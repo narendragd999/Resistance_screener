@@ -17,6 +17,7 @@ BASE_URL = "https://www.nseindia.com"
 STORED_TICKERS_PATH = "tickers.csv"
 CONFIG_FILE = "config.json"
 TEMP_TABLE_DATA_FILE = "temp_table_data.json"  # Temporary JSON file for table data
+ALERTS_DATA_FILE = "alerts_data.json"  # New JSON file for persistent alerts
 
 # Headers mimicking your browser
 headers = {
@@ -67,6 +68,17 @@ def load_table_data() -> List[Dict]:
 
 def save_table_data(data: List[Dict]):
     with open(TEMP_TABLE_DATA_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
+
+# Load/Save Alerts Data to JSON
+def load_alerts_data() -> List[Dict]:
+    if os.path.exists(ALERTS_DATA_FILE):
+        with open(ALERTS_DATA_FILE, 'r') as f:
+            return json.load(f)
+    return []
+
+def save_alerts_data(data: List[Dict]):
+    with open(ALERTS_DATA_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
 # Telegram Integration
@@ -204,7 +216,8 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                     "Ticker": ticker,
                     "Underlying": underlying,
                     "Resistance": resistance_strike,
-                    "Distance_to_Resistance": distance_to_resistance
+                    "Distance_to_Resistance": distance_to_resistance,
+                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                 })
     
     return suggestions
@@ -243,7 +256,8 @@ def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[D
                 "Distance_from_Support": distance_from_support,
                 "Distance_%_from_Resistance": distance_percent_from_resistance,
                 "Distance_%_from_Support": distance_percent_from_support,
-                "High_Volume_Gainer": high_volume_gainer
+                "High_Volume_Gainer": high_volume_gainer,
+                "Last_Updated": time.strftime("%Y-%m-%d %H:%M:%S")
             })
     
     save_table_data(table_data)  # Save to JSON
@@ -265,7 +279,11 @@ def main():
     if 'refresh_key' not in st.session_state:
         st.session_state['refresh_key'] = time.time()
     if 'suggestions' not in st.session_state:
-        st.session_state['suggestions'] = None
+        st.session_state['suggestions'] = load_alerts_data()  # Load from JSON on startup
+    if 'table_data' not in st.session_state:
+        st.session_state['table_data'] = load_table_data()
+    if 'auto_scan_triggered' not in st.session_state:
+        st.session_state['auto_scan_triggered'] = False
 
     # Sidebar Configuration
     with st.sidebar:
@@ -336,53 +354,71 @@ def main():
     expiry = data['records']['expiryDates'][0]  # Use first expiry for simplicity
 
     # Tabs
-    tabs = st.tabs(["Resistance Alerts", "Support & Resistance Table"])
+    tabs = st.tabs(["Real-Time Resistance Alerts", "Support & Resistance Table"])
 
-    # Resistance Alerts Tab
+    # Real-Time Resistance Alerts Tab
     with tabs[0]:
         st.subheader("Real-Time Resistance Alerts")
-
-        # Auto-Scan Logic
         current_time = time.time()
         auto_scan_interval_seconds = st.session_state['telegram_config']['auto_scan_interval'] * 60
         time_since_last_scan = current_time - st.session_state['last_scan_time']
+        time_to_next_scan = auto_scan_interval_seconds - time_since_last_scan
         
-        print(f"time_since_last_scan-{time_since_last_scan}")
-        print(f"auto_scan_interval_seconds-{auto_scan_interval_seconds}")
-        if time_since_last_scan >= auto_scan_interval_seconds:
+        st.write(f"Last Scan: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(st.session_state['last_scan_time']))}")
+        minutes_to_next_scan = int(time_to_next_scan // 60)
+        seconds_to_next_scan = int(time_to_next_scan % 60)
+        st.write(f"Next Scan in: {minutes_to_next_scan} minutes {seconds_to_next_scan} seconds")
+
+        # Auto-Scan Logic with Automatic Trigger
+        if time_to_next_scan <= 0 and not st.session_state['auto_scan_triggered']:
             tickers = load_tickers()
-            suggestions = check_resistance_and_notify(
+            new_suggestions = check_resistance_and_notify(
                 tickers, expiry, telegram_bot_token, telegram_chat_id,
                 st.session_state['telegram_config']['proximity_to_resistance']
             )
-            st.session_state['suggestions'] = suggestions
+            st.session_state['suggestions'].extend(new_suggestions)
+            save_alerts_data(st.session_state['suggestions'])  # Save to JSON after auto-scan
             st.session_state['last_scan_time'] = current_time
+            st.session_state['auto_scan_triggered'] = True
             st.rerun()
+        elif time_to_next_scan > 0:
+            st.session_state['auto_scan_triggered'] = False
 
         # Manual Scan Button
         if st.button("Scan Now"):
             tickers = load_tickers()
-            suggestions = check_resistance_and_notify(
+            new_suggestions = check_resistance_and_notify(
                 tickers, expiry, telegram_bot_token, telegram_chat_id,
                 st.session_state['telegram_config']['proximity_to_resistance']
             )
-            st.session_state['suggestions'] = suggestions
+            st.session_state['suggestions'].extend(new_suggestions)
+            save_alerts_data(st.session_state['suggestions'])  # Save to JSON after manual scan
+            st.session_state['last_scan_time'] = time.time()
+            st.session_state['auto_scan_triggered'] = False
+            st.rerun()
 
-        # Display Results
-        if st.session_state['suggestions'] is not None:
-            if st.session_state['suggestions']:
-                st.write("### Stocks Near Resistance")
-                suggestions_df = pd.DataFrame(st.session_state['suggestions'])
-                styled_df = suggestions_df.style.format({
-                    'Underlying': '{:.2f}',
-                    'Resistance': '{:.2f}',
-                    'Distance_to_Resistance': '{:.2f}'
-                })
-                st.table(styled_df)
-            else:
-                st.info("No stocks currently near strong resistance.")
+        # Display Real-Time Alerts with Search
+        if st.session_state['suggestions']:
+            st.write("### Stocks Near Resistance (Real-Time Alerts)")
+            search_query = st.text_input("Search Alerts by Ticker", key="alerts_search")
+            suggestions_df = pd.DataFrame(st.session_state['suggestions'])
+            
+            if search_query:
+                suggestions_df = suggestions_df[suggestions_df['Ticker'].str.contains(search_query, case=False, na=False)]
+            
+            styled_df = suggestions_df.style.format({
+                'Underlying': '{:.2f}',
+                'Resistance': '{:.2f}',
+                'Distance_to_Resistance': '{:.2f}'
+            })
+            st.table(styled_df)
+            
+            if st.button("Clear Alerts"):
+                st.session_state['suggestions'] = []
+                save_alerts_data(st.session_state['suggestions'])  # Save empty list to JSON
+                st.rerun()
         else:
-            st.info("Click 'Scan Now' or wait for auto-scan to check for stocks near resistance.")
+            st.info("No stocks currently near strong resistance. Click 'Scan Now' or wait for auto-scan.")
 
     # Support & Resistance Table Tab
     with tabs[1]:
@@ -391,13 +427,19 @@ def main():
         if st.button("Refresh Table"):
             tickers = load_tickers()
             table_data = generate_support_resistance_table(tickers, expiry)
-            # Data is saved to JSON in generate_support_resistance_table
+            st.session_state['table_data'] = table_data
+            st.rerun()
 
-        # Always display table from JSON with sortable columns
-        table_data = load_table_data()
+        # Display Table with Sorting and Search
+        table_data = st.session_state['table_data']
         if table_data:
-            st.write("### Support & Resistance Table (Sortable)")
+            st.write("### Support & Resistance Table (Sortable & Searchable)")
+            search_query = st.text_input("Search Table by Ticker", key="table_search")
             table_df = pd.DataFrame(table_data)
+            
+            if search_query:
+                table_df = table_df[table_df['Ticker'].str.contains(search_query, case=False, na=False)]
+            
             st.dataframe(
                 table_df,
                 column_config={
@@ -409,9 +451,11 @@ def main():
                     "Distance_from_Support": st.column_config.NumberColumn("Distance from Support", format="%.2f"),
                     "Distance_%_from_Resistance": st.column_config.NumberColumn("Distance % from Resistance", format="%.2f"),
                     "Distance_%_from_Support": st.column_config.NumberColumn("Distance % from Support", format="%.2f"),
-                    "High_Volume_Gainer": st.column_config.TextColumn("High Volume Gainer")
+                    "High_Volume_Gainer": st.column_config.TextColumn("High Volume Gainer"),
+                    "Last_Updated": st.column_config.TextColumn("Last Updated")
                 },
-                use_container_width=True
+                use_container_width=True,
+                height=400
             )
         else:
             st.info("No data available. Click 'Refresh Table' to load support and resistance data.")

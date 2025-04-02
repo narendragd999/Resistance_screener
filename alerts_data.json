@@ -1,0 +1,16 @@
+[
+    {
+        "Ticker": "CHAMBLFERT",
+        "Underlying": 627.6,
+        "Resistance": 630.0,
+        "Distance_to_Resistance": 2.3999999999999773,
+        "Timestamp": "2025-04-02 13:42:54"
+    },
+    {
+        "Ticker": "MANAPPURAM",
+        "Underlying": 234.25,
+        "Resistance": 235.0,
+        "Distance_to_Resistance": 0.75,
+        "Timestamp": "2025-04-02 13:43:30"
+    }
+]
