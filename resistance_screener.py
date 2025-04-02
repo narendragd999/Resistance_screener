@@ -347,6 +347,8 @@ def main():
         auto_scan_interval_seconds = st.session_state['telegram_config']['auto_scan_interval'] * 60
         time_since_last_scan = current_time - st.session_state['last_scan_time']
         
+        print(f"time_since_last_scan-{time_since_last_scan}")
+        print(f"auto_scan_interval_seconds-{auto_scan_interval_seconds}")
         if time_since_last_scan >= auto_scan_interval_seconds:
             tickers = load_tickers()
             suggestions = check_resistance_and_notify(
