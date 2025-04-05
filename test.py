@@ -17,7 +17,7 @@ scraper = cloudscraper.create_scraper()
 
 # Constants
 BASE_URL = "https://www.nseindia.com"
-STORED_TICKERS_PATH = "tickers.csv"
+STORED_TICKERS_PATH = "tickers-test.csv"
 CONFIG_FILE = "config.json"
 TEMP_TABLE_DATA_FILE = "temp_table_data.json"
 HISTORICAL_DATA_FILE = "historical_resistance_data.json"
@@ -48,7 +48,8 @@ def load_config() -> Dict:
         "telegram_bot_token": "",
         "telegram_chat_id": "",
         "auto_scan_interval": 5,
-        "proximity_to_resistance": 0.5
+        "proximity_to_resistance": 0.5,
+        "price_gain_threshold": 0.5  # New config for price gain threshold
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
@@ -168,7 +169,7 @@ async def send_telegram_message(bot_token: str, chat_id: str, message: str):
 def fetch_options_data(symbol: str, _refresh_key: float) -> Optional[Dict]:
     url = f"{BASE_URL}/api/option-chain-equities?symbol={symbol}"
     quote_url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
-    print(f"Fetching data from: {url} and {quote_url}")
+    #print(f"Fetching data from: {url} and {quote_url}")
     
     response = scraper.get(url, headers=headers)
     if response.status_code != 200:
@@ -233,6 +234,33 @@ def identify_support_resistance(call_df: pd.DataFrame, put_df: pd.DataFrame, top
     
     return support_strike, resistance_strike
 
+# New Function: Analyze Option Chain for Price Gains
+def analyze_option_chain_price_gain(symbol: str, resistance_strike: float, expiry: str, gain_threshold: float = 50.0) -> Dict:
+    url = f"{BASE_URL}/api/option-chain-equities?symbol={symbol}"
+    
+    response = scraper.get(url, headers=headers)
+    if response.status_code != 200:
+        print(f"Failed to load option chain for {symbol}: {response.status_code}")
+        return {"gain_percent": None, "ltp": None, "low_price": None}
+    
+    data = response.json()
+    if not data or 'records' not in data or 'data' not in data['records']:
+        return {"gain_percent": None, "ltp": None, "low_price": None}
+    
+    options = [item for item in data['records']['data'] if item.get('expiryDate') == expiry and 'CE' in item]
+    for item in options:
+        if item['strikePrice'] == resistance_strike:
+            ce_data = item['CE']            
+            ltp = float(ce_data.get('lastPrice', 0))
+            low_price = float(ce_data.get('lowPrice', ltp))  # Use lowPrice from option chain, fallback to LTP if unavailable
+            if low_price > 0 and ltp > low_price:
+                gain_percent = ((ltp - low_price) / low_price) * 100
+                if gain_percent >= gain_threshold:
+                    return {"gain_percent": gain_percent, "ltp": ltp, "low_price": low_price}
+            break
+    
+    return {"gain_percent": None, "ltp": None, "low_price": None}
+
 # Load Tickers
 def load_tickers() -> List[str]:
     try:
@@ -247,8 +275,8 @@ def load_tickers() -> List[str]:
         st.error(f"Error loading tickers: {e}")
         return ["HDFCBANK"]
 
-# Check Resistance and Send Notification
-def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float):
+# Check Resistance and Send Notification (Updated)
+def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, gain_threshold: float = 0.5):
     refresh_key = time.time()
     suggestions = []
     
@@ -270,6 +298,13 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
             distance_to_resistance = resistance_strike - underlying
             
             if 0 <= distance_to_resistance <= proximity_threshold:
+                # Analyze option chain for price gain at resistance strike
+                price_gain_data = analyze_option_chain_price_gain(ticker, resistance_strike, expiry, gain_threshold)
+                gain_percent = price_gain_data["gain_percent"]
+                ltp = price_gain_data["ltp"]
+                low_price = price_gain_data["low_price"]
+                
+                # Prepare Telegram message
                 message = (
                     f"*Resistance Alert*\n"
                     f"Stock: *{ticker}*\n"
@@ -278,13 +313,25 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                     f"Distance: *{distance_to_resistance:.2f}*\n"
                     f"Reason: *Within {proximity_percent}% of strong resistance*"
                 )
+                if gain_percent is not None:
+                    message += (
+                        f"\n*Option Chain Alert*\n"
+                        f"Call LTP: *₹{ltp:.2f}*\n"
+                        f"Low Price: *₹{low_price:.2f}*\n"
+                        f"Gain: *{gain_percent:.2f}%*"
+                    )
+                
                 asyncio.run(send_telegram_message(bot_token, chat_id, message))
-                suggestions.append({
+                suggestion = {
                     "Ticker": ticker,
                     "Underlying": underlying,
                     "Resistance": resistance_strike,
-                    "Distance_to_Resistance": distance_to_resistance
-                })
+                    "Distance_to_Resistance": distance_to_resistance,
+                    "Call_LTP": ltp if ltp is not None else None,
+                    "Call_Low_Price": low_price if low_price is not None else None,
+                    "Gain_Percent": gain_percent if gain_percent is not None else None
+                }
+                suggestions.append(suggestion)
     
     return suggestions
 
@@ -294,15 +341,15 @@ def get_historical_price(ticker: str, target_date: date) -> Optional[Tuple[float
         stock = yf.Ticker(ticker + ".NS")
         hist = stock.history(start=target_date, end=target_date + pd.Timedelta(days=1))
         if not hist.empty:
-            high_price = hist['High'].iloc[0]  # Get the day's high price
-            close_price = hist['Close'].iloc[0]  # Get the day's close price
+            high_price = hist['High'].iloc[0]
+            close_price = hist['Close'].iloc[0]
             return high_price, close_price
         return None, None
     except Exception as e:
         st.error(f"Error fetching historical price for {ticker}: {e}")
         return None, None
 
-# Check historical resistance (Updated)
+# Check historical resistance
 def check_historical_resistance(tickers: List[str], target_date: date, expiry: str, proximity_percent: float) -> List[Dict]:
     date_str = target_date.strftime("%Y-%m-%d")
     refresh_key = time.time()
@@ -310,36 +357,29 @@ def check_historical_resistance(tickers: List[str], target_date: date, expiry: s
     
     for ticker in tickers:
         with st.spinner(f"Checking historical data for {ticker} on {date_str}..."):
-            # Fetch current option chain data to determine resistance
             data = fetch_options_data(ticker, refresh_key)
             if not data or 'records' not in data:
                 continue
             
-            # Get historical high and close prices for the target date
             high_price, close_price = get_historical_price(ticker, target_date)
             if high_price is None or isinstance(high_price, (np.int64, np.float64)):
                 high_price = float(high_price) if high_price is not None else 0.0
             if close_price is None or isinstance(close_price, (np.int64, np.float64)):
                 close_price = float(close_price) if close_price is not None else 0.0
 
-            # Process option data to find resistance
             call_df, put_df = process_option_data(data, expiry)
             resistance_strike = identify_support_resistance(call_df, put_df)[1]
             
             if resistance_strike is None or isinstance(resistance_strike, (np.int64, np.float64)):
                 resistance_strike = float(resistance_strike) if resistance_strike is not None else 0.0
             
-            # Check if the high price touched or exceeded the resistance
             touched_resistance = high_price >= resistance_strike
-            
-            # Calculate volume and distance from close to resistance
             volume = call_df['Volume'].sum() + put_df['Volume'].sum()
             if isinstance(volume, (np.int64, np.float64)):
                 volume = float(volume)
             
-            distance_to_resistance = resistance_strike - close_price  # Distance from close price
+            distance_to_resistance = resistance_strike - close_price
 
-            # Include stock if it touched resistance on the specified day
             if touched_resistance:
                 results.append({
                     "Date": date_str,
@@ -353,7 +393,7 @@ def check_historical_resistance(tickers: List[str], target_date: date, expiry: s
                     "Touched_Resistance": "Yes"
                 })
 
-    save_historical_data(results)  # Overwrite historical data
+    save_historical_data(results)
     return results
 
 # Download data as CSV
@@ -367,8 +407,8 @@ def download_csv(data: List[Dict], filename: str):
         mime="text/csv",
     )
 
-# Generate Support/Resistance Table Data and Save to JSON
-def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[Dict]:
+# Generate Support/Resistance Table Data and Save to JSON (Updated)
+def generate_support_resistance_table(tickers: List[str], expiry: str, gain_threshold: float = 0.5) -> List[Dict]:
     refresh_key = time.time()
     table_data = []
     volume_threshold = 100000
@@ -392,6 +432,9 @@ def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[D
             distance_percent_from_resistance = (distance_from_resistance / resistance_strike * 100) if resistance_strike and distance_from_resistance is not None else None
             distance_percent_from_support = (distance_from_support / support_strike * 100) if support_strike and distance_from_support is not None else None
             
+            # Check option chain for price gain at resistance strike
+            price_gain_data = analyze_option_chain_price_gain(ticker, resistance_strike, expiry, gain_threshold)
+            
             table_data.append({
                 "Ticker": ticker,
                 "Underlying": underlying,
@@ -401,7 +444,10 @@ def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[D
                 "Distance_from_Support": distance_from_support,
                 "Distance_%_from_Resistance": distance_percent_from_resistance,
                 "Distance_%_from_Support": distance_percent_from_support,
-                "High_Volume_Gainer": high_volume_gainer
+                "High_Volume_Gainer": high_volume_gainer,
+                "Call_LTP": price_gain_data["ltp"],
+                "Call_Low_Price": price_gain_data["low_price"],
+                "Gain_Percent": price_gain_data["gain_percent"]
             })
     
     save_table_data(table_data)
@@ -457,6 +503,14 @@ def main():
             max_value=5.0,
             key="proximity_to_resistance_input"
         )
+        price_gain_threshold = st.number_input(
+            "Price Gain Threshold (%):",
+            value=st.session_state['telegram_config']['price_gain_threshold'],
+            step=10.0,
+            min_value=0.0,
+            max_value=1000.0,
+            key="price_gain_threshold_input"
+        )
 
         st.subheader("Upload Tickers")
         uploaded_file = st.file_uploader("Upload CSV with 'SYMBOL' column", type=["csv"])
@@ -482,6 +536,9 @@ def main():
         if st.session_state['telegram_config']['proximity_to_resistance'] != proximity_to_resistance:
             st.session_state['telegram_config']['proximity_to_resistance'] = proximity_to_resistance
             config_changed = True
+        if st.session_state['telegram_config']['price_gain_threshold'] != price_gain_threshold:
+            st.session_state['telegram_config']['price_gain_threshold'] = price_gain_threshold
+            config_changed = True
         if config_changed:
             save_config(st.session_state['telegram_config'])
 
@@ -498,7 +555,7 @@ def main():
     # Tabs
     tabs = st.tabs(["Resistance Alerts", "Support & Resistance Table", "Historical Resistance Tracker"])
 
-    # Real-Time Resistance Alerts Tab
+    # Inside the "Real-Time Resistance Alerts" tab (around line 614 in your traceback)
     with tabs[0]:
         st.subheader("Real-Time Resistance Alerts")
         current_time = time.time()
@@ -515,7 +572,8 @@ def main():
             tickers = load_tickers()
             new_suggestions = check_resistance_and_notify(
                 tickers, expiry, telegram_bot_token, telegram_chat_id,
-                st.session_state['telegram_config']['proximity_to_resistance']
+                st.session_state['telegram_config']['proximity_to_resistance'],
+                st.session_state['telegram_config']['price_gain_threshold']
             )
             st.session_state['suggestions'] = new_suggestions
             save_alerts_data(st.session_state['suggestions'])
@@ -529,7 +587,8 @@ def main():
             tickers = load_tickers()
             new_suggestions = check_resistance_and_notify(
                 tickers, expiry, telegram_bot_token, telegram_chat_id,
-                st.session_state['telegram_config']['proximity_to_resistance']
+                st.session_state['telegram_config']['proximity_to_resistance'],
+                st.session_state['telegram_config']['price_gain_threshold']
             )
             st.session_state['suggestions'] = new_suggestions
             save_alerts_data(st.session_state['suggestions'])
@@ -545,10 +604,20 @@ def main():
             if search_query:
                 suggestions_df = suggestions_df[suggestions_df['Ticker'].str.contains(search_query, case=False, na=False)]
             
+            # Replace None with NaN to avoid formatting issues
+            suggestions_df = suggestions_df.fillna(pd.NA)
+            
+            # Define a custom formatter to handle None/NaN gracefully
+            def format_float(x):
+                return '{:.2f}'.format(x) if pd.notna(x) else '-'
+
             styled_df = suggestions_df.style.format({
-                'Underlying': '{:.2f}',
-                'Resistance': '{:.2f}',
-                'Distance_to_Resistance': '{:.2f}'
+                'Underlying': format_float,
+                'Resistance': format_float,
+                'Distance_to_Resistance': format_float,
+                'Call_LTP': format_float,
+                'Call_Low_Price': format_float,
+                'Gain_Percent': format_float
             })
             st.table(styled_df)
             
@@ -565,7 +634,9 @@ def main():
 
         if st.button("Refresh Table"):
             tickers = load_tickers()
-            table_data = generate_support_resistance_table(tickers, expiry)
+            table_data = generate_support_resistance_table(
+                tickers, expiry, st.session_state['telegram_config']['price_gain_threshold']
+            )
             st.session_state['table_data'] = table_data
             save_table_data(table_data)
             st.rerun()
@@ -590,6 +661,9 @@ def main():
                     "Distance_%_from_Resistance": st.column_config.NumberColumn("Distance % from Resistance", format="%.2f"),
                     "Distance_%_from_Support": st.column_config.NumberColumn("Distance % from Support", format="%.2f"),
                     "High_Volume_Gainer": st.column_config.TextColumn("High Volume Gainer"),
+                    "Call_LTP": st.column_config.NumberColumn("Call LTP", format="%.2f"),
+                    "Call_Low_Price": st.column_config.NumberColumn("Call Low Price", format="%.2f"),
+                    "Gain_Percent": st.column_config.NumberColumn("Gain %", format="%.2f")
                 },
                 use_container_width=True,
                 height=400

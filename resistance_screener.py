@@ -339,8 +339,8 @@ def check_historical_resistance(tickers: List[str], target_date: date, expiry: s
             
             distance_to_resistance = resistance_strike - close_price  # Distance from close price
 
-            # Include stock if it touched resistance on the specified day
-            if touched_resistance:
+            # Include stock if it touched resistance AND close price is below resistance
+            if touched_resistance and close_price < resistance_strike:
                 results.append({
                     "Date": date_str,
                     "Time": "End of Day",
@@ -355,7 +355,6 @@ def check_historical_resistance(tickers: List[str], target_date: date, expiry: s
 
     save_historical_data(results)  # Overwrite historical data
     return results
-
 # Download data as CSV
 def download_csv(data: List[Dict], filename: str):
     df = pd.DataFrame(data)

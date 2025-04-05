@@ -1,6 +1,7 @@
 {
     "telegram_bot_token": "7826437102:AAFdVAv7b0go3wOcPLNMZMVAfRM8O2SX3xQ",
     "telegram_chat_id": "542581131",
-    "auto_scan_interval": 1,
-    "proximity_to_resistance": 5.0
+    "auto_scan_interval": 15,
+    "proximity_to_resistance": 1.0,
+    "price_gain_threshold": 50.0
 }
