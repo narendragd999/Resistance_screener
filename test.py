@@ -15,14 +15,15 @@ import numpy as np
 # Create a cloudscraper session
 scraper = cloudscraper.create_scraper()
 
-# Constants (existing ones remain the same)
+# Constants
 BASE_URL = "https://www.nseindia.com"
-STORED_TICKERS_PATH = "tickers-test.csv"
+STORED_TICKERS_PATH = "tickers.csv"
 CONFIG_FILE = "config.json"
 TEMP_TABLE_DATA_FILE = "temp_table_data.json"
 HISTORICAL_DATA_FILE = "historical_resistance_data.json"
+ALERTS_DATA_FILE = "alerts_data.json"
 
-# Headers mimicking your browser (existing)
+# Headers mimicking your browser
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
@@ -30,7 +31,7 @@ headers = {
     "Referer": "https://www.nseindia.com/market-data/equity-derivatives-watch",
 }
 
-# Initial cookie setup (existing)
+# Initial cookie setup
 print("Visiting homepage...")
 response = scraper.get("https://www.nseindia.com/", headers=headers)
 if response.status_code != 200:
@@ -41,8 +42,7 @@ print("Visiting derivatives page...")
 scraper.get("https://www.nseindia.com/market-data/equity-derivatives-watch", headers=headers)
 time.sleep(2)
 
-# Load/Save Config, Table Data, and Historical Data (existing functions remain mostly the same)
-
+# Load/Save Config, Table Data, Historical Data, and Alerts Data
 def load_config() -> Dict:
     default_config = {
         "telegram_bot_token": "",
@@ -78,7 +78,6 @@ def load_historical_data() -> List[Dict]:
         try:
             with open(HISTORICAL_DATA_FILE, 'r') as f:
                 data = json.load(f)
-                # Ensure all values are native Python types
                 converted_data = []
                 for item in data:
                     converted_item = {}
@@ -91,33 +90,66 @@ def load_historical_data() -> List[Dict]:
                 return converted_data
         except json.JSONDecodeError as e:
             st.error(f"Error decoding JSON file {HISTORICAL_DATA_FILE}: {str(e)}. File may be corrupted or empty. Creating new empty list.")
-            return []  # Return empty list if JSON is invalid
+            return []
         except Exception as e:
             st.error(f"Unexpected error loading historical data: {str(e)}")
             return []
-    return []  # Return empty list if file doesn’t exist
+    return []
 
 def save_historical_data(data: List[Dict]):
-    # Convert any NumPy types to native Python types
     converted_data = []
     for item in data:
         converted_item = {}
         for key, value in item.items():
             if isinstance(value, (pd.Series, pd.DataFrame)):
-                # Convert pandas objects to lists or scalars
                 converted_item[key] = value.to_list() if isinstance(value, pd.Series) else value.to_dict()
             elif isinstance(value, (np.int64, np.float64)):
-                # Convert NumPy int64/float64 to Python int/float
                 converted_item[key] = int(value) if isinstance(value, np.int64) else float(value)
             else:
-                # Keep other types as is
                 converted_item[key] = value
         converted_data.append(converted_item)
-
     with open(HISTORICAL_DATA_FILE, 'w') as f:
         json.dump(converted_data, f, indent=4)
 
-# Telegram Integration (existing)
+def load_alerts_data() -> List[Dict]:
+    if os.path.exists(ALERTS_DATA_FILE):
+        try:
+            with open(ALERTS_DATA_FILE, 'r') as f:
+                data = json.load(f)
+                converted_data = []
+                for item in data:
+                    converted_item = {}
+                    for key, value in item.items():
+                        if isinstance(value, (np.int64, np.float64)):
+                            converted_item[key] = float(value) if isinstance(value, np.float64) else int(value)
+                        else:
+                            converted_item[key] = value
+                    converted_data.append(converted_item)
+                return converted_data
+        except json.JSONDecodeError as e:
+            st.error(f"Error decoding JSON file {ALERTS_DATA_FILE}: {str(e)}. File may be corrupted or empty. Creating new empty list.")
+            return []
+        except Exception as e:
+            st.error(f"Unexpected error loading alerts data: {str(e)}")
+            return []
+    return []
+
+def save_alerts_data(data: List[Dict]):
+    converted_data = []
+    for item in data:
+        converted_item = {}
+        for key, value in item.items():
+            if isinstance(value, (pd.Series, pd.DataFrame)):
+                converted_item[key] = value.to_list() if isinstance(value, pd.Series) else value.to_dict()
+            elif isinstance(value, (np.int64, np.float64)):
+                converted_item[key] = int(value) if isinstance(value, np.int64) else float(value)
+            else:
+                converted_item[key] = value
+        converted_data.append(converted_item)
+    with open(ALERTS_DATA_FILE, 'w') as f:
+        json.dump(converted_data, f, indent=4)
+
+# Telegram Integration
 async def send_telegram_message(bot_token: str, chat_id: str, message: str):
     if not bot_token or not chat_id:
         st.error("Telegram Bot Token or Chat ID is missing. Please configure them in the sidebar.")
@@ -132,7 +164,7 @@ async def send_telegram_message(bot_token: str, chat_id: str, message: str):
             else:
                 st.success(f"Telegram message sent: {message}")
 
-# Fetch Options Data with Last Price as Underlying (existing)
+# Fetch Options Data with Last Price as Underlying
 def fetch_options_data(symbol: str, _refresh_key: float) -> Optional[Dict]:
     url = f"{BASE_URL}/api/option-chain-equities?symbol={symbol}"
     quote_url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
@@ -158,8 +190,7 @@ def fetch_options_data(symbol: str, _refresh_key: float) -> Optional[Dict]:
     
     return data
 
-# Process Option Data and Identify Support/Resistance (existing functions remain the same)
-
+# Process Option Data and Identify Support/Resistance
 def process_option_data(data: Dict, expiry: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     if not data or 'records' not in data or 'data' not in data['records']:
         print("Invalid data")
@@ -202,7 +233,7 @@ def identify_support_resistance(call_df: pd.DataFrame, put_df: pd.DataFrame, top
     
     return support_strike, resistance_strike
 
-# Load Tickers (existing)
+# Load Tickers
 def load_tickers() -> List[str]:
     try:
         if os.path.exists(STORED_TICKERS_PATH):
@@ -257,78 +288,75 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
     
     return suggestions
 
-# New function to fetch historical prices using yfinance
-def get_historical_price(ticker: str, target_date: date) -> Optional[float]:
+# Fetch historical prices using yfinance
+def get_historical_price(ticker: str, target_date: date) -> Optional[Tuple[float, float]]:
     try:
-        stock = yf.Ticker(ticker + ".NS")  # Assuming NSE stocks, append ".NS"
+        stock = yf.Ticker(ticker + ".NS")
         hist = stock.history(start=target_date, end=target_date + pd.Timedelta(days=1))
         if not hist.empty:
-            return hist['Close'].iloc[0]  # Use closing price for simplicity
-        return None
+            high_price = hist['High'].iloc[0]  # Get the day's high price
+            close_price = hist['Close'].iloc[0]  # Get the day's close price
+            return high_price, close_price
+        return None, None
     except Exception as e:
         st.error(f"Error fetching historical price for {ticker}: {e}")
-        return None
+        return None, None
 
-# Updated function to check historical resistance
+# Check historical resistance (Updated)
 def check_historical_resistance(tickers: List[str], target_date: date, expiry: str, proximity_percent: float) -> List[Dict]:
-    historical_data = load_historical_data()
     date_str = target_date.strftime("%Y-%m-%d")
-    
-    # Check if we already have data for this date
-    existing_data = [item for item in historical_data if item['Date'] == date_str]
-    if existing_data:
-        return existing_data
-
     refresh_key = time.time()
     results = []
     
     for ticker in tickers:
         with st.spinner(f"Checking historical data for {ticker} on {date_str}..."):
-            # Fetch historical option chain data
+            # Fetch current option chain data to determine resistance
             data = fetch_options_data(ticker, refresh_key)
             if not data or 'records' not in data:
                 continue
             
-            # Get historical price for the target date
-            historical_price = get_historical_price(ticker, target_date)
-            if historical_price is None or isinstance(historical_price, (np.int64, np.float64)):
-                historical_price = float(historical_price) if historical_price is not None else 0.0
+            # Get historical high and close prices for the target date
+            high_price, close_price = get_historical_price(ticker, target_date)
+            if high_price is None or isinstance(high_price, (np.int64, np.float64)):
+                high_price = float(high_price) if high_price is not None else 0.0
+            if close_price is None or isinstance(close_price, (np.int64, np.float64)):
+                close_price = float(close_price) if close_price is not None else 0.0
 
+            # Process option data to find resistance
             call_df, put_df = process_option_data(data, expiry)
             resistance_strike = identify_support_resistance(call_df, put_df)[1]
             
             if resistance_strike is None or isinstance(resistance_strike, (np.int64, np.float64)):
                 resistance_strike = float(resistance_strike) if resistance_strike is not None else 0.0
             
-            proximity_threshold = resistance_strike * (abs(proximity_percent) / 100)
-            distance_to_resistance = resistance_strike - historical_price
+            # Check if the high price touched or exceeded the resistance
+            touched_resistance = high_price >= resistance_strike
             
-            # Simulate volume (convert to float if necessary)
+            # Calculate volume and distance from close to resistance
             volume = call_df['Volume'].sum() + put_df['Volume'].sum()
-
             if isinstance(volume, (np.int64, np.float64)):
                 volume = float(volume)
+            
+            distance_to_resistance = resistance_strike - close_price  # Distance from close price
 
-            #print(f"distance_to_resistance--{distance_to_resistance}")    
-            #print(f"proximity_threshold--{proximity_threshold}")    
-            # Check if stock touched resistance
-            if 0 <= distance_to_resistance <= proximity_threshold:
+            # Include stock if it touched resistance on the specified day
+            if touched_resistance:
                 results.append({
                     "Date": date_str,
                     "Time": "End of Day",
                     "Ticker": ticker,
-                    "Spot_Price": float(historical_price) if historical_price is not None else 0.0,
+                    "High_Price": float(high_price) if high_price is not None else 0.0,
+                    "Close_Price": float(close_price) if close_price is not None else 0.0,
                     "Resistance_Price": float(resistance_strike) if resistance_strike is not None else 0.0,
                     "Distance_to_Resistance": float(distance_to_resistance) if distance_to_resistance is not None else 0.0,
-                    "Volume": float(volume) if volume is not None else 0.0
+                    "Volume": float(volume) if volume is not None else 0.0,
+                    "Touched_Resistance": "Yes"
                 })
 
-    # Update historical data
-    historical_data.extend(results)
-    save_historical_data(historical_data)
+    save_historical_data(results)  # Overwrite historical data
     return results
 
-# Function to download data as CSV (existing)
+# Download data as CSV
 def download_csv(data: List[Dict], filename: str):
     df = pd.DataFrame(data)
     csv = df.to_csv(index=False)
@@ -343,7 +371,7 @@ def download_csv(data: List[Dict], filename: str):
 def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[Dict]:
     refresh_key = time.time()
     table_data = []
-    volume_threshold = 100000  # Define a threshold for high volume gainer
+    volume_threshold = 100000
     
     for ticker in tickers:
         with st.spinner(f"Fetching data for {ticker}..."):
@@ -376,26 +404,29 @@ def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[D
                 "High_Volume_Gainer": high_volume_gainer
             })
     
-    save_table_data(table_data)  # Save to JSON
+    save_table_data(table_data)
     return table_data
 
-# Main Application (updated to include new tab)
+# Main Application
 def main():
     st.set_page_config(page_title="Resistance Screener", layout="wide")
     st.title("Real-Time Resistance Screener")
 
-    # Load Telegram Config
-    config = load_config()
+    # Initialize all required session state variables
     if 'telegram_config' not in st.session_state:
-        st.session_state['telegram_config'] = config
-
-    # Initialize Session State
+        st.session_state['telegram_config'] = load_config()
     if 'last_scan_time' not in st.session_state:
         st.session_state['last_scan_time'] = time.time()
     if 'refresh_key' not in st.session_state:
         st.session_state['refresh_key'] = time.time()
     if 'suggestions' not in st.session_state:
-        st.session_state['suggestions'] = None
+        st.session_state['suggestions'] = load_alerts_data()
+    if 'table_data' not in st.session_state:
+        st.session_state['table_data'] = load_table_data()
+    if 'historical_data' not in st.session_state:
+        st.session_state['historical_data'] = load_historical_data()
+    if 'auto_scan_triggered' not in st.session_state:
+        st.session_state['auto_scan_triggered'] = False
 
     # Sidebar Configuration
     with st.sidebar:
@@ -438,7 +469,6 @@ def main():
             else:
                 st.error("CSV must contain 'SYMBOL' column")
 
-        # Update config if changed
         config_changed = False
         if st.session_state['telegram_config']['telegram_bot_token'] != telegram_bot_token:
             st.session_state['telegram_config']['telegram_bot_token'] = telegram_bot_token
@@ -463,7 +493,7 @@ def main():
     if not data or 'records' not in data:
         st.error("Failed to load initial data!")
         return
-    expiry = data['records']['expiryDates'][0]  # Use first expiry for simplicity
+    expiry = data['records']['expiryDates'][0]
 
     # Tabs
     tabs = st.tabs(["Resistance Alerts", "Support & Resistance Table", "Historical Resistance Tracker"])
@@ -481,35 +511,32 @@ def main():
         seconds_to_next_scan = int(time_to_next_scan % 60)
         st.write(f"Next Scan in: {minutes_to_next_scan} minutes {seconds_to_next_scan} seconds")
 
-        # Auto-Scan Logic with Automatic Trigger
         if time_to_next_scan <= 0 and not st.session_state['auto_scan_triggered']:
             tickers = load_tickers()
             new_suggestions = check_resistance_and_notify(
                 tickers, expiry, telegram_bot_token, telegram_chat_id,
                 st.session_state['telegram_config']['proximity_to_resistance']
             )
-            st.session_state['suggestions'].extend(new_suggestions)
-            save_alerts_data(st.session_state['suggestions'])  # Save to JSON after auto-scan
+            st.session_state['suggestions'] = new_suggestions
+            save_alerts_data(st.session_state['suggestions'])
             st.session_state['last_scan_time'] = current_time
             st.session_state['auto_scan_triggered'] = True
             st.rerun()
         elif time_to_next_scan > 0:
             st.session_state['auto_scan_triggered'] = False
 
-        # Manual Scan Button
         if st.button("Scan Now"):
             tickers = load_tickers()
             new_suggestions = check_resistance_and_notify(
                 tickers, expiry, telegram_bot_token, telegram_chat_id,
                 st.session_state['telegram_config']['proximity_to_resistance']
             )
-            st.session_state['suggestions'].extend(new_suggestions)
-            save_alerts_data(st.session_state['suggestions'])  # Save to JSON after manual scan
+            st.session_state['suggestions'] = new_suggestions
+            save_alerts_data(st.session_state['suggestions'])
             st.session_state['last_scan_time'] = time.time()
             st.session_state['auto_scan_triggered'] = False
             st.rerun()
 
-        # Display Real-Time Alerts with Search
         if st.session_state['suggestions']:
             st.write("### Stocks Near Resistance (Real-Time Alerts)")
             search_query = st.text_input("Search Alerts by Ticker", key="alerts_search")
@@ -527,7 +554,7 @@ def main():
             
             if st.button("Clear Alerts"):
                 st.session_state['suggestions'] = []
-                save_alerts_data(st.session_state['suggestions'])  # Save empty list to JSON
+                save_alerts_data([])
                 st.rerun()
         else:
             st.info("No stocks currently near strong resistance. Click 'Scan Now' or wait for auto-scan.")
@@ -540,14 +567,13 @@ def main():
             tickers = load_tickers()
             table_data = generate_support_resistance_table(tickers, expiry)
             st.session_state['table_data'] = table_data
+            save_table_data(table_data)
             st.rerun()
 
-        # Display Table with Sorting and Search
-        table_data = st.session_state['table_data']
-        if table_data:
+        if st.session_state['table_data']:
             st.write("### Support & Resistance Table (Sortable & Searchable)")
             search_query = st.text_input("Search Table by Ticker", key="table_search")
-            table_df = pd.DataFrame(table_data)
+            table_df = pd.DataFrame(st.session_state['table_data'])
             
             if search_query:
                 table_df = table_df[table_df['Ticker'].str.contains(search_query, case=False, na=False)]
@@ -564,7 +590,6 @@ def main():
                     "Distance_%_from_Resistance": st.column_config.NumberColumn("Distance % from Resistance", format="%.2f"),
                     "Distance_%_from_Support": st.column_config.NumberColumn("Distance % from Support", format="%.2f"),
                     "High_Volume_Gainer": st.column_config.TextColumn("High Volume Gainer"),
-                    "Last_Updated": st.column_config.TextColumn("Last Updated")
                 },
                 use_container_width=True,
                 height=400
@@ -576,8 +601,7 @@ def main():
     with tabs[2]:
         st.subheader("Historical Resistance Tracker")
 
-        # Date selection
-        selected_date = st.date_input("Select Date", value=date.today() - pd.Timedelta(days=1))  # Default to yesterday
+        selected_date = st.date_input("Select Date", value=date.today() - pd.Timedelta(days=1))
 
         if st.button("Check Historical Resistance"):
             tickers = load_tickers()
@@ -587,28 +611,52 @@ def main():
                 historical_results = check_historical_resistance(
                     tickers, selected_date, expiry, proximity_percent
                 )
+                st.session_state['historical_data'] = historical_results
+                save_historical_data(historical_results)
 
-            if historical_results:
+            if st.session_state['historical_data']:
                 st.write("### Stocks that touched resistance on selected date")
-                historical_df = pd.DataFrame(historical_results)
+                historical_df = pd.DataFrame(st.session_state['historical_data'])
                 st.dataframe(
                     historical_df,
                     column_config={
                         "Date": st.column_config.TextColumn("Date"),
                         "Time": st.column_config.TextColumn("Time"),
                         "Ticker": st.column_config.TextColumn("Ticker"),
-                        "Spot_Price": st.column_config.NumberColumn("Spot Price", format="%.2f"),
+                        "High_Price": st.column_config.NumberColumn("High Price", format="%.2f"),
+                        "Close_Price": st.column_config.NumberColumn("Close Price", format="%.2f"),
                         "Resistance_Price": st.column_config.NumberColumn("Resistance Price", format="%.2f"),
-                        "Distance_to_Resistance": st.column_config.NumberColumn("Distance to Resistance", format="%.2f"),
-                        #"Volume": st.column_config.NumberColumn("Volume", format="%.0f")
+                        "Distance_to_Resistance": st.column_config.NumberColumn("Distance to Resistance (Close)", format="%.2f"),
+                        "Volume": st.column_config.NumberColumn("Volume", format="%.0f"),
+                        "Touched_Resistance": st.column_config.TextColumn("Touched Resistance")
                     },
                     use_container_width=True
                 )
-
-                # Add download button
-                download_csv(historical_results, f"historical_resistance_{selected_date}.csv")
+                download_csv(st.session_state['historical_data'], f"historical_resistance_{selected_date}.csv")
             else:
-                st.info("No resistance touches found for the selected date or data already exists.")
+                st.info("No stocks touched resistance on the selected date.")
+        else:
+            if st.session_state['historical_data']:
+                st.write("### Last Historical Scan Results")
+                historical_df = pd.DataFrame(st.session_state['historical_data'])
+                st.dataframe(
+                    historical_df,
+                    column_config={
+                        "Date": st.column_config.TextColumn("Date"),
+                        "Time": st.column_config.TextColumn("Time"),
+                        "Ticker": st.column_config.TextColumn("Ticker"),
+                        "High_Price": st.column_config.NumberColumn("High Price", format="%.2f"),
+                        "Close_Price": st.column_config.NumberColumn("Close Price", format="%.2f"),
+                        "Resistance_Price": st.column_config.NumberColumn("Resistance Price", format="%.2f"),
+                        "Distance_to_Resistance": st.column_config.NumberColumn("Distance to Resistance (Close)", format="%.2f"),
+                        "Volume": st.column_config.NumberColumn("Volume", format="%.0f"),
+                        "Touched_Resistance": st.column_config.TextColumn("Touched Resistance")
+                    },
+                    use_container_width=True
+                )
+                download_csv(st.session_state['historical_data'], f"historical_resistance_{st.session_state['historical_data'][0]['Date'] if st.session_state['historical_data'] else 'last_scan'}.csv")
+            else:
+                st.info("No historical data available. Select a date and click 'Check Historical Resistance'.")
 
 if __name__ == "__main__":
     main()

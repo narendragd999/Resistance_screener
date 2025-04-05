@@ -1,38 +1,5 @@
 [
     {
-        "Ticker": "ABB",
-        "Underlying": 5089,
-        "Support": 4933.333333333333,
-        "Resistance": 5700.0,
-        "Distance_from_Resistance": 611.0,
-        "Distance_from_Support": 155.66666666666697,
-        "Distance_%_from_Resistance": 10.719298245614036,
-        "Distance_%_from_Support": 3.155405405405412,
-        "High_Volume_Gainer": "No"
-    },
-    {
-        "Ticker": "ACC",
-        "Underlying": 1962.05,
-        "Support": 1953.3333333333333,
-        "Resistance": 2026.6666666666667,
-        "Distance_from_Resistance": 64.61666666666679,
-        "Distance_from_Support": 8.716666666666697,
-        "Distance_%_from_Resistance": 3.1883223684210584,
-        "Distance_%_from_Support": 0.4462457337883975,
-        "High_Volume_Gainer": "No"
-    },
-    {
-        "Ticker": "APLAPOLLO",
-        "Underlying": 1518.05,
-        "Support": 1400.0,
-        "Resistance": 1660.0,
-        "Distance_from_Resistance": 141.95000000000005,
-        "Distance_from_Support": 118.04999999999995,
-        "Distance_%_from_Resistance": 8.55120481927711,
-        "Distance_%_from_Support": 8.432142857142853,
-        "High_Volume_Gainer": "No"
-    },
-    {
         "Ticker": "AUBANK",
         "Underlying": 554,
         "Support": 526.6666666666666,
@@ -44,72 +11,6 @@
         "High_Volume_Gainer": "No"
     },
     {
-        "Ticker": "AARTIIND",
-        "Underlying": 375.45,
-        "Support": 376.6666666666667,
-        "Resistance": 410.0,
-        "Distance_from_Resistance": 34.55000000000001,
-        "Distance_from_Support": -1.216666666666697,
-        "Distance_%_from_Resistance": 8.426829268292686,
-        "Distance_%_from_Support": -0.3230088495575302,
-        "High_Volume_Gainer": "No"
-    },
-    {
-        "Ticker": "ADANIENSOL",
-        "Underlying": 858.2,
-        "Support": 853.3333333333334,
-        "Resistance": 926.6666666666666,
-        "Distance_from_Resistance": 68.46666666666658,
-        "Distance_from_Support": 4.866666666666674,
-        "Distance_%_from_Resistance": 7.388489208633085,
-        "Distance_%_from_Support": 0.5703125000000009,
-        "High_Volume_Gainer": "No"
-    },
-    {
-        "Ticker": "ADANIENT",
-        "Underlying": 2336.3,
-        "Support": 2300.0,
-        "Resistance": 2500.0,
-        "Distance_from_Resistance": 163.69999999999982,
-        "Distance_from_Support": 36.30000000000018,
-        "Distance_%_from_Resistance": 6.547999999999993,
-        "Distance_%_from_Support": 1.5782608695652254,
-        "High_Volume_Gainer": "No"
-    },
-    {
-        "Ticker": "ADANIGREEN",
-        "Underlying": 925.5,
-        "Support": 920.0,
-        "Resistance": 966.6666666666666,
-        "Distance_from_Resistance": 41.16666666666663,
-        "Distance_from_Support": 5.5,
-        "Distance_%_from_Resistance": 4.258620689655169,
-        "Distance_%_from_Support": 0.5978260869565217,
-        "High_Volume_Gainer": "No"
-    },
-    {
-        "Ticker": "ADANIPORTS",
-        "Underlying": 1152,
-        "Support": 1180.0,
-        "Resistance": 1226.6666666666667,
-        "Distance_from_Resistance": 74.66666666666674,
-        "Distance_from_Support": -28.0,
-        "Distance_%_from_Resistance": 6.086956521739136,
-        "Distance_%_from_Support": -2.3728813559322033,
-        "High_Volume_Gainer": "No"
-    },
-    {
-        "Ticker": "ATGL",
-        "Underlying": 591.8,
-        "Support": 566.6666666666666,
-        "Resistance": 646.6666666666666,
-        "Distance_from_Resistance": 54.866666666666674,
-        "Distance_from_Support": 25.133333333333326,
-        "Distance_%_from_Resistance": 8.484536082474229,
-        "Distance_%_from_Support": 4.435294117647058,
-        "High_Volume_Gainer": "No"
-    },
-    {
         "Ticker": "BANKINDIA",
         "Underlying": 111.85,
         "Support": 108.33333333333333,
@@ -118,6 +19,28 @@
         "Distance_from_Support": 3.5166666666666657,
         "Distance_%_from_Resistance": 2.7391304347826138,
         "Distance_%_from_Support": 3.2461538461538453,
+        "High_Volume_Gainer": "No"
+    },
+    {
+        "Ticker": "CHAMBLFERT",
+        "Underlying": 626,
+        "Support": 616.6666666666666,
+        "Resistance": 663.3333333333334,
+        "Distance_from_Resistance": 37.33333333333337,
+        "Distance_from_Support": 9.333333333333371,
+        "Distance_%_from_Resistance": 5.628140703517593,
+        "Distance_%_from_Support": 1.5135135135135198,
+        "High_Volume_Gainer": "No"
+    },
+    {
+        "Ticker": "GAIL",
+        "Underlying": 177,
+        "Support": 175.0,
+        "Resistance": 185.0,
+        "Distance_from_Resistance": 8.0,
+        "Distance_from_Support": 2.0,
+        "Distance_%_from_Resistance": 4.324324324324325,
+        "Distance_%_from_Support": 1.1428571428571428,
         "High_Volume_Gainer": "No"
     }
 ]

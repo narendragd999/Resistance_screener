@@ -1,16 +1,20 @@
 [
     {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 627.6,
-        "Resistance": 630.0,
-        "Distance_to_Resistance": 2.3999999999999773,
-        "Timestamp": "2025-04-02 13:42:54"
+        "Ticker": "AUBANK",
+        "Underlying": 554,
+        "Resistance": 570.0,
+        "Distance_to_Resistance": 16.0
     },
     {
-        "Ticker": "MANAPPURAM",
-        "Underlying": 234.25,
-        "Resistance": 235.0,
-        "Distance_to_Resistance": 0.75,
-        "Timestamp": "2025-04-02 13:43:30"
+        "Ticker": "BANKINDIA",
+        "Underlying": 111.85,
+        "Resistance": 115.0,
+        "Distance_to_Resistance": 3.1500000000000057
+    },
+    {
+        "Ticker": "GAIL",
+        "Underlying": 177,
+        "Resistance": 185.0,
+        "Distance_to_Resistance": 8.0
     }
 ]
