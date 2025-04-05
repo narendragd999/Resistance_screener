@@ -1,0 +1,20 @@
+[
+    {
+        "Date": "2025-04-03",
+        "Time": "End of Day",
+        "Ticker": "AUBANK",
+        "Spot_Price": 563.4500122070312,
+        "Resistance_Price": 570.0,
+        "Distance_to_Resistance": 6.54998779296875,
+        "Volume": 19072.0
+    },
+    {
+        "Date": "2025-04-03",
+        "Time": "End of Day",
+        "Ticker": "BANKINDIA",
+        "Spot_Price": 114.91999816894531,
+        "Resistance_Price": 115.0,
+        "Distance_to_Resistance": 0.0800018310546875,
+        "Volume": 9650.0
+    }
+]
