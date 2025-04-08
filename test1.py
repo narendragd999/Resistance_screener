@@ -45,7 +45,8 @@ def load_config() -> Dict:
         "telegram_bot_token": "",
         "telegram_chat_id": "",
         "auto_scan_interval": 5,
-        "proximity_to_resistance": 0.5
+        "proximity_to_resistance": 0.5,
+        "auto_running": False  # Add this new field
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
@@ -375,6 +376,7 @@ def main():
     # Define three tabs
     tabs = st.tabs(["Real-Time Resistance Alerts", "Support & Resistance Table", "Historical Data"])
 
+      
     # Real-Time Resistance Alerts Tab
     with tabs[0]:
         st.subheader("Real-Time Resistance Alerts")
@@ -387,6 +389,12 @@ def main():
         minutes_to_next_scan = int(time_to_next_scan // 60)
         seconds_to_next_scan = int(time_to_next_scan % 60)
         st.write(f"Next Scan in: {minutes_to_next_scan} minutes {seconds_to_next_scan} seconds")
+
+        # Initialize auto_running from config if not in session state
+        if 'auto_running' not in st.session_state:
+            st.session_state['auto_running'] = st.session_state['telegram_config']['auto_running']
+        if 'last_auto_time' not in st.session_state:
+            st.session_state['last_auto_time'] = 0
 
         def perform_scan(tickers_to_scan):
             new_suggestions = check_resistance_and_notify(
@@ -430,16 +438,30 @@ def main():
             st.session_state['historical_data'].extend(historical_updates)
             save_historical_data(st.session_state['historical_data'])
 
-        if time_to_next_scan <= 0 and not st.session_state['auto_scan_triggered']:
-            tickers = load_tickers() if not specific_tickers else [t.strip() for t in specific_tickers.split(',')]
-            perform_scan(tickers)
-            st.session_state['last_scan_time'] = current_time
-            st.session_state['auto_scan_triggered'] = True
-            st.rerun()
-        elif time_to_next_scan > 0:
-            st.session_state['auto_scan_triggered'] = False
+        # Automatic scanning logic (60s interval)
+        if st.session_state['auto_running']:
+            current_time = time.time()
+            if current_time - st.session_state['last_auto_time'] >= time_to_next_scan:  # 60 seconds interval
+                tickers = load_tickers() if not specific_tickers else [t.strip() for t in specific_tickers.split(',')]
+                perform_scan(tickers)
+                st.session_state['last_scan_time'] = current_time
+                st.session_state['last_auto_time'] = current_time
+                st.rerun()
 
-        col1, col2 = st.columns(2)
+        
+        # Auto-trigger on page refresh based on config and interval
+        # if st.session_state['telegram_config']['auto_running'] and time_to_next_scan <= 0:
+        #     tickers = load_tickers()
+        #     perform_scan(tickers)
+        #     print(f"Clicked event--{st.session_state['telegram_config']['auto_running']}")
+        #     st.session_state['last_scan_time'] = current_time
+        #     st.session_state['auto_scan_triggered'] = True
+        #     st.rerun()
+        # elif time_to_next_scan > 0:
+        #     st.session_state['auto_scan_triggered'] = False
+
+        # Button columns
+        col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Scan All Tickers"):
                 tickers = load_tickers()
@@ -454,6 +476,18 @@ def main():
                 st.session_state['last_scan_time'] = time.time()
                 st.session_state['auto_scan_triggered'] = False
                 st.rerun()
+        with col3:
+            if st.button("Toggle Auto (60s)"):
+                st.session_state['auto_running'] = not st.session_state['auto_running']
+                st.session_state['telegram_config']['auto_running'] = st.session_state['auto_running']
+                save_config(st.session_state['telegram_config'])  # Save to JSON
+                if st.session_state['auto_running']:
+                    st.session_state['last_auto_time'] = time.time()
+                st.rerun()
+
+        # Display auto status
+        status = "Running" if st.session_state['auto_running'] else "Stopped"
+        st.write(f"Auto Scan (60s): {status}")
 
         if st.session_state['scanned_stocks']:
             st.write("### Scanned Stocks (Sortable & Searchable)")
