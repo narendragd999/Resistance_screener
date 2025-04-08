@@ -302,8 +302,25 @@ def main():
     if 'scanned_stocks' not in st.session_state:
         st.session_state['scanned_stocks'] = []
 
+    # Initialize auto_running from config if not in session state
+    if 'auto_running' not in st.session_state:
+        st.session_state['auto_running'] = st.session_state['telegram_config']['auto_running']
+    if 'last_auto_time' not in st.session_state:
+        st.session_state['last_auto_time'] = 0
+
     # Sidebar Configuration
     with st.sidebar:
+        st.subheader("Auto Scan Control")
+        if st.button("Toggle Auto (60s)", key="sidebar_auto_toggle"):
+            st.session_state['auto_running'] = not st.session_state['auto_running']
+            st.session_state['telegram_config']['auto_running'] = st.session_state['auto_running']
+            save_config(st.session_state['telegram_config'])
+            if st.session_state['auto_running']:
+                st.session_state['last_auto_time'] = time.time()
+            st.rerun()
+        status = "Running" if st.session_state['auto_running'] else "Stopped"
+        st.write(f"Auto Scan (60s): {status}")
+
         st.subheader("Telegram Integration")
         telegram_bot_token = st.text_input(
             "Telegram Bot Token:",
@@ -390,12 +407,7 @@ def main():
         seconds_to_next_scan = int(time_to_next_scan % 60)
         st.write(f"Next Scan in: {minutes_to_next_scan} minutes {seconds_to_next_scan} seconds")
 
-        # Initialize auto_running from config if not in session state
-        if 'auto_running' not in st.session_state:
-            st.session_state['auto_running'] = st.session_state['telegram_config']['auto_running']
-        if 'last_auto_time' not in st.session_state:
-            st.session_state['last_auto_time'] = 0
-
+        
         def perform_scan(tickers_to_scan):
             new_suggestions = check_resistance_and_notify(
                 tickers_to_scan, expiry, telegram_bot_token, telegram_chat_id,
@@ -476,14 +488,14 @@ def main():
                 st.session_state['last_scan_time'] = time.time()
                 st.session_state['auto_scan_triggered'] = False
                 st.rerun()
-        with col3:
-            if st.button("Toggle Auto (60s)"):
-                st.session_state['auto_running'] = not st.session_state['auto_running']
-                st.session_state['telegram_config']['auto_running'] = st.session_state['auto_running']
-                save_config(st.session_state['telegram_config'])  # Save to JSON
-                if st.session_state['auto_running']:
-                    st.session_state['last_auto_time'] = time.time()
-                st.rerun()
+        # with col3:
+        #     if st.button("Toggle Auto (60s)"):
+        #         st.session_state['auto_running'] = not st.session_state['auto_running']
+        #         st.session_state['telegram_config']['auto_running'] = st.session_state['auto_running']
+        #         save_config(st.session_state['telegram_config'])  # Save to JSON
+        #         if st.session_state['auto_running']:
+        #             st.session_state['last_auto_time'] = time.time()
+        #         st.rerun()
 
         # Display auto status
         status = "Running" if st.session_state['auto_running'] else "Stopped"

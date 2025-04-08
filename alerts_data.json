@@ -103,5 +103,19 @@
         "Resistance": 636.6666666666666,
         "Distance_to_Resistance": 1.1166666666666742,
         "Timestamp": "2025-04-08 16:00:58"
+    },
+    {
+        "Ticker": "CHAMBLFERT",
+        "Underlying": 635.55,
+        "Resistance": 636.6666666666666,
+        "Distance_to_Resistance": 1.1166666666666742,
+        "Timestamp": "2025-04-08 16:22:32"
+    },
+    {
+        "Ticker": "CHAMBLFERT",
+        "Underlying": 635.55,
+        "Resistance": 636.6666666666666,
+        "Distance_to_Resistance": 1.1166666666666742,
+        "Timestamp": "2025-04-08 16:22:51"
     }
 ]
