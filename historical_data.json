@@ -1,0 +1,30 @@
+[
+    {
+        "Ticker": "AUBANK",
+        "Underlying": 544.85,
+        "Resistance": 570.0,
+        "Support": 520.0,
+        "Timestamp": "2025-04-08 12:42:48"
+    },
+    {
+        "Ticker": "BANKINDIA",
+        "Underlying": 109.41,
+        "Resistance": 115.0,
+        "Support": 105.0,
+        "Timestamp": "2025-04-08 12:42:48"
+    },
+    {
+        "Ticker": "CHAMBLFERT",
+        "Underlying": 626.05,
+        "Resistance": 650.0,
+        "Support": 600.0,
+        "Timestamp": "2025-04-08 12:42:48"
+    },
+    {
+        "Ticker": "GAIL",
+        "Underlying": 174.08,
+        "Resistance": 185.0,
+        "Support": 168.33333333333334,
+        "Timestamp": "2025-04-08 12:42:48"
+    }
+]
