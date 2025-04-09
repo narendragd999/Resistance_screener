@@ -1,29 +1,20 @@
 [
     {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 635.55,
-        "Suggested_Call_Strike": 640.0,
-        "Call_Last_Price": 22.15,
-        "Potential_Gain_%": 20.09029345372481,
+        "Ticker": "BANKBARODA",
+        "Underlying": 234.5,
+        "Suggested_Call_Strike": 247.5,
+        "Call_Last_Price": 2.75,
+        "Potential_Gain_%": 472.72727272727275,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-09 08:52:11"
+        "Timestamp": "2025-04-09 09:29:24"
     },
     {
-        "Ticker": "ASIANPAINT",
-        "Underlying": 2394.2,
-        "Suggested_Call_Strike": 2400.0,
-        "Call_Last_Price": 47.0,
-        "Potential_Gain_%": 12.340425531915281,
+        "Ticker": "ITC",
+        "Underlying": 413.25,
+        "Suggested_Call_Strike": 435.0,
+        "Call_Last_Price": 1.35,
+        "Potential_Gain_%": 1611.111111111111,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-09 08:52:16"
-    },
-    {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 635.55,
-        "Suggested_Call_Strike": 640.0,
-        "Call_Last_Price": 22.15,
-        "Potential_Gain_%": 20.09029345372481,
-        "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-09 08:52:23"
+        "Timestamp": "2025-04-09 09:29:48"
     }
 ]

@@ -1,23 +1,16 @@
 [
     {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 635.55,
-        "Resistance": 636.6666666666666,
-        "Distance_to_Resistance": 1.1166666666666742,
-        "Timestamp": "2025-04-09 08:52:11"
+        "Ticker": "BANKBARODA",
+        "Underlying": 234.5,
+        "Resistance": 235.0,
+        "Distance_to_Resistance": 0.5,
+        "Timestamp": "2025-04-09 09:29:24"
     },
     {
-        "Ticker": "ASIANPAINT",
-        "Underlying": 2394.2,
-        "Resistance": 2400.0,
-        "Distance_to_Resistance": 5.800000000000182,
-        "Timestamp": "2025-04-09 08:52:16"
-    },
-    {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 635.55,
-        "Resistance": 636.6666666666666,
-        "Distance_to_Resistance": 1.1166666666666742,
-        "Timestamp": "2025-04-09 08:52:23"
+        "Ticker": "ITC",
+        "Underlying": 413.25,
+        "Resistance": 415.0,
+        "Distance_to_Resistance": 1.75,
+        "Timestamp": "2025-04-09 09:29:48"
     }
 ]

@@ -15,7 +15,7 @@ scraper = cloudscraper.create_scraper()
 
 # Constants
 BASE_URL = "https://www.nseindia.com"
-STORED_TICKERS_PATH = "tickers-test.csv"
+STORED_TICKERS_PATH = "tickers.csv"
 CONFIG_FILE = "config.json"
 TEMP_TABLE_DATA_FILE = "temp_table_data.json"
 ALERTS_DATA_FILE = "alerts_data.json"
@@ -185,28 +185,47 @@ def process_option_data(data: Dict, expiry: str) -> Tuple[pd.DataFrame, pd.DataF
 
 # Suggest Call Options (OTM 3% above spot price)
 def suggest_call_options(data: Dict, expiry: str, underlying: float, ticker: str) -> Optional[Dict]:
-    call_df, _ = process_option_data(data, expiry)
-    if call_df.empty or underlying <= 0:
+    """
+    Suggest a slightly OTM call option strike (5-10% above underlying) with the highest premium.
+    """
+    if not data or 'records' not in data or 'data' not in data['records']:
+        print(f"No valid data for {ticker} to suggest call options")
         return None
     
-    target_strike = underlying * 1.03
-    call_df = call_df[call_df['Strike'] > underlying].sort_values('Strike')
+    call_df, _ = process_option_data(data, expiry)
+    if call_df.empty or underlying <= 0:
+        print(f"No call data or invalid underlying for {ticker}")
+        return None
     
-    if not call_df.empty:
-        suggested_strike = call_df.iloc[0]['Strike']
-        last_price = call_df.iloc[0]['Last Price']
-        potential_gain_percent = ((suggested_strike - underlying) / last_price * 100) if last_price > 0 else 0
-        
-        return {
-            "Ticker": ticker,
-            "Underlying": underlying,
-            "Suggested_Call_Strike": suggested_strike,
-            "Call_Last_Price": last_price,
-            "Potential_Gain_%": potential_gain_percent,
-            "Expiry": expiry,
-            "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-    return None
+    # Filter calls that are slightly OTM (5-10% above underlying)
+    min_otm = underlying * 1.05  # 5% OTM
+    max_otm = underlying * 1.10  # 10% OTM
+    slightly_otm_calls = call_df[(call_df['Strike'] >= min_otm) & (call_df['Strike'] <= max_otm)].sort_values('Last Price', ascending=False)
+    
+    if slightly_otm_calls.empty:
+        print(f"No slightly OTM calls found for {ticker}, falling back to most OTM")
+        # Fallback: Use the most OTM if no slightly OTM options are available
+        most_otm_calls = call_df[call_df['Strike'] > underlying].sort_values('Strike', ascending=False)
+        if most_otm_calls.empty:
+            return None
+        most_otm_strike = most_otm_calls.iloc[0]
+        last_price = most_otm_strike['Last Price']
+        potential_gain_percent = ((most_otm_strike['Strike'] - underlying) / last_price * 100) if last_price > 0 else 0
+    else:
+        # Choose the strike with the highest premium (Last Price)
+        best_strike = slightly_otm_calls.iloc[0]
+        last_price = best_strike['Last Price']
+        potential_gain_percent = ((best_strike['Strike'] - underlying) / last_price * 100) if last_price > 0 else 0
+    
+    return {
+        "Ticker": ticker,
+        "Underlying": underlying,
+        "Suggested_Call_Strike": best_strike['Strike'] if not slightly_otm_calls.empty else most_otm_strike['Strike'],
+        "Call_Last_Price": last_price,
+        "Potential_Gain_%": potential_gain_percent,
+        "Expiry": expiry,
+        "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
 
 # Identify Support and Resistance
 def identify_support_resistance(call_df: pd.DataFrame, put_df: pd.DataFrame, top_n: int = 3) -> Tuple[Optional[float], Optional[float]]:
@@ -280,13 +299,14 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                     "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                 })
 
+                # Get the most OTM call suggestion
                 call_suggestion = suggest_call_options(data, expiry, underlying, ticker)
-                if call_suggestion:
+                if call_suggestion and call_suggestion['Potential_Gain_%'] > 0:  # Ensure there's a positive gain
                     call_message = (
-                        f"*Call Option Suggestion*\n"
+                        f"*Call Option Suggestion (Most OTM)*\n"
                         f"Stock: *{ticker}*\n"
                         f"Underlying: *₹{underlying:.2f}*\n"
-                        f"Suggested Call Strike: *₹{call_suggestion['Suggested_Call_Strike']:.2f}* (OTM 3% above spot)\n"
+                        f"Suggested Call Strike: *₹{call_suggestion['Suggested_Call_Strike']:.2f}* (Most OTM)\n"
                         f"Call Last Price: *₹{call_suggestion['Call_Last_Price']:.2f}*\n"
                         f"Potential Gain: *{call_suggestion['Potential_Gain_%']:.2f}%*\n"
                         f"Expiry: *{expiry}*\n"
