@@ -1,0 +1,29 @@
+[
+    {
+        "Ticker": "CHAMBLFERT",
+        "Underlying": 635.55,
+        "Suggested_Call_Strike": 640.0,
+        "Call_Last_Price": 22.15,
+        "Potential_Gain_%": 20.09029345372481,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-09 08:52:11"
+    },
+    {
+        "Ticker": "ASIANPAINT",
+        "Underlying": 2394.2,
+        "Suggested_Call_Strike": 2400.0,
+        "Call_Last_Price": 47.0,
+        "Potential_Gain_%": 12.340425531915281,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-09 08:52:16"
+    },
+    {
+        "Ticker": "CHAMBLFERT",
+        "Underlying": 635.55,
+        "Suggested_Call_Strike": 640.0,
+        "Call_Last_Price": 22.15,
+        "Potential_Gain_%": 20.09029345372481,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-09 08:52:23"
+    }
+]

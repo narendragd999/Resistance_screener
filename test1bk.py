@@ -15,7 +15,7 @@ scraper = cloudscraper.create_scraper()
 
 # Constants
 BASE_URL = "https://www.nseindia.com"
-STORED_TICKERS_PATH = "tickers-test.csv"
+STORED_TICKERS_PATH = "tickers.csv"
 CONFIG_FILE = "config.json"
 TEMP_TABLE_DATA_FILE = "temp_table_data.json"
 ALERTS_DATA_FILE = "alerts_data.json"
@@ -239,7 +239,7 @@ def load_tickers() -> List[str]:
         st.error(f"Error loading tickers: {e}")
         return ["HDFCBANK"]
 
-# Check Resistance and Send Notification with Call Suggestions (for Tab 1)
+# Check Resistance and Send Notification with Call Suggestions
 def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float):
     refresh_key = time.time()
     suggestions = []
@@ -296,40 +296,6 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                     call_suggestions.append(call_suggestion)
 
     return suggestions, call_suggestions
-
-# Scan for Historical Data based on Proximity Criteria (for Tab 3)
-def scan_historical_data(tickers: List[str], expiry: str, proximity_percent: float) -> List[Dict]:
-    refresh_key = time.time()
-    historical_data = []
-    
-    for ticker in tickers:
-        with st.spinner(f"Scanning {ticker} for historical data..."):
-            data = fetch_options_data(ticker, refresh_key)
-            if not data or 'records' not in data:
-                print(f"Failed to fetch data for {ticker}")
-                continue
-            
-            call_df, put_df = process_option_data(data, expiry)
-            underlying = data['records'].get('underlyingValue', 0)
-            support_strike, resistance_strike = identify_support_resistance(call_df, put_df)
-            
-            if resistance_strike is None:
-                continue
-            
-            proximity_threshold = resistance_strike * (abs(proximity_percent) / 100)
-            distance_to_resistance = resistance_strike - underlying
-            
-            if 0 <= distance_to_resistance <= proximity_threshold:
-                historical_data.append({
-                    "Ticker": ticker,
-                    "Underlying": underlying,
-                    "Resistance": resistance_strike,
-                    "Support": support_strike,
-                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                })
-                print(f"Added {ticker} to historical data: Within {proximity_percent}% of resistance")
-    
-    return historical_data
 
 # Generate Support/Resistance Table Data and Save to JSON
 def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[Dict]:
@@ -514,9 +480,11 @@ def main():
             save_alerts_data(st.session_state['suggestions'])
             save_call_suggestions(st.session_state['call_suggestions'])
 
-            # Update scanned stocks (Tab 1 only)
+            # Update scanned stocks and historical data
             refresh_key = time.time()
             scanned_data = []
+            historical_updates = []
+            print(f"Scanning tickers: {tickers_to_scan}")
             for ticker in tickers_to_scan:
                 data = fetch_options_data(ticker, refresh_key)
                 if data and 'records' in data:
@@ -531,9 +499,23 @@ def main():
                         "Support": support_strike,
                         "Last_Scanned": time.strftime("%Y-%m-%d %H:%M:%S")
                     })
+                    historical_updates.append({
+                        "Ticker": ticker,
+                        "Underlying": underlying,
+                        "Resistance": resistance_strike,
+                        "Support": support_strike,
+                        "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                    })
                 else:
                     print(f"No data fetched for ticker: {ticker}")
+            
             st.session_state['scanned_stocks'] = scanned_data
+            # Update historical data
+            if 'historical_data' not in st.session_state or not st.session_state['historical_data']:
+                st.session_state['historical_data'] = []
+            st.session_state['historical_data'].extend(historical_updates)
+            print(f"Added {len(historical_updates)} entries to historical data. Total: {len(st.session_state['historical_data'])}")
+            save_historical_data(st.session_state['historical_data'])
 
         # Automatic scanning logic (60s interval)
         if st.session_state['auto_running']:
@@ -682,12 +664,7 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Refresh Historical Data"):
-                tickers = load_tickers()
-                new_historical_data = scan_historical_data(
-                    tickers, expiry, st.session_state['telegram_config']['proximity_to_resistance']
-                )
-                st.session_state['historical_data'] = new_historical_data
-                save_historical_data(st.session_state['historical_data'])
+                st.session_state['historical_data'] = load_historical_data()
                 st.rerun()
         with col2:
             if st.button("Clear Historical Data"):
@@ -729,7 +706,7 @@ def main():
             else:
                 st.warning("No data matches the selected filters. Try adjusting the date or search query.")
         else:
-            st.warning("No historical data available. Click 'Refresh Historical Data' to scan for stocks near resistance.")
+            st.warning("No historical data available. Please perform a scan to record data.")
 
 if __name__ == "__main__":
     main()

@@ -1,121 +1,23 @@
 [
     {
-        "Ticker": "AUBANK",
-        "Underlying": 548,
-        "Resistance": 570.0,
-        "Distance_to_Resistance": 22.0,
-        "Timestamp": "2025-04-08 15:50:01"
+        "Ticker": "CHAMBLFERT",
+        "Underlying": 635.55,
+        "Resistance": 636.6666666666666,
+        "Distance_to_Resistance": 1.1166666666666742,
+        "Timestamp": "2025-04-09 08:52:11"
     },
     {
-        "Ticker": "BANKINDIA",
-        "Underlying": 109.65,
-        "Resistance": 115.0,
-        "Distance_to_Resistance": 5.349999999999994,
-        "Timestamp": "2025-04-08 15:50:06"
+        "Ticker": "ASIANPAINT",
+        "Underlying": 2394.2,
+        "Resistance": 2400.0,
+        "Distance_to_Resistance": 5.800000000000182,
+        "Timestamp": "2025-04-09 08:52:16"
     },
     {
         "Ticker": "CHAMBLFERT",
         "Underlying": 635.55,
         "Resistance": 636.6666666666666,
         "Distance_to_Resistance": 1.1166666666666742,
-        "Timestamp": "2025-04-08 15:50:07"
-    },
-    {
-        "Ticker": "AUBANK",
-        "Underlying": 548,
-        "Resistance": 570.0,
-        "Distance_to_Resistance": 22.0,
-        "Timestamp": "2025-04-08 15:50:37"
-    },
-    {
-        "Ticker": "BANKINDIA",
-        "Underlying": 109.65,
-        "Resistance": 115.0,
-        "Distance_to_Resistance": 5.349999999999994,
-        "Timestamp": "2025-04-08 15:50:45"
-    },
-    {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 635.55,
-        "Resistance": 636.6666666666666,
-        "Distance_to_Resistance": 1.1166666666666742,
-        "Timestamp": "2025-04-08 15:50:47"
-    },
-    {
-        "Ticker": "AUBANK",
-        "Underlying": 548,
-        "Resistance": 570.0,
-        "Distance_to_Resistance": 22.0,
-        "Timestamp": "2025-04-08 15:58:02"
-    },
-    {
-        "Ticker": "BANKINDIA",
-        "Underlying": 109.65,
-        "Resistance": 115.0,
-        "Distance_to_Resistance": 5.349999999999994,
-        "Timestamp": "2025-04-08 15:58:04"
-    },
-    {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 635.55,
-        "Resistance": 636.6666666666666,
-        "Distance_to_Resistance": 1.1166666666666742,
-        "Timestamp": "2025-04-08 15:58:05"
-    },
-    {
-        "Ticker": "AUBANK",
-        "Underlying": 548,
-        "Resistance": 570.0,
-        "Distance_to_Resistance": 22.0,
-        "Timestamp": "2025-04-08 15:58:53"
-    },
-    {
-        "Ticker": "BANKINDIA",
-        "Underlying": 109.65,
-        "Resistance": 115.0,
-        "Distance_to_Resistance": 5.349999999999994,
-        "Timestamp": "2025-04-08 15:58:55"
-    },
-    {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 635.55,
-        "Resistance": 636.6666666666666,
-        "Distance_to_Resistance": 1.1166666666666742,
-        "Timestamp": "2025-04-08 15:58:56"
-    },
-    {
-        "Ticker": "AUBANK",
-        "Underlying": 548,
-        "Resistance": 570.0,
-        "Distance_to_Resistance": 22.0,
-        "Timestamp": "2025-04-08 16:00:55"
-    },
-    {
-        "Ticker": "BANKINDIA",
-        "Underlying": 109.65,
-        "Resistance": 115.0,
-        "Distance_to_Resistance": 5.349999999999994,
-        "Timestamp": "2025-04-08 16:00:56"
-    },
-    {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 635.55,
-        "Resistance": 636.6666666666666,
-        "Distance_to_Resistance": 1.1166666666666742,
-        "Timestamp": "2025-04-08 16:00:58"
-    },
-    {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 635.55,
-        "Resistance": 636.6666666666666,
-        "Distance_to_Resistance": 1.1166666666666742,
-        "Timestamp": "2025-04-08 16:22:32"
-    },
-    {
-        "Ticker": "CHAMBLFERT",
-        "Underlying": 635.55,
-        "Resistance": 636.6666666666666,
-        "Distance_to_Resistance": 1.1166666666666742,
-        "Timestamp": "2025-04-08 16:22:51"
+        "Timestamp": "2025-04-09 08:52:23"
     }
 ]
