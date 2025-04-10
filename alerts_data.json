@@ -1,16 +1,9 @@
 [
     {
-        "Ticker": "BANKBARODA",
-        "Underlying": 234.5,
-        "Resistance": 235.0,
-        "Distance_to_Resistance": 0.5,
-        "Timestamp": "2025-04-09 09:29:24"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 413.25,
-        "Resistance": 415.0,
-        "Distance_to_Resistance": 1.75,
-        "Timestamp": "2025-04-09 09:29:48"
+        "Ticker": "PIDILITIND",
+        "Underlying": 2939.3,
+        "Resistance": 2946.6666666666665,
+        "Distance_to_Resistance": 7.366666666666333,
+        "Timestamp": "2025-04-10 08:20:31"
     }
 ]

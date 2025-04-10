@@ -8,14 +8,16 @@ import cloudscraper
 import aiohttp
 import asyncio
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, date
+import yfinance as yf
+import numpy as np
 
 # Create a cloudscraper session
 scraper = cloudscraper.create_scraper()
 
 # Constants
 BASE_URL = "https://www.nseindia.com"
-STORED_TICKERS_PATH = "tickers.csv"
+STORED_TICKERS_PATH = "tickers-test.csv"
 CONFIG_FILE = "config.json"
 TEMP_TABLE_DATA_FILE = "temp_table_data.json"
 ALERTS_DATA_FILE = "alerts_data.json"
@@ -183,7 +185,7 @@ def process_option_data(data: Dict, expiry: str) -> Tuple[pd.DataFrame, pd.DataF
     
     return call_df, put_df
 
-# Suggest Call Options (OTM 3% above spot price)
+# Suggest Call Options (OTM call option strike (5-10% above underlying) with the highest premium)
 def suggest_call_options(data: Dict, expiry: str, underlying: float, ticker: str) -> Optional[Dict]:
     """
     Suggest a slightly OTM call option strike (5-10% above underlying) with the highest premium.
@@ -350,6 +352,88 @@ def scan_historical_data(tickers: List[str], expiry: str, proximity_percent: flo
                 print(f"Added {ticker} to historical data: Within {proximity_percent}% of resistance")
     
     return historical_data
+
+# Fetch historical prices using yfinance
+def get_historical_price(ticker: str, target_date: date) -> Optional[Tuple[float, float]]:
+    try:
+        stock = yf.Ticker(ticker + ".NS")        
+        hist = stock.history(start=target_date, end=target_date + pd.Timedelta(days=1))
+
+        if not hist.empty:
+            high_price = hist['High'].iloc[0]  # Get the day's high price
+            close_price = hist['Close'].iloc[0]  # Get the day's close price
+            return high_price, close_price
+        return None, None
+    except Exception as e:
+        st.error(f"Error fetching historical price for {ticker}: {e}")
+        return None, None
+
+# Check historical resistance (Updated)
+def check_historical_resistance(tickers: List[str], target_date: date, expiry: str, proximity_percent: float) -> List[Dict]:
+    date_str = target_date.strftime("%Y-%m-%d")
+    refresh_key = time.time()
+    results = []
+    #print(f"tickers into function before loop allowed--{tickers}")
+    for ticker in tickers:
+        with st.spinner(f"Checking historical data for {ticker} on {date_str}..."):
+            # Fetch current option chain data to determine resistance            
+            data = fetch_options_data(ticker, refresh_key)            
+            if not data or 'records' not in data:
+                continue
+            
+            # Get historical high and close prices for the target date
+            high_price, close_price = get_historical_price(ticker, target_date)
+            if high_price is None or isinstance(high_price, (np.int64, np.float64)):
+                high_price = float(high_price) if high_price is not None else 0.0
+            if close_price is None or isinstance(close_price, (np.int64, np.float64)):
+                close_price = float(close_price) if close_price is not None else 0.0
+
+            # Process option data to find resistance
+            call_df, put_df = process_option_data(data, expiry)
+            resistance_strike = identify_support_resistance(call_df, put_df)[1]
+            
+            if resistance_strike is None or isinstance(resistance_strike, (np.int64, np.float64)):
+                resistance_strike = float(resistance_strike) if resistance_strike is not None else 0.0
+            
+            
+            # Check if the high price touched or exceeded the resistance
+            touched_resistance = high_price >= resistance_strike
+            
+            # Calculate volume and distance from close to resistance
+            volume = call_df['Volume'].sum() + put_df['Volume'].sum()
+            if isinstance(volume, (np.int64, np.float64)):
+                volume = float(volume)
+            
+            distance_to_resistance = resistance_strike - close_price  # Distance from close price
+
+            # Include stock if it touched resistance AND close price is below resistance
+            #if touched_resistance and close_price < resistance_strike:
+            if touched_resistance:
+                results.append({
+                    "Date": date_str,
+                    "Time": "End of Day",
+                    "Ticker": ticker,
+                    "High_Price": float(high_price) if high_price is not None else 0.0,
+                    "Close_Price": float(close_price) if close_price is not None else 0.0,
+                    "Resistance_Price": float(resistance_strike) if resistance_strike is not None else 0.0,
+                    "Distance_to_Resistance": float(distance_to_resistance) if distance_to_resistance is not None else 0.0,
+                    "Volume": float(volume) if volume is not None else 0.0,
+                    "Touched_Resistance": "Yes"
+                })
+
+    save_historical_data(results)  # Overwrite historical data
+    return results
+
+# Download data as CSV
+def download_csv(data: List[Dict], filename: str):
+    df = pd.DataFrame(data)
+    csv = df.to_csv(index=False)
+    st.download_button(
+        label="Download data as CSV",
+        data=csv,
+        file_name=filename,
+        mime="text/csv",
+    )
 
 # Generate Support/Resistance Table Data and Save to JSON
 def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[Dict]:
@@ -585,9 +669,10 @@ def main():
         # Display auto status
         status = "Running" if st.session_state['auto_running'] else "Stopped"
         st.write(f"Auto Scan (60s): {status}")
-
+        #print(f"scanned stocks{session_state['scanned_stocks']}")
         if st.session_state['scanned_stocks']:
             st.write("### Scanned Stocks (Sortable & Searchable)")
+
             search_query = st.text_input("Search Scanned Stocks by Ticker", key="scanned_search")
             scanned_df = pd.DataFrame(st.session_state['scanned_stocks'])
             
@@ -630,7 +715,7 @@ def main():
             st.info("No stocks currently near strong resistance.")
 
         if st.session_state['call_suggestions']:
-            st.write("### Suggested Call Options (OTM 3% Above Spot)")
+            st.write("### Suggested Call Options (OTM with maximum price Above Spot)")
             call_search_query = st.text_input("Search Call Suggestions by Ticker", key="call_search")
             call_suggestions_df = pd.DataFrame(st.session_state['call_suggestions'])
             
@@ -696,60 +781,74 @@ def main():
         st.subheader("Historical Scan Data")
 
         # Date picker for filtering
-        selected_date = st.date_input("Select Date to Filter Historical Data", value=None)
+        selected_date = st.date_input("Select Date", value=date.today() - pd.Timedelta(days=1))
 
         # Buttons
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Refresh Historical Data"):
-                tickers = load_tickers()
-                new_historical_data = scan_historical_data(
-                    tickers, expiry, st.session_state['telegram_config']['proximity_to_resistance']
-                )
-                st.session_state['historical_data'] = new_historical_data
-                save_historical_data(st.session_state['historical_data'])
-                st.rerun()
-        with col2:
-            if st.button("Clear Historical Data"):
-                st.session_state['historical_data'] = []
-                save_historical_data(st.session_state['historical_data'])
-                print("Historical data cleared")
-                st.rerun()
+        if st.button("Check Historical Resistance"):
+            tickers = load_tickers()
+            
+            proximity_percent = st.session_state['telegram_config']['proximity_to_resistance']
+            #print(f"tickers into tab allowed--{proximity_percent}")
+            #with st.spinner("Checking historical resistance touches..."):
+            historical_results = check_historical_resistance(
+                tickers, selected_date, expiry, proximity_percent
+            )
+            st.session_state['historical_data'] = historical_results
+            save_historical_data(historical_results)
 
-        # Display historical data
-        if st.session_state['historical_data']:
-            st.write("### Historical Data (Sortable & Searchable)")
-            hist_search_query = st.text_input("Search Historical Data by Ticker", key="hist_search")
-            hist_df = pd.DataFrame(st.session_state['historical_data'])
-            print(f"Raw historical data: {len(hist_df)} entries")
-
-            # Apply filters
-            filtered_df = hist_df.copy()
-            if selected_date:
-                filtered_df['Date'] = pd.to_datetime(filtered_df['Timestamp'], errors='coerce').dt.date
-                filtered_df = filtered_df[filtered_df['Date'] == selected_date]
-                print(f"Filtered by date {selected_date}: {len(filtered_df)} entries")
-            if hist_search_query:
-                filtered_df = filtered_df[filtered_df['Ticker'].str.contains(hist_search_query, case=False, na=False)]
-                print(f"Filtered by search '{hist_search_query}': {len(filtered_df)} entries")
-
-            if not filtered_df.empty:
+            if st.session_state['historical_data']:
+                st.write("### Stocks that touched resistance on selected date")
+                historical_df = pd.DataFrame(st.session_state['historical_data'])
                 st.dataframe(
-                    filtered_df,
+                    historical_df,
                     column_config={
+                        "Date": st.column_config.TextColumn("Date"),
+                        "Time": st.column_config.TextColumn("Time"),
                         "Ticker": st.column_config.TextColumn("Ticker"),
-                        "Underlying": st.column_config.NumberColumn("Underlying", format="%.2f"),
-                        "Resistance": st.column_config.NumberColumn("Resistance", format="%.2f"),
-                        "Support": st.column_config.NumberColumn("Support", format="%.2f"),
-                        "Timestamp": st.column_config.TextColumn("Timestamp")
+                        "High_Price": st.column_config.NumberColumn("High Price", format="%.2f"),
+                        "Close_Price": st.column_config.NumberColumn("Close Price", format="%.2f"),
+                        "Resistance_Price": st.column_config.NumberColumn("Resistance Price", format="%.2f"),
+                        "Distance_to_Resistance": st.column_config.NumberColumn("Distance to Resistance (Close)", format="%.2f"),
+                        "Volume": st.column_config.NumberColumn("Volume", format="%.0f"),
+                        "Touched_Resistance": st.column_config.TextColumn("Touched Resistance")
                     },
                     use_container_width=True,
                     height=400
                 )
+                if st.button("Clear Historical Data"):
+                    st.session_state['historical_data'] = []
+                    save_historical_data(st.session_state['historical_data'])
+                    st.rerun()
+                download_csv(st.session_state['historical_data'], f"historical_resistance_{selected_date}.csv")
             else:
-                st.warning("No data matches the selected filters. Try adjusting the date or search query.")
-        else:
-            st.warning("No historical data available. Click 'Refresh Historical Data' to scan for stocks near resistance.")
+                st.info("No stocks touched resistance on the selected date.")
+        else:            
+            if st.session_state['historical_data']:
+                st.write("### Last Historical Scan Results")
+                historical_df = pd.DataFrame(st.session_state['historical_data'])
+                st.dataframe(
+                    historical_df,
+                    column_config={
+                        "Date": st.column_config.TextColumn("Date"),
+                        "Time": st.column_config.TextColumn("Time"),
+                        "Ticker": st.column_config.TextColumn("Ticker"),
+                        "High_Price": st.column_config.NumberColumn("High Price", format="%.2f"),
+                        "Close_Price": st.column_config.NumberColumn("Close Price", format="%.2f"),
+                        "Resistance_Price": st.column_config.NumberColumn("Resistance Price", format="%.2f"),
+                        "Distance_to_Resistance": st.column_config.NumberColumn("Distance to Resistance (Close)", format="%.2f"),
+                        "Volume": st.column_config.NumberColumn("Volume", format="%.0f"),
+                        "Touched_Resistance": st.column_config.TextColumn("Touched Resistance")
+                    },
+                    use_container_width=True,
+                    height=400
+                )
+                if st.button("Clear Historical Data"):
+                    st.session_state['historical_data'] = []
+                    save_historical_data(st.session_state['historical_data'])
+                    st.rerun()
+                download_csv(st.session_state['historical_data'], f"historical_resistance_{st.session_state['historical_data'][0]['Date'] if st.session_state['historical_data'] else 'last_scan'}.csv")
+            else:
+                st.info("No historical data available. Select a date and click 'Check Historical Resistance'.")
 
 if __name__ == "__main__":
     main()

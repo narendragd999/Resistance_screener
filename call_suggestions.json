@@ -1,20 +1,11 @@
 [
     {
-        "Ticker": "BANKBARODA",
-        "Underlying": 234.5,
-        "Suggested_Call_Strike": 247.5,
-        "Call_Last_Price": 2.75,
-        "Potential_Gain_%": 472.72727272727275,
+        "Ticker": "PIDILITIND",
+        "Underlying": 2939.3,
+        "Suggested_Call_Strike": 3100.0,
+        "Call_Last_Price": 14.8,
+        "Potential_Gain_%": 1085.8108108108095,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-09 09:29:24"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 413.25,
-        "Suggested_Call_Strike": 435.0,
-        "Call_Last_Price": 1.35,
-        "Potential_Gain_%": 1611.111111111111,
-        "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-09 09:29:48"
+        "Timestamp": "2025-04-10 08:20:31"
     }
 ]
