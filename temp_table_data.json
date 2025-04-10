@@ -9,7 +9,7 @@
         "Distance_%_from_Resistance": 2.807017543859649,
         "Distance_%_from_Support": 6.538461538461539,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:02"
+        "Last_Updated": "2025-04-10 16:23:19"
     },
     {
         "Ticker": "BANKINDIA",
@@ -21,7 +21,7 @@
         "Distance_%_from_Resistance": 6.956521739130435,
         "Distance_%_from_Support": 1.9047619047619049,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:03"
+        "Last_Updated": "2025-04-10 16:23:19"
     },
     {
         "Ticker": "CHAMBLFERT",
@@ -33,7 +33,7 @@
         "Distance_%_from_Resistance": 4.120603015075383,
         "Distance_%_from_Support": 3.1351351351351413,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:04"
+        "Last_Updated": "2025-04-10 16:23:20"
     },
     {
         "Ticker": "GAIL",
@@ -45,7 +45,7 @@
         "Distance_%_from_Resistance": 8.7027027027027,
         "Distance_%_from_Support": -1.6116504854368843,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:05"
+        "Last_Updated": "2025-04-10 16:23:21"
     },
     {
         "Ticker": "ASHOKLEY",
@@ -57,7 +57,7 @@
         "Distance_%_from_Resistance": 3.385826771653539,
         "Distance_%_from_Support": 4.871794871794872,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:05"
+        "Last_Updated": "2025-04-10 16:23:22"
     },
     {
         "Ticker": "ASIANPAINT",
@@ -69,91 +69,7 @@
         "Distance_%_from_Resistance": 1.2643442622950782,
         "Distance_%_from_Support": 2.662642045454556,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:05"
-    },
-    {
-        "Ticker": "ASTRAL",
-        "Underlying": 1264.55,
-        "Support": 1246.6666666666667,
-        "Resistance": 1346.6666666666667,
-        "Distance_from_Resistance": 82.11666666666679,
-        "Distance_from_Support": 17.883333333333212,
-        "Distance_%_from_Resistance": 6.097772277227731,
-        "Distance_%_from_Support": 1.4344919786096157,
-        "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:06"
-    },
-    {
-        "Ticker": "AUROPHARMA",
-        "Underlying": 1055,
-        "Support": 1033.3333333333333,
-        "Resistance": 1173.3333333333333,
-        "Distance_from_Resistance": 118.33333333333326,
-        "Distance_from_Support": 21.666666666666742,
-        "Distance_%_from_Resistance": 10.085227272727266,
-        "Distance_%_from_Support": 2.0967741935483946,
-        "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:07"
-    },
-    {
-        "Ticker": "DMART",
-        "Underlying": 4133,
-        "Support": 3766.6666666666665,
-        "Resistance": 4266.666666666667,
-        "Distance_from_Resistance": 133.66666666666697,
-        "Distance_from_Support": 366.3333333333335,
-        "Distance_%_from_Resistance": 3.1328125000000067,
-        "Distance_%_from_Support": 9.725663716814163,
-        "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:07"
-    },
-    {
-        "Ticker": "BRITANNIA",
-        "Underlying": 5330,
-        "Support": 5100.0,
-        "Resistance": 5400.0,
-        "Distance_from_Resistance": 70.0,
-        "Distance_from_Support": 230.0,
-        "Distance_%_from_Resistance": 1.2962962962962963,
-        "Distance_%_from_Support": 4.509803921568627,
-        "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:08"
-    },
-    {
-        "Ticker": "CESC",
-        "Underlying": 149.77,
-        "Support": 145.0,
-        "Resistance": 160.0,
-        "Distance_from_Resistance": 10.22999999999999,
-        "Distance_from_Support": 4.77000000000001,
-        "Distance_%_from_Resistance": 6.393749999999994,
-        "Distance_%_from_Support": 3.2896551724138003,
-        "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:08"
-    },
-    {
-        "Ticker": "CGPOWER",
-        "Underlying": 552,
-        "Support": 530.0,
-        "Resistance": 610.0,
-        "Distance_from_Resistance": 58.0,
-        "Distance_from_Support": 22.0,
-        "Distance_%_from_Resistance": 9.508196721311474,
-        "Distance_%_from_Support": 4.150943396226415,
-        "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:09"
-    },
-    {
-        "Ticker": "CANBK",
-        "Underlying": 88.35,
-        "Support": 85.0,
-        "Resistance": 95.0,
-        "Distance_from_Resistance": 6.650000000000006,
-        "Distance_from_Support": 3.3499999999999943,
-        "Distance_%_from_Resistance": 7.000000000000006,
-        "Distance_%_from_Support": 3.9411764705882284,
-        "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:09"
+        "Last_Updated": "2025-04-10 16:23:23"
     },
     {
         "Ticker": "CDSL",
@@ -165,7 +81,7 @@
         "Distance_%_from_Resistance": 7.994652406417117,
         "Distance_%_from_Support": 2.410714285714286,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:11"
+        "Last_Updated": "2025-04-10 16:23:23"
     },
     {
         "Ticker": "CHAMBLFERT",
@@ -177,7 +93,7 @@
         "Distance_%_from_Resistance": 4.120603015075383,
         "Distance_%_from_Support": 3.1351351351351413,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:11"
+        "Last_Updated": "2025-04-10 16:23:24"
     },
     {
         "Ticker": "CHOLAFIN",
@@ -189,7 +105,7 @@
         "Distance_%_from_Resistance": 5.694078947368418,
         "Distance_%_from_Support": 3.8731884057971047,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:11"
+        "Last_Updated": "2025-04-10 16:23:24"
     },
     {
         "Ticker": "PIDILITIND",
@@ -201,7 +117,7 @@
         "Distance_%_from_Resistance": 0.24999999999998868,
         "Distance_%_from_Support": 4.975000000000007,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:12"
+        "Last_Updated": "2025-04-10 16:23:24"
     },
     {
         "Ticker": "COLPAL",
@@ -213,7 +129,7 @@
         "Distance_%_from_Resistance": -0.24,
         "Distance_%_from_Support": 4.416666666666667,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:12"
+        "Last_Updated": "2025-04-10 16:23:25"
     },
     {
         "Ticker": "JUBLFOOD",
@@ -225,6 +141,18 @@
         "Distance_%_from_Resistance": 1.4492753623188406,
         "Distance_%_from_Support": 5.154639175257738,
         "High_Volume_Gainer": "No",
-        "Last_Updated": "2025-04-10 08:21:13"
+        "Last_Updated": "2025-04-10 16:23:25"
+    },
+    {
+        "Ticker": "TATACONSUM",
+        "Underlying": 1087.55,
+        "Support": 1036.6666666666667,
+        "Resistance": 1106.6666666666667,
+        "Distance_from_Resistance": 19.116666666666788,
+        "Distance_from_Support": 50.88333333333321,
+        "Distance_%_from_Resistance": 1.7274096385542277,
+        "Distance_%_from_Support": 4.9083601286173515,
+        "High_Volume_Gainer": "No",
+        "Last_Updated": "2025-04-10 16:23:26"
     }
 ]

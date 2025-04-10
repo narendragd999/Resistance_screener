@@ -1,13 +1,28 @@
 [
     {
-        "Date": "2025-03-25",
+        "Date": "2025-03-21",
         "Time": "End of Day",
         "Ticker": "ASHOKLEY",
-        "High_Price": 215.1999969482422,
-        "Close_Price": 210.0399932861328,
+        "High_Price": 212.3000030517578,
+        "Close_Price": 210.83999633789062,
         "Resistance_Price": 211.66666666666666,
-        "Distance_to_Resistance": 1.6266733805338447,
+        "Selected_Date_Resistance": 228.38999938964844,
+        "Distance_to_Resistance": 0.8266703287760322,
         "Volume": 13661.0,
-        "Touched_Resistance": "Yes"
+        "Touched_Resistance": "Yes",
+        "Touched_Selected_Date_Resistance": "No"
+    },
+    {
+        "Date": "2025-03-21",
+        "Time": "End of Day",
+        "Ticker": "CHOLAFIN",
+        "High_Price": 1550.0,
+        "Close_Price": 1538.5,
+        "Resistance_Price": 1520.0,
+        "Selected_Date_Resistance": 1558.7333170572915,
+        "Distance_to_Resistance": -18.5,
+        "Volume": 27234.0,
+        "Touched_Resistance": "Yes",
+        "Touched_Selected_Date_Resistance": "No"
     }
 ]
