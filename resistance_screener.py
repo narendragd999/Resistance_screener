@@ -274,27 +274,51 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
             if resistance_strike is None:
                 continue
             
-            proximity_threshold = resistance_strike * (abs(proximity_percent) / 100)
-            distance_to_resistance = resistance_strike - underlying
+            # Calculate absolute proximity threshold
+            proximity_threshold = abs(proximity_percent) / 100.0
             
-            if 0 <= distance_to_resistance <= proximity_threshold:
-                message = (
-                    f"*Resistance Alert*\n"
-                    f"Stock: *{ticker}*\n"
-                    f"Underlying: *₹{underlying:.2f}*\n"
-                    f"Resistance: *₹{resistance_strike:.2f}*\n"
-                    f"Distance: *{distance_to_resistance:.2f}*\n"
-                    f"Reason: *Within {proximity_percent}% of strong resistance*"
-                )
-                asyncio.run(send_telegram_message(bot_token, chat_id, message))
-                suggestions.append({
-                    "Ticker": ticker,
-                    "Underlying": underlying,
-                    "Resistance": resistance_strike,
-                    "Distance_to_Resistance": distance_to_resistance,
-                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                })
+            if proximity_percent >= 0:  # Check if underlying is within proximity of resistance (approaching or at resistance)
+                distance_to_resistance = resistance_strike - underlying
+                if 0 <= distance_to_resistance <= (resistance_strike * proximity_threshold):
+                    message = (
+                        f"*Resistance Alert*\n"
+                        f"Stock: *{ticker}*\n"
+                        f"Underlying: *₹{underlying:.2f}*\n"
+                        f"Resistance: *₹{resistance_strike:.2f}*\n"
+                        f"Distance: *{distance_to_resistance:.2f}*\n"
+                        f"Reason: *Within {proximity_percent}% of strong resistance*"
+                    )
+                    asyncio.run(send_telegram_message(bot_token, chat_id, message))
+                    suggestions.append({
+                        "Ticker": ticker,
+                        "Underlying": underlying,
+                        "Resistance": resistance_strike,
+                        "Distance_to_Resistance": distance_to_resistance,
+                        "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                    })
+            else:  # Check if resistance is crossed (negative proximity)
+                distance_to_resistance = underlying - resistance_strike  # How much it has crossed
+                if distance_to_resistance > 0 and distance_to_resistance <= (resistance_strike * abs(proximity_threshold)):
+                    message = (
+                        f"*Resistance Crossed Alert*\n"
+                        f"Stock: *{ticker}*\n"
+                        f"Underlying: *₹{underlying:.2f}*\n"
+                        f"Resistance: *₹{resistance_strike:.2f}*\n"
+                        f"Crossed By: *{distance_to_resistance:.2f}*\n"
+                        f"Reason: *Crossed resistance by {abs(proximity_percent)}%*"
+                    )
+                    asyncio.run(send_telegram_message(bot_token, chat_id, message))
+                    suggestions.append({
+                        "Ticker": ticker,
+                        "Underlying": underlying,
+                        "Resistance": resistance_strike,
+                        "Distance_to_Resistance": -distance_to_resistance,  # Negative to indicate crossing
+                        "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                    })
 
+            # Call suggestion logic remains the same but only trigger if within or crossing resistance
+            if (proximity_percent >= 0 and 0 <= (resistance_strike - underlying) <= (resistance_strike * proximity_threshold)) or \
+               (proximity_percent < 0 and (underlying - resistance_strike) > 0 and (underlying - resistance_strike) <= (resistance_strike * abs(proximity_threshold))):
                 call_suggestion = suggest_call_options(data, expiry, underlying, ticker)
                 if call_suggestion and call_suggestion['Potential_Gain_%'] > 0:
                     call_message = (
@@ -599,7 +623,7 @@ def main():
             "Proximity to Resistance (%):",
             value=st.session_state['telegram_config']['proximity_to_resistance'],
             step=0.1,
-            min_value=0.0,
+            min_value=-5.0,
             max_value=5.0,
             key="proximity_to_resistance_input"
         )

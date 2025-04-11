@@ -1,429 +1,128 @@
 [
     {
-        "Ticker": "PIDILITIND",
-        "Underlying": 2939.3,
-        "Resistance": 2946.6666666666665,
-        "Distance_to_Resistance": 7.366666666666333,
-        "Timestamp": "2025-04-10 16:22:50"
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Resistance": 4900.0,
+        "Distance_to_Resistance": 15.0,
+        "Timestamp": "2025-04-11 20:19:18"
     },
     {
-        "Ticker": "EICHERMOT",
-        "Underlying": 5389.85,
-        "Resistance": 5400.0,
-        "Distance_to_Resistance": 10.149999999999636,
-        "Timestamp": "2025-04-11 09:44:17"
-    },
-    {
-        "Ticker": "GMRAIRPORT",
-        "Underlying": 87,
-        "Resistance": 87.0,
-        "Distance_to_Resistance": 0.0,
-        "Timestamp": "2025-04-11 09:44:20"
-    },
-    {
-        "Ticker": "LAURUSLABS",
-        "Underlying": 589.35,
-        "Resistance": 590.0,
-        "Distance_to_Resistance": 0.6499999999999773,
-        "Timestamp": "2025-04-11 09:44:38"
-    },
-    {
-        "Ticker": "EICHERMOT",
-        "Underlying": 5394.2,
-        "Resistance": 5400.0,
-        "Distance_to_Resistance": 5.800000000000182,
-        "Timestamp": "2025-04-11 10:02:03"
-    },
-    {
-        "Ticker": "APOLLOHOSP",
-        "Underlying": 6824.55,
-        "Resistance": 6833.333333333333,
-        "Distance_to_Resistance": 8.783333333332848,
-        "Timestamp": "2025-04-11 10:15:52"
-    },
-    {
-        "Ticker": "EICHERMOT",
-        "Underlying": 5389.45,
-        "Resistance": 5400.0,
-        "Distance_to_Resistance": 10.550000000000182,
-        "Timestamp": "2025-04-11 10:16:13"
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Resistance": 690.0,
+        "Distance_to_Resistance": 3.2999999999999545,
+        "Timestamp": "2025-04-11 20:19:18"
     },
     {
         "Ticker": "NESTLEIND",
-        "Underlying": 2349.35,
-        "Resistance": 2353.3333333333335,
-        "Distance_to_Resistance": 3.983333333333576,
-        "Timestamp": "2025-04-11 10:16:46"
+        "Underlying": 2355,
+        "Resistance": 2366.6666666666665,
+        "Distance_to_Resistance": 11.666666666666515,
+        "Timestamp": "2025-04-11 20:19:20"
     },
     {
-        "Ticker": "GRASIM",
-        "Underlying": 2632.9,
-        "Resistance": 2633.3333333333335,
-        "Distance_to_Resistance": 0.43333333333339397,
-        "Timestamp": "2025-04-11 10:43:02"
-    },
-    {
-        "Ticker": "MCX",
-        "Underlying": 5400,
-        "Resistance": 5400.0,
-        "Distance_to_Resistance": 0.0,
-        "Timestamp": "2025-04-11 10:43:38"
-    },
-    {
-        "Ticker": "MCX",
-        "Underlying": 5398.65,
-        "Resistance": 5400.0,
-        "Distance_to_Resistance": 1.3500000000003638,
-        "Timestamp": "2025-04-11 10:46:38"
-    },
-    {
-        "Ticker": "GRASIM",
-        "Underlying": 2630.95,
-        "Resistance": 2633.3333333333335,
-        "Distance_to_Resistance": 2.383333333333667,
-        "Timestamp": "2025-04-11 10:47:55"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.25,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.75,
-        "Timestamp": "2025-04-11 10:48:05"
-    },
-    {
-        "Ticker": "MCX",
-        "Underlying": 5394.85,
-        "Resistance": 5400.0,
-        "Distance_to_Resistance": 5.149999999999636,
-        "Timestamp": "2025-04-11 10:48:24"
-    },
-    {
-        "Ticker": "GRASIM",
-        "Underlying": 2631.4,
-        "Resistance": 2633.3333333333335,
-        "Distance_to_Resistance": 1.933333333333394,
-        "Timestamp": "2025-04-11 10:50:47"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.75,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.25,
-        "Timestamp": "2025-04-11 10:50:56"
-    },
-    {
-        "Ticker": "GRASIM",
-        "Underlying": 2632.9,
-        "Resistance": 2633.3333333333335,
-        "Distance_to_Resistance": 0.43333333333339397,
-        "Timestamp": "2025-04-11 10:53:02"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.75,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.25,
-        "Timestamp": "2025-04-11 10:53:12"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.9,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.10000000000002274,
-        "Timestamp": "2025-04-11 10:56:11"
-    },
-    {
-        "Ticker": "APOLLOHOSP",
-        "Underlying": 6827.15,
-        "Resistance": 6833.333333333333,
-        "Distance_to_Resistance": 6.183333333333394,
-        "Timestamp": "2025-04-11 10:57:33"
-    },
-    {
-        "Ticker": "LAURUSLABS",
-        "Underlying": 589.25,
-        "Resistance": 590.0,
-        "Distance_to_Resistance": 0.75,
-        "Timestamp": "2025-04-11 10:58:08"
-    },
-    {
-        "Ticker": "LAURUSLABS",
-        "Underlying": 589.3,
-        "Resistance": 590.0,
-        "Distance_to_Resistance": 0.7000000000000455,
-        "Timestamp": "2025-04-11 11:01:16"
-    },
-    {
-        "Ticker": "LAURUSLABS",
-        "Underlying": 589.45,
-        "Resistance": 590.0,
-        "Distance_to_Resistance": 0.5499999999999545,
-        "Timestamp": "2025-04-11 11:03:19"
-    },
-    {
-        "Ticker": "APOLLOHOSP",
-        "Underlying": 6823.2,
-        "Resistance": 6833.333333333333,
-        "Distance_to_Resistance": 10.133333333333212,
-        "Timestamp": "2025-04-11 11:12:43"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 420,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.0,
-        "Timestamp": "2025-04-11 11:13:13"
-    },
-    {
-        "Ticker": "PIDILITIND",
-        "Underlying": 2953,
-        "Resistance": 2953.3333333333335,
-        "Distance_to_Resistance": 0.3333333333334849,
-        "Timestamp": "2025-04-11 11:13:43"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.9,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.10000000000002274,
-        "Timestamp": "2025-04-11 11:18:18"
-    },
-    {
-        "Ticker": "PIDILITIND",
-        "Underlying": 2952.5,
-        "Resistance": 2953.3333333333335,
-        "Distance_to_Resistance": 0.8333333333334849,
-        "Timestamp": "2025-04-11 11:18:43"
-    },
-    {
-        "Ticker": "GRASIM",
-        "Underlying": 2628.75,
-        "Resistance": 2633.3333333333335,
-        "Distance_to_Resistance": 4.583333333333485,
-        "Timestamp": "2025-04-11 11:21:07"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.7,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.30000000000001137,
-        "Timestamp": "2025-04-11 11:21:15"
-    },
-    {
-        "Ticker": "PIDILITIND",
-        "Underlying": 2952.25,
-        "Resistance": 2953.3333333333335,
-        "Distance_to_Resistance": 1.083333333333485,
-        "Timestamp": "2025-04-11 11:21:37"
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Resistance": 3633.3333333333335,
+        "Distance_to_Resistance": 14.383333333333667,
+        "Timestamp": "2025-04-11 20:19:18"
     },
     {
         "Ticker": "POWERGRID",
-        "Underlying": 301.9,
-        "Resistance": 302.5,
-        "Distance_to_Resistance": 0.6000000000000227,
-        "Timestamp": "2025-04-11 11:21:41"
+        "Underlying": 303.95,
+        "Resistance": 305.0,
+        "Distance_to_Resistance": 1.0500000000000114,
+        "Timestamp": "2025-04-11 20:19:18"
     },
     {
-        "Ticker": "ITC",
-        "Underlying": 419.95,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.05000000000001137,
-        "Timestamp": "2025-04-11 11:23:13"
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Resistance": 1566.6666666666667,
+        "Distance_to_Resistance": 6.6666666666667425,
+        "Timestamp": "2025-04-11 20:19:21"
     },
     {
-        "Ticker": "PIDILITIND",
-        "Underlying": 2951.2,
-        "Resistance": 2953.3333333333335,
-        "Distance_to_Resistance": 2.133333333333667,
-        "Timestamp": "2025-04-11 11:23:38"
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Resistance": 4900.0,
+        "Distance_to_Resistance": 15.0,
+        "Timestamp": "2025-04-11 20:27:58"
     },
     {
-        "Ticker": "BAJAJFINSV",
-        "Underlying": 1963.55,
-        "Resistance": 1966.6666666666667,
-        "Distance_to_Resistance": 3.116666666666788,
-        "Timestamp": "2025-04-11 11:25:48"
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Resistance": 690.0,
+        "Distance_to_Resistance": 3.2999999999999545,
+        "Timestamp": "2025-04-11 20:27:58"
     },
     {
-        "Ticker": "ESCORTS",
-        "Underlying": 3214,
-        "Resistance": 3216.6666666666665,
-        "Distance_to_Resistance": 2.666666666666515,
-        "Timestamp": "2025-04-11 11:26:07"
+        "Ticker": "NESTLEIND",
+        "Underlying": 2355,
+        "Resistance": 2366.6666666666665,
+        "Distance_to_Resistance": 11.666666666666515,
+        "Timestamp": "2025-04-11 20:28:00"
     },
     {
-        "Ticker": "HAVELLS",
-        "Underlying": 1519.2,
-        "Resistance": 1520.0,
-        "Distance_to_Resistance": 0.7999999999999545,
-        "Timestamp": "2025-04-11 11:26:16"
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Resistance": 3633.3333333333335,
+        "Distance_to_Resistance": 14.383333333333667,
+        "Timestamp": "2025-04-11 20:27:58"
     },
     {
-        "Ticker": "PIDILITIND",
-        "Underlying": 2952.1,
-        "Resistance": 2953.3333333333335,
-        "Distance_to_Resistance": 1.2333333333335759,
-        "Timestamp": "2025-04-11 11:26:45"
+        "Ticker": "POWERGRID",
+        "Underlying": 303.95,
+        "Resistance": 305.0,
+        "Distance_to_Resistance": 1.0500000000000114,
+        "Timestamp": "2025-04-11 20:27:58"
     },
     {
-        "Ticker": "BAJAJFINSV",
-        "Underlying": 1963.65,
-        "Resistance": 1966.6666666666667,
-        "Distance_to_Resistance": 3.0166666666666515,
-        "Timestamp": "2025-04-11 11:27:49"
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Resistance": 1566.6666666666667,
+        "Distance_to_Resistance": 6.6666666666667425,
+        "Timestamp": "2025-04-11 20:28:00"
     },
     {
-        "Ticker": "ESCORTS",
-        "Underlying": 3215.35,
-        "Resistance": 3216.6666666666665,
-        "Distance_to_Resistance": 1.316666666666606,
-        "Timestamp": "2025-04-11 11:28:05"
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Resistance": 4900.0,
+        "Distance_to_Resistance": 15.0,
+        "Timestamp": "2025-04-11 20:29:33"
     },
     {
-        "Ticker": "PIDILITIND",
-        "Underlying": 2952.1,
-        "Resistance": 2953.3333333333335,
-        "Distance_to_Resistance": 1.2333333333335759,
-        "Timestamp": "2025-04-11 11:28:58"
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Resistance": 690.0,
+        "Distance_to_Resistance": 3.2999999999999545,
+        "Timestamp": "2025-04-11 20:29:35"
     },
     {
-        "Ticker": "BAJAJFINSV",
-        "Underlying": 1963.4,
-        "Resistance": 1966.6666666666667,
-        "Distance_to_Resistance": 3.2666666666666515,
-        "Timestamp": "2025-04-11 11:32:57"
+        "Ticker": "NESTLEIND",
+        "Underlying": 2355,
+        "Resistance": 2366.6666666666665,
+        "Distance_to_Resistance": 11.666666666666515,
+        "Timestamp": "2025-04-11 20:29:35"
     },
     {
-        "Ticker": "HAVELLS",
-        "Underlying": 1519.6,
-        "Resistance": 1520.0,
-        "Distance_to_Resistance": 0.40000000000009095,
-        "Timestamp": "2025-04-11 11:33:19"
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Resistance": 3633.3333333333335,
+        "Distance_to_Resistance": 14.383333333333667,
+        "Timestamp": "2025-04-11 20:29:34"
     },
     {
-        "Ticker": "IDFCFIRSTB",
-        "Underlying": 59.93,
-        "Resistance": 60.0,
-        "Distance_to_Resistance": 0.07000000000000028,
-        "Timestamp": "2025-04-11 11:33:24"
+        "Ticker": "POWERGRID",
+        "Underlying": 303.95,
+        "Resistance": 305.0,
+        "Distance_to_Resistance": 1.0500000000000114,
+        "Timestamp": "2025-04-11 20:29:34"
     },
     {
-        "Ticker": "BAJAJFINSV",
-        "Underlying": 1964.05,
-        "Resistance": 1966.6666666666667,
-        "Distance_to_Resistance": 2.616666666666788,
-        "Timestamp": "2025-04-11 11:35:55"
-    },
-    {
-        "Ticker": "HAVELLS",
-        "Underlying": 1519.5,
-        "Resistance": 1520.0,
-        "Distance_to_Resistance": 0.5,
-        "Timestamp": "2025-04-11 11:36:19"
-    },
-    {
-        "Ticker": "IDFCFIRSTB",
-        "Underlying": 59.95,
-        "Resistance": 60.0,
-        "Distance_to_Resistance": 0.04999999999999716,
-        "Timestamp": "2025-04-11 11:36:25"
-    },
-    {
-        "Ticker": "UNITDSPR",
-        "Underlying": 1465.8,
-        "Resistance": 1466.6666666666667,
-        "Distance_to_Resistance": 0.8666666666667879,
-        "Timestamp": "2025-04-11 11:37:12"
-    },
-    {
-        "Ticker": "BAJAJFINSV",
-        "Underlying": 1963.85,
-        "Resistance": 1966.6666666666667,
-        "Distance_to_Resistance": 2.8166666666668334,
-        "Timestamp": "2025-04-11 11:37:56"
-    },
-    {
-        "Ticker": "PIDILITIND",
-        "Underlying": 2953.2,
-        "Resistance": 2953.3333333333335,
-        "Distance_to_Resistance": 0.13333333333366681,
-        "Timestamp": "2025-04-11 11:38:56"
-    },
-    {
-        "Ticker": "IDFCFIRSTB",
-        "Underlying": 59.92,
-        "Resistance": 60.0,
-        "Distance_to_Resistance": 0.0799999999999983,
-        "Timestamp": "2025-04-11 11:41:36"
-    },
-    {
-        "Ticker": "GRASIM",
-        "Underlying": 2629.2,
-        "Resistance": 2633.3333333333335,
-        "Distance_to_Resistance": 4.133333333333667,
-        "Timestamp": "2025-04-11 11:42:58"
-    },
-    {
-        "Ticker": "IDFCFIRSTB",
-        "Underlying": 59.98,
-        "Resistance": 60.0,
-        "Distance_to_Resistance": 0.020000000000003126,
-        "Timestamp": "2025-04-11 11:43:06"
-    },
-    {
-        "Ticker": "GRASIM",
-        "Underlying": 2630.75,
-        "Resistance": 2633.3333333333335,
-        "Distance_to_Resistance": 2.583333333333485,
-        "Timestamp": "2025-04-11 11:45:59"
-    },
-    {
-        "Ticker": "IDFCFIRSTB",
-        "Underlying": 59.97,
-        "Resistance": 60.0,
-        "Distance_to_Resistance": 0.030000000000001137,
-        "Timestamp": "2025-04-11 11:46:08"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.9,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.10000000000002274,
-        "Timestamp": "2025-04-11 11:46:12"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.9,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.10000000000002274,
-        "Timestamp": "2025-04-11 11:48:39"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.95,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.05000000000001137,
-        "Timestamp": "2025-04-11 11:53:26"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.8,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.19999999999998863,
-        "Timestamp": "2025-04-11 11:56:29"
-    },
-    {
-        "Ticker": "HAVELLS",
-        "Underlying": 1518.45,
-        "Resistance": 1520.0,
-        "Distance_to_Resistance": 1.5499999999999545,
-        "Timestamp": "2025-04-11 11:58:31"
-    },
-    {
-        "Ticker": "ITC",
-        "Underlying": 419.75,
-        "Resistance": 420.0,
-        "Distance_to_Resistance": 0.25,
-        "Timestamp": "2025-04-11 11:58:38"
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Resistance": 1566.6666666666667,
+        "Distance_to_Resistance": 6.6666666666667425,
+        "Timestamp": "2025-04-11 20:29:36"
     }
 ]

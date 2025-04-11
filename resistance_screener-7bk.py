@@ -5,7 +5,6 @@ import time
 import json
 import os
 import cloudscraper
-from concurrent.futures import ThreadPoolExecutor
 import aiohttp
 import asyncio
 from typing import Dict, List, Optional, Tuple
@@ -24,9 +23,6 @@ TEMP_TABLE_DATA_FILE = "temp_table_data.json"
 ALERTS_DATA_FILE = "alerts_data.json"
 HISTORICAL_DATA_FILE = "historical_data.json"
 CALL_SUGGESTIONS_FILE = "call_suggestions.json"
-
-# Cache for performance
-cache = {}
 
 # Headers mimicking your browser
 headers = {
@@ -120,7 +116,7 @@ def save_call_suggestions(data: List[Dict]):
 # Telegram Integration
 async def send_telegram_message(bot_token: str, chat_id: str, message: str):
     if not bot_token or not chat_id:
-        print("Telegram Bot Token or Chat ID is missing.")  # Changed from st.error
+        st.error("Telegram Bot Token or Chat ID is missing. Please configure them in the sidebar.")
         return
     
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -128,27 +124,23 @@ async def send_telegram_message(bot_token: str, chat_id: str, message: str):
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload) as response:
             if response.status != 200:
-                print(f"Failed to send Telegram message: {await response.text()}")  # Changed from st.error
+                st.error(f"Failed to send Telegram message: {await response.text()}")
             else:
-                print(f"Telegram message sent: {message}")  # Changed from st.success
+                st.success(f"Telegram message sent: {message}")
 
 # Fetch Options Data with Last Price as Underlying
-def fetch_options_data(symbol: str, refresh_key: float) -> Optional[Dict]:
-    cache_key = f"{symbol}_{refresh_key}"
-    if cache_key in cache and (time.time() - cache.get(f"{cache_key}_timestamp", 0)) < 300:  # Cache for 5 minutes
-        return cache[cache_key]
-
+def fetch_options_data(symbol: str, _refresh_key: float) -> Optional[Dict]:
     url = f"{BASE_URL}/api/option-chain-equities?symbol={symbol}"
     quote_url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
-    print(f"Fetching data for {symbol} from: {url} and {quote_url}")
-
+    print(f"Fetching data from: {url} and {quote_url}")
+    
     response = scraper.get(url, headers=headers)
     if response.status_code != 200:
         print(f"Failed to load options chain for {symbol}: {response.status_code}")
         return None
-
+    
     data = response.json()
-
+    
     quote_response = scraper.get(quote_url, headers=headers)
     if quote_response.status_code == 200:
         quote_data = quote_response.json()
@@ -159,139 +151,8 @@ def fetch_options_data(symbol: str, refresh_key: float) -> Optional[Dict]:
             print(f"No valid last price found for {symbol}, using default underlying.")
     else:
         print(f"Failed to load quote data for {symbol}: {quote_response.status_code}")
-
-    cache[cache_key] = data
-    cache[f"{cache_key}_timestamp"] = time.time()
+    
     return data
-
-def process_ticker_group(ticker_group: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, refresh_key: float) -> Tuple[List[Dict], List[Dict]]:
-    suggestions = []
-    call_suggestions = []
-
-    for ticker in ticker_group:
-        data = fetch_options_data(ticker, refresh_key)
-        if not data or 'records' not in data:
-            print(f"Failed to fetch data for {ticker}")
-            continue
-
-        call_df, put_df = process_option_data(data, expiry)
-        underlying = data['records'].get('underlyingValue', 0)
-        resistance_strike = identify_support_resistance(call_df, put_df)[1]
-
-        if resistance_strike is None:
-            continue
-
-        proximity_threshold = abs(proximity_percent) / 100.0
-
-        if proximity_percent >= 0:
-            distance_to_resistance = resistance_strike - underlying
-            if 0 <= distance_to_resistance <= (resistance_strike * proximity_threshold):
-                message = (
-                    f"*Resistance Alert*\n"
-                    f"Stock: *{ticker}*\n"
-                    f"Underlying: *₹{underlying:.2f}*\n"
-                    f"Resistance: *₹{resistance_strike:.2f}*\n"
-                    f"Distance: *{distance_to_resistance:.2f}*\n"
-                    f"Reason: *Within {proximity_percent}% of strong resistance*"
-                )
-                asyncio.run(send_telegram_message(bot_token, chat_id, message))
-                suggestions.append({
-                    "Ticker": ticker,
-                    "Underlying": underlying,
-                    "Resistance": resistance_strike,
-                    "Distance_to_Resistance": distance_to_resistance,
-                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                })
-        else:
-            distance_to_resistance = underlying - resistance_strike
-            if distance_to_resistance > 0 and distance_to_resistance <= (resistance_strike * abs(proximity_threshold)):
-                message = (
-                    f"*Resistance Crossed Alert*\n"
-                    f"Stock: *{ticker}*\n"
-                    f"Underlying: *₹{underlying:.2f}*\n"
-                    f"Resistance: *₹{resistance_strike:.2f}*\n"
-                    f"Crossed By: *{distance_to_resistance:.2f}*\n"
-                    f"Reason: *Crossed resistance by {abs(proximity_percent)}%*"
-                )
-                asyncio.run(send_telegram_message(bot_token, chat_id, message))
-                suggestions.append({
-                    "Ticker": ticker,
-                    "Underlying": underlying,
-                    "Resistance": resistance_strike,
-                    "Distance_to_Resistance": -distance_to_resistance,
-                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                })
-
-        if (proximity_percent >= 0 and 0 <= (resistance_strike - underlying) <= (resistance_strike * proximity_threshold)) or \
-           (proximity_percent < 0 and (underlying - resistance_strike) > 0 and (underlying - resistance_strike) <= (resistance_strike * abs(proximity_threshold))):
-            call_suggestion = suggest_call_options(data, expiry, underlying, ticker)
-            if call_suggestion and call_suggestion['Potential_Gain_%'] > 0:
-                call_message = (
-                    f"*Call Option Suggestion (Most OTM)*\n"
-                    f"Stock: *{ticker}*\n"
-                    f"Underlying: *₹{underlying:.2f}*\n"
-                    f"Suggested Call Strike: *₹{call_suggestion['Suggested_Call_Strike']:.2f}* (Most OTM)\n"
-                    f"Call Last Price: *₹{call_suggestion['Call_Last_Price']:.2f}*\n"
-                    f"Potential Gain: *{call_suggestion['Potential_Gain_%']:.2f}%*\n"
-                    f"Expiry: *{expiry}*\n"
-                    f"Timestamp: *{call_suggestion['Timestamp']}*"
-                )
-                asyncio.run(send_telegram_message(bot_token, chat_id, call_message))
-                call_suggestions.append(call_suggestion)
-
-    return suggestions, call_suggestions
-
-def perform_parallel_scan(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float) -> Tuple[List[Dict], List[Dict], List[Dict]]:
-    refresh_key = time.time()  # Generate refresh_key here
-    num_groups = 4
-    group_size = max(1, len(tickers) // num_groups)
-    ticker_groups = [tickers[i:i + group_size] for i in range(0, len(tickers), group_size)]
-
-    all_suggestions = []
-    all_call_suggestions = []
-    scanned_stocks = []
-
-    with ThreadPoolExecutor(max_workers=num_groups) as executor:
-        future_to_group = {executor.submit(process_ticker_group, group, expiry, bot_token, chat_id, proximity_percent, refresh_key): group for group in ticker_groups}
-
-        for future in future_to_group:
-            try:
-                suggestions, call_suggestions = future.result()
-                all_suggestions.extend(suggestions)
-                all_call_suggestions.extend(call_suggestions)
-            except Exception as e:
-                print(f"Error processing group: {e}")
-
-    # Collect scanned stocks (post-processing)
-    for ticker in tickers:
-        data = fetch_options_data(ticker, refresh_key)  # Use the same refresh_key
-        if data and 'records' in data:
-            call_df, put_df = process_option_data(data, expiry)
-            underlying = data['records'].get('underlyingValue', 0)
-            support_strike, resistance_strike = identify_support_resistance(call_df, put_df)
-
-            distance_from_resistance = resistance_strike - underlying if resistance_strike else None
-            distance_from_support = underlying - support_strike if support_strike else None
-            distance_percent_from_resistance = (distance_from_resistance / resistance_strike * 100) if resistance_strike and distance_from_resistance is not None else None
-            distance_percent_from_support = (distance_from_support / support_strike * 100) if support_strike and distance_from_support is not None else None
-
-            total_volume = call_df['Volume'].sum() + put_df['Volume'].sum()
-            high_volume_gainer = "Yes" if total_volume > 100000 else "No"
-
-            scanned_stocks.append({
-                "Ticker": ticker,
-                "Underlying": underlying,
-                "Resistance": resistance_strike,
-                "Support": support_strike,
-                "Distance_from_Resistance": distance_from_resistance,
-                "Distance_from_Support": distance_from_support,
-                "Distance_%_from_Resistance": distance_percent_from_resistance,
-                "Distance_%_from_Support": distance_percent_from_support,
-                "High_Volume_Gainer": high_volume_gainer,
-                "Last_Scanned": time.strftime("%Y-%m-%d %H:%M:%S")
-            })
-
-    return all_suggestions, all_call_suggestions, scanned_stocks
 
 # Process Option Data
 def process_option_data(data: Dict, expiry: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -413,51 +274,27 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
             if resistance_strike is None:
                 continue
             
-            # Calculate absolute proximity threshold
-            proximity_threshold = abs(proximity_percent) / 100.0
+            proximity_threshold = resistance_strike * (abs(proximity_percent) / 100)
+            distance_to_resistance = resistance_strike - underlying
             
-            if proximity_percent >= 0:  # Check if underlying is within proximity of resistance (approaching or at resistance)
-                distance_to_resistance = resistance_strike - underlying
-                if 0 <= distance_to_resistance <= (resistance_strike * proximity_threshold):
-                    message = (
-                        f"*Resistance Alert*\n"
-                        f"Stock: *{ticker}*\n"
-                        f"Underlying: *₹{underlying:.2f}*\n"
-                        f"Resistance: *₹{resistance_strike:.2f}*\n"
-                        f"Distance: *{distance_to_resistance:.2f}*\n"
-                        f"Reason: *Within {proximity_percent}% of strong resistance*"
-                    )
-                    asyncio.run(send_telegram_message(bot_token, chat_id, message))
-                    suggestions.append({
-                        "Ticker": ticker,
-                        "Underlying": underlying,
-                        "Resistance": resistance_strike,
-                        "Distance_to_Resistance": distance_to_resistance,
-                        "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                    })
-            else:  # Check if resistance is crossed (negative proximity)
-                distance_to_resistance = underlying - resistance_strike  # How much it has crossed
-                if distance_to_resistance > 0 and distance_to_resistance <= (resistance_strike * abs(proximity_threshold)):
-                    message = (
-                        f"*Resistance Crossed Alert*\n"
-                        f"Stock: *{ticker}*\n"
-                        f"Underlying: *₹{underlying:.2f}*\n"
-                        f"Resistance: *₹{resistance_strike:.2f}*\n"
-                        f"Crossed By: *{distance_to_resistance:.2f}*\n"
-                        f"Reason: *Crossed resistance by {abs(proximity_percent)}%*"
-                    )
-                    asyncio.run(send_telegram_message(bot_token, chat_id, message))
-                    suggestions.append({
-                        "Ticker": ticker,
-                        "Underlying": underlying,
-                        "Resistance": resistance_strike,
-                        "Distance_to_Resistance": -distance_to_resistance,  # Negative to indicate crossing
-                        "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                    })
+            if 0 <= distance_to_resistance <= proximity_threshold:
+                message = (
+                    f"*Resistance Alert*\n"
+                    f"Stock: *{ticker}*\n"
+                    f"Underlying: *₹{underlying:.2f}*\n"
+                    f"Resistance: *₹{resistance_strike:.2f}*\n"
+                    f"Distance: *{distance_to_resistance:.2f}*\n"
+                    f"Reason: *Within {proximity_percent}% of strong resistance*"
+                )
+                asyncio.run(send_telegram_message(bot_token, chat_id, message))
+                suggestions.append({
+                    "Ticker": ticker,
+                    "Underlying": underlying,
+                    "Resistance": resistance_strike,
+                    "Distance_to_Resistance": distance_to_resistance,
+                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                })
 
-            # Call suggestion logic remains the same but only trigger if within or crossing resistance
-            if (proximity_percent >= 0 and 0 <= (resistance_strike - underlying) <= (resistance_strike * proximity_threshold)) or \
-               (proximity_percent < 0 and (underlying - resistance_strike) > 0 and (underlying - resistance_strike) <= (resistance_strike * abs(proximity_threshold))):
                 call_suggestion = suggest_call_options(data, expiry, underlying, ticker)
                 if call_suggestion and call_suggestion['Potential_Gain_%'] > 0:
                     call_message = (
@@ -735,7 +572,7 @@ def main():
             save_config(st.session_state['telegram_config'])
             if st.session_state['auto_running']:
                 st.session_state['last_auto_time'] = time.time()
-            #st.rerun()
+            st.rerun()
         status = "Running" if st.session_state['auto_running'] else "Stopped"
         st.write(f"Auto Scan (60s): {status}")
 
@@ -762,7 +599,7 @@ def main():
             "Proximity to Resistance (%):",
             value=st.session_state['telegram_config']['proximity_to_resistance'],
             step=0.1,
-            min_value=-5.0,
+            min_value=0.0,
             max_value=5.0,
             key="proximity_to_resistance_input"
         )
@@ -812,7 +649,7 @@ def main():
     tabs = st.tabs(["Real-Time Resistance Alerts", "Support & Resistance Table", "Historical Scan Data"])
 
     # Real-Time Resistance Alerts Tab
-    # Inside the "Real-Time Resistance Alerts" tab (tabs[0])
+    # Real-Time Resistance Alerts Tab
     with tabs[0]:
         st.subheader("Real-Time Resistance Alerts")
         current_time = time.time()
@@ -825,41 +662,35 @@ def main():
         seconds_to_next_scan = int(time_to_next_scan % 60)
         st.write(f"Next Scan in: {minutes_to_next_scan} minutes {seconds_to_next_scan} seconds")
 
-        # Add a flag to track scan completion
-        if 'scan_in_progress' not in st.session_state:
-            st.session_state['scan_in_progress'] = False
-
-        def perform_scan(tickers_to_scan, expiry, telegram_bot_token, telegram_chat_id, proximity_percent):
-            if st.session_state['scan_in_progress']:
-                return  # Prevent re-execution if scan is already running
-            
-            st.session_state['scan_in_progress'] = True
-            refresh_key = time.time()
-            suggestions, call_suggestions, scanned_stocks = perform_parallel_scan(
-                tickers_to_scan, expiry, telegram_bot_token, telegram_chat_id, proximity_percent
+        def perform_scan(tickers_to_scan):
+            new_suggestions, new_call_suggestions = check_resistance_and_notify(
+                tickers_to_scan, expiry, telegram_bot_token, telegram_chat_id,
+                st.session_state['telegram_config']['proximity_to_resistance']
             )
-
-            st.session_state['suggestions'].extend(suggestions)
-            st.session_state['call_suggestions'].extend(call_suggestions)
-            st.session_state['scanned_stocks'] = scanned_stocks
-
+            st.session_state['suggestions'].extend(new_suggestions)
+            st.session_state['call_suggestions'].extend(new_call_suggestions)
             save_alerts_data(st.session_state['suggestions'])
             save_call_suggestions(st.session_state['call_suggestions'])
 
+            # Update scanned stocks (Tab 1 only)
+            refresh_key = time.time()
             scanned_data = []
-            volume_threshold = 100000
+            volume_threshold = 100000  # Same threshold as in generate_support_resistance_table
+
             for ticker in tickers_to_scan:
                 data = fetch_options_data(ticker, refresh_key)
                 if data and 'records' in data:
                     call_df, put_df = process_option_data(data, expiry)
                     underlying = data['records'].get('underlyingValue', 0)
                     support_strike, resistance_strike = identify_support_resistance(call_df, put_df)
-
+                    
+                    # Calculate distances
                     distance_from_resistance = resistance_strike - underlying if resistance_strike else None
                     distance_from_support = underlying - support_strike if support_strike else None
                     distance_percent_from_resistance = (distance_from_resistance / resistance_strike * 100) if resistance_strike and distance_from_resistance is not None else None
                     distance_percent_from_support = (distance_from_support / support_strike * 100) if support_strike and distance_from_support is not None else None
-
+                    
+                    # Calculate high volume gainer
                     total_volume = call_df['Volume'].sum() + put_df['Volume'].sum()
                     high_volume_gainer = "Yes" if total_volume > volume_threshold else "No"
 
@@ -879,39 +710,35 @@ def main():
                     print(f"No data fetched for ticker: {ticker}")
 
             st.session_state['scanned_stocks'] = scanned_data
-            st.session_state['last_scan_time'] = time.time()
-            st.session_state['scan_in_progress'] = False  # Reset flag after scan
 
         # Automatic scanning logic (60s interval)
         if st.session_state['auto_running']:
             current_time = time.time()
-            if current_time - st.session_state['last_auto_time'] >= 60 and not st.session_state['scan_in_progress']:
+            if current_time - st.session_state['last_auto_time'] >= 60:
                 tickers = load_tickers() if not specific_tickers else [t.strip() for t in specific_tickers.split(',')]
-                perform_scan(tickers, expiry, st.session_state['telegram_config']['telegram_bot_token'], 
-                             st.session_state['telegram_config']['telegram_chat_id'], 
-                             st.session_state['telegram_config']['proximity_to_resistance'])
+                perform_scan(tickers)
+                st.session_state['last_scan_time'] = current_time
                 st.session_state['last_auto_time'] = current_time
-                # Removed st.rerun() to avoid continuous loop
+                st.rerun()
 
+        # Button columns
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("Scan All Tickers") and not st.session_state['scan_in_progress']:
+            if st.button("Scan All Tickers"):
                 tickers = load_tickers()
-                perform_scan(tickers, expiry, st.session_state['telegram_config']['telegram_bot_token'], 
-                             st.session_state['telegram_config']['telegram_chat_id'], 
-                             st.session_state['telegram_config']['proximity_to_resistance'])
+                perform_scan(tickers)
+                st.session_state['last_scan_time'] = time.time()
                 st.session_state['auto_scan_triggered'] = False
-                st.rerun()  # Retained to show scan results immediately
-
+                st.rerun()
         with col2:
-            if st.button("Scan Specific Tickers") and specific_tickers and not st.session_state['scan_in_progress']:
+            if st.button("Scan Specific Tickers") and specific_tickers:
                 tickers = [t.strip() for t in specific_tickers.split(',')]
-                perform_scan(tickers, expiry, st.session_state['telegram_config']['telegram_bot_token'], 
-                             st.session_state['telegram_config']['telegram_chat_id'], 
-                             st.session_state['telegram_config']['proximity_to_resistance'])
+                perform_scan(tickers)
+                st.session_state['last_scan_time'] = time.time()
                 st.session_state['auto_scan_triggered'] = False
-                st.rerun()  # Retained to show scan results immediately
+                st.rerun()
 
+        # Display auto status
         status = "Running" if st.session_state['auto_running'] else "Stopped"
         st.write(f"Auto Scan (60s): {status}")
 
@@ -959,7 +786,7 @@ def main():
             if st.button("Clear Alerts"):
                 st.session_state['suggestions'] = []
                 save_alerts_data(st.session_state['suggestions'])
-                #st.rerun()
+                st.rerun()
         else:
             st.info("No stocks currently near strong resistance.")
 
@@ -1109,7 +936,7 @@ def main():
                         os.remove(historical_file)
                         print(f"Deleted historical data file: {historical_file}")
                     st.session_state['historical_data_date'] = None  # Reset date to force reload
-                    #st.rerun()
+                    st.rerun()
                 download_csv(st.session_state['historical_data'], f"historical_resistance_{selected_date}.csv")
             else:
                 st.info("No stocks touched resistance on the selected date.")
