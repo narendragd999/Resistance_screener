@@ -649,6 +649,7 @@ def main():
     tabs = st.tabs(["Real-Time Resistance Alerts", "Support & Resistance Table", "Historical Scan Data"])
 
     # Real-Time Resistance Alerts Tab
+    # Real-Time Resistance Alerts Tab
     with tabs[0]:
         st.subheader("Real-Time Resistance Alerts")
         current_time = time.time()
@@ -674,6 +675,8 @@ def main():
             # Update scanned stocks (Tab 1 only)
             refresh_key = time.time()
             scanned_data = []
+            volume_threshold = 100000  # Same threshold as in generate_support_resistance_table
+
             for ticker in tickers_to_scan:
                 data = fetch_options_data(ticker, refresh_key)
                 if data and 'records' in data:
@@ -681,15 +684,31 @@ def main():
                     underlying = data['records'].get('underlyingValue', 0)
                     support_strike, resistance_strike = identify_support_resistance(call_df, put_df)
                     
+                    # Calculate distances
+                    distance_from_resistance = resistance_strike - underlying if resistance_strike else None
+                    distance_from_support = underlying - support_strike if support_strike else None
+                    distance_percent_from_resistance = (distance_from_resistance / resistance_strike * 100) if resistance_strike and distance_from_resistance is not None else None
+                    distance_percent_from_support = (distance_from_support / support_strike * 100) if support_strike and distance_from_support is not None else None
+                    
+                    # Calculate high volume gainer
+                    total_volume = call_df['Volume'].sum() + put_df['Volume'].sum()
+                    high_volume_gainer = "Yes" if total_volume > volume_threshold else "No"
+
                     scanned_data.append({
                         "Ticker": ticker,
                         "Underlying": underlying,
                         "Resistance": resistance_strike,
                         "Support": support_strike,
+                        "Distance_from_Resistance": distance_from_resistance,
+                        "Distance_from_Support": distance_from_support,
+                        "Distance_%_from_Resistance": distance_percent_from_resistance,
+                        "Distance_%_from_Support": distance_percent_from_support,
+                        "High_Volume_Gainer": high_volume_gainer,
                         "Last_Scanned": time.strftime("%Y-%m-%d %H:%M:%S")
                     })
                 else:
                     print(f"No data fetched for ticker: {ticker}")
+
             st.session_state['scanned_stocks'] = scanned_data
 
         # Automatic scanning logic (60s interval)
@@ -738,10 +757,15 @@ def main():
                     "Underlying": st.column_config.NumberColumn("Underlying", format="%.2f"),
                     "Resistance": st.column_config.NumberColumn("Resistance", format="%.2f"),
                     "Support": st.column_config.NumberColumn("Support", format="%.2f"),
+                    "Distance_from_Resistance": st.column_config.NumberColumn("Distance from Resistance", format="%.2f"),
+                    "Distance_from_Support": st.column_config.NumberColumn("Distance from Support", format="%.2f"),
+                    "Distance_%_from_Resistance": st.column_config.NumberColumn("Distance % from Resistance", format="%.2f"),
+                    "Distance_%_from_Support": st.column_config.NumberColumn("Distance % from Support", format="%.2f"),
+                    "High_Volume_Gainer": st.column_config.TextColumn("High Volume Gainer"),
                     "Last_Scanned": st.column_config.TextColumn("Last Scanned")
                 },
                 use_container_width=True,
-                height=300
+                height=400
             )
 
         if st.session_state['suggestions']:
