@@ -118,6 +118,26 @@ def save_call_suggestions(data: List[Dict]):
     with open(CALL_SUGGESTIONS_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
+def load_previous_suggestions() -> List[Dict]:
+    if os.path.exists("previous_suggestions.json"):
+        with open("previous_suggestions.json", 'r') as f:
+            return json.load(f)
+    return []
+
+def save_previous_suggestions(data: List[Dict]):
+    with open("previous_suggestions.json", 'w') as f:
+        json.dump(data, f, indent=4)
+
+def load_previous_call_suggestions() -> List[Dict]:
+    if os.path.exists("previous_call_suggestions.json"):
+        with open("previous_call_suggestions.json", 'r') as f:
+            return json.load(f)
+    return []
+
+def save_previous_call_suggestions(data: List[Dict]):
+    with open("previous_call_suggestions.json", 'w') as f:
+        json.dump(data, f, indent=4)
+
 # Telegram Integration
 async def send_telegram_message(bot_token: str, chat_id: str, message: str):
     if not bot_token or not chat_id:
@@ -129,7 +149,29 @@ async def send_telegram_message(bot_token: str, chat_id: str, message: str):
         async with session.post(url, json=payload) as response:
             if response.status != 200:
                 return
-            return
+
+def send_split_telegram_message(bot_token: str, chat_id: str, message: str):
+    MAX_MESSAGE_LENGTH = 4096  # Telegram's character limit
+
+    if len(message) <= MAX_MESSAGE_LENGTH:
+        asyncio.run(send_telegram_message(bot_token, chat_id, message))
+        return
+
+    # Split the message into chunks
+    chunks = []
+    current_chunk = message[:MAX_MESSAGE_LENGTH].strip()
+    chunks.append(current_chunk)
+
+    remaining = message[MAX_MESSAGE_LENGTH:]
+    while remaining:
+        next_chunk = remaining[:MAX_MESSAGE_LENGTH].strip()
+        chunks.append(next_chunk)
+        remaining = remaining[MAX_MESSAGE_LENGTH:]
+
+    # Send each chunk sequentially
+    for chunk in chunks:
+        asyncio.run(send_telegram_message(bot_token, chat_id, chunk))
+        asyncio.sleep(0.5)  # Small delay to ensure order
 
 # Fetch Options Data with Last Price as Underlying
 def fetch_options_data(symbol: str, refresh_key: float) -> Optional[Dict]:
@@ -137,7 +179,7 @@ def fetch_options_data(symbol: str, refresh_key: float) -> Optional[Dict]:
     api_call_counter += 1  # Increment the counter for each API call
     
     cache_key = f"{symbol}_{refresh_key}"
-    if cache_key in cache and (time.time() - cache.get(f"{cache_key}_timestamp", 0)) < 300:  # Cache for 5 minutes
+    if cache_key in cache and (time.time() - cache.get(f"{cache_key}_timestamp", 0)) < 60:  # Cache for 1 minutes
         return cache[cache_key]
 
     url = f"{BASE_URL}/api/option-chain-equities?symbol={symbol}"
@@ -199,6 +241,7 @@ def process_option_data(data: Dict, expiry: str) -> Tuple[pd.DataFrame, pd.DataF
     return call_df, put_df
 
 # Process Ticker Group for Parallel Execution
+# Ensure process_ticker_group only returns data, no notifications
 def process_ticker_group(ticker_group: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, refresh_key: float) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     suggestions = []
     call_suggestions = []
@@ -207,7 +250,7 @@ def process_ticker_group(ticker_group: List[str], expiry: str, bot_token: str, c
     volume_threshold = 100000
 
     for ticker in ticker_group:
-        data = fetch_options_data(ticker, refresh_key)  # Use refresh_key here
+        data = fetch_options_data(ticker, refresh_key)
         if not data or 'records' not in data:
             print(f"Failed to fetch data for {ticker}")
             continue
@@ -244,15 +287,6 @@ def process_ticker_group(ticker_group: List[str], expiry: str, bot_token: str, c
         if proximity_percent >= 0:
             distance_to_resistance = resistance_strike - underlying
             if 0 <= distance_to_resistance <= (resistance_strike * proximity_threshold):
-                message = (
-                    f"*Resistance Alert*\n"
-                    f"Stock: *{ticker}*\n"
-                    f"Underlying: *₹{underlying:.2f}*\n"
-                    f"Resistance: *₹{resistance_strike:.2f}*\n"
-                    f"Distance: *{distance_to_resistance:.2f}*\n"
-                    f"Reason: *Within {proximity_percent}% of strong resistance*"
-                )
-                asyncio.run(send_telegram_message(bot_token, chat_id, message))
                 suggestions.append({
                     "Ticker": ticker,
                     "Underlying": underlying,
@@ -263,15 +297,6 @@ def process_ticker_group(ticker_group: List[str], expiry: str, bot_token: str, c
         else:
             distance_to_resistance = underlying - resistance_strike
             if distance_to_resistance > 0 and distance_to_resistance <= (resistance_strike * abs(proximity_threshold)):
-                message = (
-                    f"*Resistance Crossed Alert*\n"
-                    f"Stock: *{ticker}*\n"
-                    f"Underlying: *₹{underlying:.2f}*\n"
-                    f"Resistance: *₹{resistance_strike:.2f}*\n"
-                    f"Crossed By: *{distance_to_resistance:.2f}*\n"
-                    f"Reason: *Crossed resistance by {abs(proximity_percent)}%*"
-                )
-                asyncio.run(send_telegram_message(bot_token, chat_id, message))
                 suggestions.append({
                     "Ticker": ticker,
                     "Underlying": underlying,
@@ -284,23 +309,13 @@ def process_ticker_group(ticker_group: List[str], expiry: str, bot_token: str, c
            (proximity_percent < 0 and (underlying - resistance_strike) > 0 and (underlying - resistance_strike) <= (resistance_strike * abs(proximity_threshold))):
             call_suggestion = suggest_call_options(data, expiry, underlying, ticker)
             if call_suggestion and call_suggestion['Potential_Gain_%'] > 0:
-                call_message = (
-                    f"*Call Option Suggestion (Most OTM)*\n"
-                    f"Stock: *{ticker}*\n"
-                    f"Underlying: *₹{underlying:.2f}*\n"
-                    f"Suggested Call Strike: *₹{call_suggestion['Suggested_Call_Strike']:.2f}* (Most OTM)\n"
-                    f"Call Last Price: *₹{call_suggestion['Call_Last_Price']:.2f}*\n"
-                    f"Potential Gain: *{call_suggestion['Potential_Gain_%']:.2f}%*\n"
-                    f"Expiry: *{expiry}*\n"
-                    f"Timestamp: *{call_suggestion['Timestamp']}*"
-                )
-                asyncio.run(send_telegram_message(bot_token, chat_id, call_message))
                 call_suggestions.append(call_suggestion)
 
     return suggestions, call_suggestions, scanned_stocks
 
+# Ensure perform_parallel_scan does not send notifications
 def perform_parallel_scan(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, refresh_key: float) -> Tuple[List[Dict], List[Dict], List[Dict]]:
-    num_groups = 20
+    num_groups = 5
     group_size = max(1, len(tickers) // num_groups)
     ticker_groups = [tickers[i:i + group_size] for i in range(0, len(tickers), group_size)]
 
@@ -674,6 +689,7 @@ def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[D
     save_table_data(table_data)
     return table_data
 
+
 # Main Application
 def main():
     st.set_page_config(page_title="Resistance Screener", layout="wide")
@@ -707,6 +723,17 @@ def main():
         st.session_state['last_auto_time'] = 0
     if 'scan_in_progress' not in st.session_state:
         st.session_state['scan_in_progress'] = False
+    if 'previous_suggestions' not in st.session_state:
+        st.session_state['previous_suggestions'] = []
+    if 'previous_call_suggestions' not in st.session_state:
+        st.session_state['previous_call_suggestions'] = []
+
+    st.session_state['previous_suggestions'] = load_previous_suggestions()
+    st.session_state['previous_call_suggestions'] = load_previous_call_suggestions()
+
+    # After updates, save them:
+    save_previous_suggestions(st.session_state['previous_suggestions'])
+    save_previous_call_suggestions(st.session_state['previous_call_suggestions'])
 
     # Sidebar Configuration
     with st.sidebar:
@@ -810,21 +837,73 @@ def main():
         def perform_scan(tickers_to_scan, expiry, telegram_bot_token, telegram_chat_id, proximity_percent, refresh_key):
             if st.session_state['scan_in_progress']:
                 return
-            
+
             st.session_state['scan_in_progress'] = True
+
+            # Fetch all data without sending notifications in perform_parallel_scan
             suggestions, call_suggestions, scanned_stocks = perform_parallel_scan(
                 tickers_to_scan, expiry, telegram_bot_token, telegram_chat_id, proximity_percent, refresh_key
             )
 
-            st.session_state['suggestions'].extend(suggestions)
-            st.session_state['call_suggestions'].extend(call_suggestions)
+            # Collect new suggestions (compare with previous to find new ones)
+            new_resistance_alerts = {s['Ticker']: s for s in suggestions if s not in st.session_state['previous_suggestions']}
+            new_call_suggestions = {s['Ticker']: s for s in call_suggestions if s not in st.session_state['previous_call_suggestions']}
+
+            # Get unique tickers that have either a resistance alert or call suggestion
+            relevant_tickers = sorted(set(new_resistance_alerts.keys()) | set(new_call_suggestions.keys()))
+
+            # Combine and send notifications for each ticker in sorted order
+            if relevant_tickers:
+                combined_message = ""
+                for ticker in relevant_tickers:
+                    # Add Resistance Alert if it exists
+                    if ticker in new_resistance_alerts:
+                        alert = new_resistance_alerts[ticker]
+                        combined_message += (
+                            f"Resistance Alert\n"
+                            f"Stock: *{alert['Ticker']}*\n"
+                            f"Underlying: *₹{alert['Underlying']:.2f}*\n"
+                            f"Resistance: *₹{alert['Resistance']:.2f}*\n"
+                            f"Distance: *{alert['Distance_to_Resistance']:.2f}*\n"
+                            f"Reason: *Within {proximity_percent}% of strong resistance*\n\n"
+                        )
+
+                    # Add Call Option Suggestion if it exists
+                    if ticker in new_call_suggestions:
+                        suggestion = new_call_suggestions[ticker]
+                        suggestion['Expiry'] = expiry  # Ensure expiry is included
+                        combined_message += (
+                            f"Call Option Suggestion (Most OTM)\n"
+                            f"Stock: *{suggestion['Ticker']}*\n"
+                            f"Underlying: *₹{suggestion['Underlying']:.2f}*\n"
+                            f"Suggested Call Strike: *₹{suggestion['Suggested_Call_Strike']:.2f}* (Most OTM)\n"
+                            f"Call Last Price: *₹{suggestion['Call_Last_Price']:.2f}*\n"
+                            f"Potential Gain: *{suggestion['Potential_Gain_%']:.2f}%*\n"
+                            f"Expiry: *{suggestion['Expiry']}*\n"
+                            f"Timestamp: *{suggestion['Timestamp']}*\n\n"
+                        )
+
+                # Send the combined message, splitting if necessary
+                if combined_message:
+                    send_split_telegram_message(telegram_bot_token, telegram_chat_id, combined_message)
+
+            # Update session state and storage only with new data
+            new_suggestions_list = list(new_resistance_alerts.values())
+            new_call_suggestions_list = list(new_call_suggestions.values())
+            st.session_state['suggestions'].extend(new_suggestions_list)
+            st.session_state['call_suggestions'].extend(new_call_suggestions_list)
             st.session_state['scanned_stocks'] = scanned_stocks
+
+            # Update previous state for next comparison
+            st.session_state['previous_suggestions'] = st.session_state['suggestions'].copy()
+            st.session_state['previous_call_suggestions'] = st.session_state['call_suggestions'].copy()
 
             save_alerts_data(st.session_state['suggestions'])
             save_call_suggestions(st.session_state['call_suggestions'])
             st.session_state['last_scan_time'] = time.time()
             st.session_state['scan_in_progress'] = False
 
+            # Update scanned data logic (unchanged)
             scanned_data = []
             volume_threshold = 100000
             for ticker in tickers_to_scan:
@@ -935,6 +1014,7 @@ def main():
             
             if st.button("Clear Alerts"):
                 st.session_state['suggestions'] = []
+                st.session_state['previous_suggestions'] = []
                 save_alerts_data(st.session_state['suggestions'])
 
         if st.session_state['call_suggestions']:
@@ -955,6 +1035,7 @@ def main():
             
             if st.button("Clear Call Suggestions"):
                 st.session_state['call_suggestions'] = []
+                st.session_state['previous_call_suggestions'] = []
                 save_call_suggestions(st.session_state['call_suggestions'])
 
     # Support & Resistance Table Tab

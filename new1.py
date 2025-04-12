@@ -43,7 +43,7 @@ if response.status_code != 200:
 
 print("Visiting derivatives page...")
 scraper.get("https://www.nseindia.com/market-data/equity-derivatives-watch", headers=headers)
-time.sleep(10)
+time.sleep(5)
 
 # Cache for performance
 cache = {}

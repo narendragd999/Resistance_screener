@@ -1,1 +1,44 @@
-[]
+[
+    {
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Resistance": 4900.0,
+        "Distance_to_Resistance": 15.0,
+        "Timestamp": "2025-04-12 18:35:14"
+    },
+    {
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Resistance": 690.0,
+        "Distance_to_Resistance": 3.2999999999999545,
+        "Timestamp": "2025-04-12 18:35:23"
+    },
+    {
+        "Ticker": "NESTLEIND",
+        "Underlying": 2355,
+        "Resistance": 2366.6666666666665,
+        "Distance_to_Resistance": 11.666666666666515,
+        "Timestamp": "2025-04-12 18:35:15"
+    },
+    {
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Resistance": 3633.3333333333335,
+        "Distance_to_Resistance": 14.383333333333667,
+        "Timestamp": "2025-04-12 18:35:20"
+    },
+    {
+        "Ticker": "POWERGRID",
+        "Underlying": 303.95,
+        "Resistance": 305.0,
+        "Distance_to_Resistance": 1.0500000000000114,
+        "Timestamp": "2025-04-12 18:35:27"
+    },
+    {
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Resistance": 1566.6666666666667,
+        "Distance_to_Resistance": 6.6666666666667425,
+        "Timestamp": "2025-04-12 18:35:24"
+    }
+]
