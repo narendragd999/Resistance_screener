@@ -341,7 +341,7 @@ def save_historical_options_data(ticker: str, data: Dict, expiry: str):
         df = pd.DataFrame(historical_data)
     
     df.to_csv(historical_file, index=False, compression='gzip')
-    print(f"Saved historical data for {ticker} at {timestamp}")
+    #print(f"Saved historical data for {ticker} at {timestamp}")
 
 # Process Option Data
 def process_option_data(data: Dict, expiry: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
