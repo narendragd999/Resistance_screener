@@ -6,7 +6,8 @@
         "Call_Last_Price": 29.05,
         "Potential_Gain_%": 912.2203098106713,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-12 18:35:14"
+        "Timestamp": "2025-04-13 16:38:37",
+        "Call_Volume_Spike": false
     },
     {
         "Ticker": "JUBLFOOD",
@@ -15,7 +16,8 @@
         "Call_Last_Price": 5.2,
         "Potential_Gain_%": 832.6923076923068,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-12 18:35:23"
+        "Timestamp": "2025-04-13 16:38:57",
+        "Call_Volume_Spike": false
     },
     {
         "Ticker": "NESTLEIND",
@@ -24,7 +26,8 @@
         "Call_Last_Price": 9.15,
         "Potential_Gain_%": 1366.120218579235,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-12 18:35:15"
+        "Timestamp": "2025-04-13 16:38:43",
+        "Call_Volume_Spike": false
     },
     {
         "Ticker": "PIIND",
@@ -33,7 +36,8 @@
         "Call_Last_Price": 44.85,
         "Potential_Gain_%": 403.6789297658867,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-12 18:35:20"
+        "Timestamp": "2025-04-13 16:38:51",
+        "Call_Volume_Spike": false
     },
     {
         "Ticker": "POWERGRID",
@@ -42,7 +46,8 @@
         "Call_Last_Price": 1.2,
         "Potential_Gain_%": 1337.5000000000011,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-12 18:35:27"
+        "Timestamp": "2025-04-13 16:39:03",
+        "Call_Volume_Spike": false
     },
     {
         "Ticker": "TORNTPOWER",
@@ -51,6 +56,427 @@
         "Call_Last_Price": 21.0,
         "Potential_Gain_%": 380.9523809523809,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-12 18:35:24"
+        "Timestamp": "2025-04-13 16:38:54",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Suggested_Call_Strike": 5150.0,
+        "Call_Last_Price": 29.05,
+        "Potential_Gain_%": 912.2203098106713,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:47:14",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Suggested_Call_Strike": 730.0,
+        "Call_Last_Price": 5.2,
+        "Potential_Gain_%": 832.6923076923068,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:47:34",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "NESTLEIND",
+        "Underlying": 2355,
+        "Suggested_Call_Strike": 2480.0,
+        "Call_Last_Price": 9.15,
+        "Potential_Gain_%": 1366.120218579235,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:47:17",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Suggested_Call_Strike": 3800.0,
+        "Call_Last_Price": 44.85,
+        "Potential_Gain_%": 403.6789297658867,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:47:25",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "POWERGRID",
+        "Underlying": 303.95,
+        "Suggested_Call_Strike": 320.0,
+        "Call_Last_Price": 1.2,
+        "Potential_Gain_%": 1337.5000000000011,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:47:36",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Suggested_Call_Strike": 1640.0,
+        "Call_Last_Price": 21.0,
+        "Potential_Gain_%": 380.9523809523809,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:47:35",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Suggested_Call_Strike": 5150.0,
+        "Call_Last_Price": 29.05,
+        "Potential_Gain_%": 912.2203098106713,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:54:01",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Suggested_Call_Strike": 730.0,
+        "Call_Last_Price": 5.2,
+        "Potential_Gain_%": 832.6923076923068,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:54:23",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "NESTLEIND",
+        "Underlying": 2355,
+        "Suggested_Call_Strike": 2480.0,
+        "Call_Last_Price": 9.15,
+        "Potential_Gain_%": 1366.120218579235,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:54:06",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Suggested_Call_Strike": 3800.0,
+        "Call_Last_Price": 44.85,
+        "Potential_Gain_%": 403.6789297658867,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:54:15",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "POWERGRID",
+        "Underlying": 303.95,
+        "Suggested_Call_Strike": 320.0,
+        "Call_Last_Price": 1.2,
+        "Potential_Gain_%": 1337.5000000000011,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:54:27",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Suggested_Call_Strike": 1640.0,
+        "Call_Last_Price": 21.0,
+        "Potential_Gain_%": 380.9523809523809,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:54:25",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Suggested_Call_Strike": 5150.0,
+        "Call_Last_Price": 29.05,
+        "Potential_Gain_%": 912.2203098106713,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:58:32",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Suggested_Call_Strike": 730.0,
+        "Call_Last_Price": 5.2,
+        "Potential_Gain_%": 832.6923076923068,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:58:53",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "NESTLEIND",
+        "Underlying": 2355,
+        "Suggested_Call_Strike": 2480.0,
+        "Call_Last_Price": 9.15,
+        "Potential_Gain_%": 1366.120218579235,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:58:36",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Suggested_Call_Strike": 3800.0,
+        "Call_Last_Price": 44.85,
+        "Potential_Gain_%": 403.6789297658867,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:58:44",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "POWERGRID",
+        "Underlying": 303.95,
+        "Suggested_Call_Strike": 320.0,
+        "Call_Last_Price": 1.2,
+        "Potential_Gain_%": 1337.5000000000011,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:58:56",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Suggested_Call_Strike": 1640.0,
+        "Call_Last_Price": 21.0,
+        "Potential_Gain_%": 380.9523809523809,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 16:58:56",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Suggested_Call_Strike": 5150.0,
+        "Call_Last_Price": 29.05,
+        "Potential_Gain_%": 912.2203098106713,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:03:32",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Suggested_Call_Strike": 730.0,
+        "Call_Last_Price": 5.2,
+        "Potential_Gain_%": 832.6923076923068,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:03:53",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "NESTLEIND",
+        "Underlying": 2355,
+        "Suggested_Call_Strike": 2480.0,
+        "Call_Last_Price": 9.15,
+        "Potential_Gain_%": 1366.120218579235,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:03:39",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Suggested_Call_Strike": 3800.0,
+        "Call_Last_Price": 44.85,
+        "Potential_Gain_%": 403.6789297658867,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:03:47",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "POWERGRID",
+        "Underlying": 303.95,
+        "Suggested_Call_Strike": 320.0,
+        "Call_Last_Price": 1.2,
+        "Potential_Gain_%": 1337.5000000000011,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:03:59",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Suggested_Call_Strike": 1640.0,
+        "Call_Last_Price": 21.0,
+        "Potential_Gain_%": 380.9523809523809,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:03:53",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Suggested_Call_Strike": 5150.0,
+        "Call_Last_Price": 29.05,
+        "Potential_Gain_%": 912.2203098106713,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:11:19",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Suggested_Call_Strike": 730.0,
+        "Call_Last_Price": 5.2,
+        "Potential_Gain_%": 832.6923076923068,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:11:34",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "NESTLEIND",
+        "Underlying": 2355,
+        "Suggested_Call_Strike": 2480.0,
+        "Call_Last_Price": 9.15,
+        "Potential_Gain_%": 1366.120218579235,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:11:22",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Suggested_Call_Strike": 3800.0,
+        "Call_Last_Price": 44.85,
+        "Potential_Gain_%": 403.6789297658867,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:11:30",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "POWERGRID",
+        "Underlying": 303.95,
+        "Suggested_Call_Strike": 320.0,
+        "Call_Last_Price": 1.2,
+        "Potential_Gain_%": 1337.5000000000011,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:11:41",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Suggested_Call_Strike": 1640.0,
+        "Call_Last_Price": 21.0,
+        "Potential_Gain_%": 380.9523809523809,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-13 17:11:38",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Suggested_Call_Strike": 5150.0,
+        "Call_Last_Price": 29.05,
+        "Potential_Gain_%": 912.2203098106713,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:32:10",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Suggested_Call_Strike": 730.0,
+        "Call_Last_Price": 5.2,
+        "Potential_Gain_%": 832.6923076923068,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:32:21",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "NESTLEIND",
+        "Underlying": 2355,
+        "Suggested_Call_Strike": 2480.0,
+        "Call_Last_Price": 9.15,
+        "Potential_Gain_%": 1366.120218579235,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:32:15",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Suggested_Call_Strike": 3800.0,
+        "Call_Last_Price": 44.85,
+        "Potential_Gain_%": 403.6789297658867,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:32:20",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "POWERGRID",
+        "Underlying": 303.95,
+        "Suggested_Call_Strike": 320.0,
+        "Call_Last_Price": 1.2,
+        "Potential_Gain_%": 1337.5000000000011,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:32:25",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Suggested_Call_Strike": 1640.0,
+        "Call_Last_Price": 21.0,
+        "Potential_Gain_%": 380.9523809523809,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:32:27",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "ALKEM",
+        "Underlying": 4885,
+        "Suggested_Call_Strike": 5150.0,
+        "Call_Last_Price": 29.05,
+        "Potential_Gain_%": 912.2203098106713,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:52:22",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "JUBLFOOD",
+        "Underlying": 686.7,
+        "Suggested_Call_Strike": 730.0,
+        "Call_Last_Price": 5.2,
+        "Potential_Gain_%": 832.6923076923068,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:52:28",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "NESTLEIND",
+        "Underlying": 2355,
+        "Suggested_Call_Strike": 2480.0,
+        "Call_Last_Price": 9.15,
+        "Potential_Gain_%": 1366.120218579235,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:52:24",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "PIIND",
+        "Underlying": 3618.95,
+        "Suggested_Call_Strike": 3800.0,
+        "Call_Last_Price": 44.85,
+        "Potential_Gain_%": 403.6789297658867,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:52:27",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "POWERGRID",
+        "Underlying": 303.95,
+        "Suggested_Call_Strike": 320.0,
+        "Call_Last_Price": 1.2,
+        "Potential_Gain_%": 1337.5000000000011,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:52:31",
+        "Call_Volume_Spike": false
+    },
+    {
+        "Ticker": "TORNTPOWER",
+        "Underlying": 1560,
+        "Suggested_Call_Strike": 1640.0,
+        "Call_Last_Price": 21.0,
+        "Potential_Gain_%": 380.9523809523809,
+        "Expiry": "24-Apr-2025",
+        "Timestamp": "2025-04-15 08:52:29",
+        "Call_Volume_Spike": false
     }
 ]
