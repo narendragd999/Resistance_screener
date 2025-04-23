@@ -1,82 +1,38 @@
 [
     {
-        "Ticker": "ALKEM",
-        "Underlying": 4900,
-        "Suggested_Call_Strike": 5150.0,
-        "Call_Last_Price": 29.05,
-        "Potential_Gain_%": 860.5851979345955,
-        "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-15 09:10:00",
-        "Call_Volume_Spike": false
-    },
-    {
         "Ticker": "COLPAL",
-        "Underlying": 2540,
-        "Suggested_Call_Strike": 2680.0,
-        "Call_Last_Price": 6.9,
-        "Potential_Gain_%": 2028.9855072463765,
+        "Underlying": 2659.8,
+        "Suggested_Call_Strike": 2800.0,
+        "Call_Last_Price": 2.4,
+        "Potential_Gain_%": 5841.66666666666,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-15 09:09:59",
-        "Call_Volume_Spike": false
+        "Timestamp": "2025-04-22 15:08:42"
     },
     {
-        "Ticker": "GMRAIRPORT",
-        "Underlying": 87,
-        "Suggested_Call_Strike": 92.0,
-        "Call_Last_Price": 0.55,
-        "Potential_Gain_%": 909.090909090909,
+        "Ticker": "JIOFIN",
+        "Underlying": 250.59,
+        "Suggested_Call_Strike": 265.0,
+        "Call_Last_Price": 0.2,
+        "Potential_Gain_%": 7204.999999999998,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-15 09:10:14",
-        "Call_Volume_Spike": false
+        "Timestamp": "2025-04-22 15:08:48"
     },
     {
-        "Ticker": "MRF",
-        "Underlying": 119900,
-        "Suggested_Call_Strike": 126000.0,
-        "Call_Last_Price": 375.1,
-        "Potential_Gain_%": 1626.2330045321246,
+        "Ticker": "LAURUSLABS",
+        "Underlying": 651.8,
+        "Suggested_Call_Strike": 690.0,
+        "Call_Last_Price": 0.7,
+        "Potential_Gain_%": 5457.142857142864,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-15 09:10:22",
-        "Call_Volume_Spike": false
+        "Timestamp": "2025-04-22 15:08:53"
     },
     {
-        "Ticker": "MARUTI",
-        "Underlying": 11790,
-        "Suggested_Call_Strike": 12400.0,
-        "Call_Last_Price": 18.0,
-        "Potential_Gain_%": 3388.8888888888887,
+        "Ticker": "TIINDIA",
+        "Underlying": 2650.9,
+        "Suggested_Call_Strike": 2800.0,
+        "Call_Last_Price": 3.8,
+        "Potential_Gain_%": 3923.6842105263136,
         "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-15 09:09:57",
-        "Call_Volume_Spike": false
-    },
-    {
-        "Ticker": "MFSL",
-        "Underlying": 1180,
-        "Suggested_Call_Strike": 1240.0,
-        "Call_Last_Price": 6.4,
-        "Potential_Gain_%": 937.5,
-        "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-15 09:09:58",
-        "Call_Volume_Spike": false
-    },
-    {
-        "Ticker": "SHREECEM",
-        "Underlying": 31000,
-        "Suggested_Call_Strike": 32750.0,
-        "Call_Last_Price": 92.55,
-        "Potential_Gain_%": 1890.86980010805,
-        "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-15 09:10:25",
-        "Call_Volume_Spike": false
-    },
-    {
-        "Ticker": "ULTRACEMCO",
-        "Underlying": 11749,
-        "Suggested_Call_Strike": 12400.0,
-        "Call_Last_Price": 21.7,
-        "Potential_Gain_%": 3000.0,
-        "Expiry": "24-Apr-2025",
-        "Timestamp": "2025-04-15 09:10:21",
-        "Call_Volume_Spike": false
+        "Timestamp": "2025-04-22 15:08:54"
     }
 ]

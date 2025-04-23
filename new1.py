@@ -993,7 +993,7 @@ def main():
             data = fetch_options_data(ticker, refresh_key, expiry)  # Fixed typo: Refreshresh_key -> refresh_key
             if data:
                 print(f"Polled data for {ticker} at {time.strftime('%Y-%m-%d %H:%M:%S')}")
-            time.sleep(5)  # Delay to avoid rate limits
+            time.sleep(1)  # Delay to avoid rate limits
 
     current_time = time.time()
     if is_market_open() and current_time - st.session_state['last_poll_time'] >= 300:
