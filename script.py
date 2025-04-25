@@ -12,8 +12,6 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, date
 import yfinance as yf
 import numpy as np
-import gzip
-import shutil
 
 # Create a cloudscraper session
 scraper = cloudscraper.create_scraper()
@@ -140,16 +138,6 @@ def save_previous_call_suggestions(data: List[Dict]):
     with open("previous_call_suggestions.json", 'w') as f:
         json.dump(data, f, indent=4)
 
-def archive_old_data(ticker: str, days_old: int = 30):
-    folder_path = "historical_call_volume"
-    file = os.path.join(folder_path, f"historical_call_volume_{ticker}.csv")
-    if os.path.exists(file):
-        df = pd.read_csv(file)
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-        cutoff = datetime.now() - pd.Timedelta(days=days_old)
-        df = df[df['Timestamp'] > cutoff]
-        df.to_csv(file, index=False)
-
 # Telegram Integration
 async def send_telegram_message(bot_token: str, chat_id: str, message: str):
     if not bot_token or not chat_id:
@@ -185,163 +173,75 @@ def send_split_telegram_message(bot_token: str, chat_id: str, message: str):
         asyncio.run(send_telegram_message(bot_token, chat_id, chunk))
         asyncio.sleep(0.5)  # Small delay to ensure order
 
+# Fetch Intraday Data for Opening and Pullback Analysis
+def get_intraday_data(ticker: str, target_date: date) -> Optional[pd.DataFrame]:
+    try:
+        stock = yf.Ticker(ticker + ".NS")
+        start_time = pd.Timestamp(target_date)
+        end_time = start_time + pd.Timedelta(days=1)
+        intraday_data = stock.history(period="1d", interval="5m", start=start_time, end=end_time)
+        if not intraday_data.empty:
+            return intraday_data
+        return None
+    except Exception as e:
+        print(f"Error fetching intraday data for {ticker}: {e}")
+        return None
+
+# Check Opening Price and Pullback
+def check_opening_pullback(ticker: str, target_date: date, resistance_price: float) -> Tuple[bool, Optional[float], Optional[float]]:
+    intraday_data = get_intraday_data(ticker, target_date)
+    if intraday_data is None or intraday_data.empty:
+        return False, None, None
+
+    # Get the opening price (first data point)
+    opening_price = intraday_data['Open'].iloc[0]
+    # Check if subsequent prices fall below resistance
+    subsequent_data = intraday_data.iloc[1:]  # Skip the first data point
+    pullback_occurred = False
+
+    if opening_price >= resistance_price:
+        # Check if any close or low price after opening falls below resistance
+        for _, row in subsequent_data.iterrows():
+            if row['Close'] < resistance_price or row['Low'] < resistance_price:
+                pullback_occurred = True
+                break
+
+    return pullback_occurred, opening_price, intraday_data['Close'].iloc[-1] if not intraday_data.empty else None
+
 # Fetch Options Data with Last Price as Underlying
-def fetch_options_data(symbol: str, refresh_key: float, expiry: str = None) -> Optional[Dict]:
+def fetch_options_data(symbol: str, refresh_key: float) -> Optional[Dict]:
     global api_call_counter
-    api_call_counter += 1
+    api_call_counter += 1  # Increment the counter for each API call
     
     cache_key = f"{symbol}_{refresh_key}"
-    if cache_key in cache and (time.time() - cache.get(f"{cache_key}_timestamp", 0)) < 60:
+    if cache_key in cache and (time.time() - cache.get(f"{cache_key}_timestamp", 0)) < 60:  # Cache for 1 minute
         return cache[cache_key]
 
     url = f"{BASE_URL}/api/option-chain-equities?symbol={symbol}"
     quote_url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
     print(f"Fetching data for API {api_call_counter}--{symbol}")
     
-    max_retries = 3
-    retry_delay = 600
+    response = scraper.get(url, headers=headers)
+    if response.status_code != 200:
+        print(f"Failed to load options chain for {symbol}: {response.status_code}")
+        return None
     
-    for attempt in range(max_retries):
-        try:
-            response = scraper.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                quote_response = scraper.get(quote_url, headers=headers, timeout=10)
-                if quote_response.status_code == 200:
-                    quote_data = quote_response.json()
-                    last_price = quote_data.get('priceInfo', {}).get('lastPrice', 0)
-                    if last_price > 0 and 'records' in data:
-                        data['records']['underlyingValue'] = last_price
-                if expiry:
-                    save_historical_options_data(symbol, data, expiry)
-                cache[cache_key] = data
-                cache[f"{cache_key}_timestamp"] = time.time()
-                return data
-            elif response.status_code == 429 or "Access Restricted" in response.text:
-                print(f"Rate limit exceeded for {symbol}. Waiting {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                continue
-            else:
-                print(f"Failed to load options chain for {symbol}: {response.status_code}")
-                return None
-        except requests.RequestException as e:
-            print(f"Request error for {symbol}: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                continue
-            return None
+    data = response.json()
     
-    print(f"Max retries reached for {symbol}. Skipping.")
-    return None
-
-def detect_call_volume_spike(ticker: str, current_call_volume: float, lookback_period: int = 12) -> bool:
-    """
-    Detect significant call volume increase using z-score or percentage change.
-    Uses thresholds from st.session_state.
-    """
-    volume_file = os.path.join("historical_call_volume", f"historical_call_volume_{ticker}.csv.gz")
-    if not os.path.exists(volume_file):
-        return False
-    
-    try:
-        df = pd.read_csv(volume_file, compression='gzip')
-    except Exception as e:
-        print(f"Error reading volume file for {ticker}: {e}")
-        return False
-    
-    if len(df) < lookback_period:
-        return False
-    
-    recent_volumes = df['Call_Volume'].tail(lookback_period).astype(float)
-    mean_volume = recent_volumes.mean()
-    std_volume = recent_volumes.std()
-    z_score_threshold = st.session_state.get('z_score_threshold', 2.0)  # Default 2.0
-    percent_change_threshold = st.session_state.get('percent_change_threshold', 200)  # Default 200
-    
-    if std_volume == 0:
-        return False
-    z_score = (current_call_volume - mean_volume) / std_volume
-    
-    last_volume = recent_volumes.iloc[-2] if len(recent_volumes) > 1 else mean_volume
-    percent_change = ((current_call_volume - last_volume) / last_volume * 100) if last_volume > 0 else 0
-    
-    return z_score > z_score_threshold or percent_change > percent_change_threshold
-
-def save_historical_options_data(ticker: str, data: Dict, expiry: str):
-    if not data or 'records' not in data or 'data' not in data['records']:
-        print(f"No valid data to save for {ticker}")
-        return
-    
-    timestamp = time.strftime("%Y-%m-%d %H:%M:00")  # Align to 5-minute intervals
-    call_df, put_df = process_option_data(data, expiry)
-    underlying = data['records'].get('underlyingValue', 0)
-    
-    # Aggregate call volume
-    call_volume = call_df['Volume'].sum() if not call_df.empty else 0
-    
-    # Store ticker-level call volume data
-    volume_data = [{
-        "Ticker": ticker,
-        "Timestamp": timestamp,
-        "Call_Volume": call_volume,
-        "Underlying": underlying
-    }]
-    
-    # Create historical_call_volume folder if it doesn't exist
-    folder_path = "historical_call_volume"
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    
-    volume_file = os.path.join(folder_path, f"historical_call_volume_{ticker}.csv.gz")
-    if os.path.exists(volume_file):
-        df = pd.read_csv(volume_file, compression='gzip')
-        df = df[df['Timestamp'] != timestamp]  # Avoid duplicates
-        df = pd.concat([df, pd.DataFrame(volume_data)], ignore_index=True)
+    quote_response = scraper.get(quote_url, headers=headers)
+    if quote_response.status_code == 200:
+        quote_data = quote_response.json()
+        last_price = quote_data.get('priceInfo', {}).get('lastPrice', 0)
+        if last_price > 0 and 'records' in data:
+            data['records']['underlyingValue'] = last_price
+        else:
+            print(f"No valid last price found for {symbol}, using default underlying.")
     else:
-        df = pd.DataFrame(volume_data)
+        print(f"Failed to load quote data for {symbol}: {quote_response.status_code}")
     
-    df.to_csv(volume_file, index=False, compression='gzip')
-    
-    # Store detailed options data
-    historical_data = []
-    for _, call_row in call_df.iterrows():
-        strike = call_row['Strike']
-        historical_data.append({
-            "Ticker": ticker,
-            "Timestamp": timestamp,
-            "Expiry": expiry,
-            "Strike": strike,
-            "Type": "Call",
-            "Last_Price": call_row['Last Price'],
-            "OI": call_row['OI'],
-            "Volume": call_row['Volume'],
-            "Underlying": underlying
-        })
-    
-    for _, put_row in put_df.iterrows():
-        strike = put_row['Strike']
-        historical_data.append({
-            "Ticker": ticker,
-            "Timestamp": timestamp,
-            "Expiry": expiry,
-            "Strike": strike,
-            "Type": "Put",
-            "Last_Price": 0,
-            "OI": put_row['OI'],
-            "Volume": put_row['Volume'],
-            "Underlying": underlying
-        })
-    
-    historical_file = os.path.join(folder_path, f"historical_options_{ticker}.csv.gz")
-    if os.path.exists(historical_file):
-        df = pd.read_csv(historical_file, compression='gzip')
-        df = df[df['Timestamp'] != timestamp]
-        df = pd.concat([df, pd.DataFrame(historical_data)], ignore_index=True)
-    else:
-        df = pd.DataFrame(historical_data)
-    
-    df.to_csv(historical_file, index=False, compression='gzip')
-    #print(f"Saved historical data for {ticker} at {timestamp}")
+    cache[cache_key] = data
+    cache[f"{cache_key}_timestamp"] = time.time()
+    return data
 
 # Process Option Data
 def process_option_data(data: Dict, expiry: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -375,15 +275,15 @@ def process_option_data(data: Dict, expiry: str) -> Tuple[pd.DataFrame, pd.DataF
     return call_df, put_df
 
 # Process Ticker Group for Parallel Execution
-# Ensure process_ticker_group only returns data, no notifications
-def process_ticker_group(ticker_group: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, refresh_key: float) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+def process_ticker_group(ticker_group: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, refresh_key: float, target_date: date) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     suggestions = []
     call_suggestions = []
     scanned_stocks = []
+
     volume_threshold = 100000
 
     for ticker in ticker_group:
-        data = fetch_options_data(ticker, refresh_key, expiry)
+        data = fetch_options_data(ticker, refresh_key)
         if not data or 'records' not in data:
             print(f"Failed to fetch data for {ticker}")
             continue
@@ -392,25 +292,16 @@ def process_ticker_group(ticker_group: List[str], expiry: str, bot_token: str, c
         underlying = data['records'].get('underlyingValue', 0)
         support_strike, resistance_strike = identify_support_resistance(call_df, put_df)
 
+        # Check opening price and pullback
+        pullback_occurred, opening_price, close_price = check_opening_pullback(ticker, target_date, resistance_strike if resistance_strike else 0)
+        touched_resistance_then_pullback = "Yes" if pullback_occurred else "No"
+
         total_volume = call_df['Volume'].sum() + put_df['Volume'].sum()
-        call_volume = call_df['Volume'].sum() if not call_df.empty else 0
         high_volume_gainer = "Yes" if total_volume > volume_threshold else "No"
-        call_volume_spike = detect_call_volume_spike(ticker, call_volume)
         distance_from_resistance = resistance_strike - underlying if resistance_strike else None
         distance_from_support = underlying - support_strike if support_strike else None
         distance_percent_from_resistance = (distance_from_resistance / resistance_strike * 100) if resistance_strike and distance_from_resistance is not None else None
         distance_percent_from_support = (distance_from_support / support_strike * 100) if support_strike and distance_from_support is not None else None
-
-        is_near_resistance = False
-        proximity_threshold = abs(proximity_percent) / 100.0
-        distance_to_resistance = None
-        if resistance_strike:
-            if proximity_percent >= 0:
-                distance_to_resistance = resistance_strike - underlying
-                is_near_resistance = 0 <= distance_to_resistance <= (resistance_strike * proximity_threshold)
-            else:
-                distance_to_resistance = underlying - resistance_strike
-                is_near_resistance = distance_to_resistance > 0 and distance_to_resistance <= (resistance_strike * abs(proximity_threshold))
 
         scanned_stocks.append({
             "Ticker": ticker,
@@ -422,44 +313,64 @@ def process_ticker_group(ticker_group: List[str], expiry: str, bot_token: str, c
             "Distance_%_from_Resistance": distance_percent_from_resistance,
             "Distance_%_from_Support": distance_percent_from_support,
             "High_Volume_Gainer": high_volume_gainer,
-            "Call_Volume_Spike": "Yes" if call_volume_spike else "No",
-            "Call_Volume": call_volume,
+            "Touched_Resistance_Then_Pullback": touched_resistance_then_pullback,
             "Last_Scanned": time.strftime("%Y-%m-%d %H:%M:%S")
         })
 
         if resistance_strike is None:
             continue
 
-        # Trigger alerts for proximity to resistance, regardless of volume spike
-        if is_near_resistance:
-            if proximity_percent >= 0:
+        proximity_threshold = abs(proximity_percent) / 100.0
+
+        # Standard proximity alert
+        if proximity_percent >= 0:
+            distance_to_resistance = resistance_strike - underlying
+            if 0 <= distance_to_resistance <= (resistance_strike * proximity_threshold):
                 suggestions.append({
                     "Ticker": ticker,
                     "Underlying": underlying,
                     "Resistance": resistance_strike,
                     "Distance_to_Resistance": distance_to_resistance,
-                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "Call_Volume_Spike": call_volume_spike
+                    "Touched_Resistance_Then_Pullback": touched_resistance_then_pullback,
+                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                 })
-            else:
+        else:
+            distance_to_resistance = underlying - resistance_strike
+            if distance_to_resistance > 0 and distance_to_resistance <= (resistance_strike * abs(proximity_threshold)):
                 suggestions.append({
                     "Ticker": ticker,
                     "Underlying": underlying,
                     "Resistance": resistance_strike,
                     "Distance_to_Resistance": -distance_to_resistance,
-                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "Call_Volume_Spike": call_volume_spike
+                    "Touched_Resistance_Then_Pullback": touched_resistance_then_pullback,
+                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                 })
 
+        # Add pullback-specific alert
+        if pullback_occurred:
+            suggestions.append({
+                "Ticker": ticker,
+                "Underlying": underlying,
+                "Resistance": resistance_strike,
+                "Opening_Price": opening_price,
+                "Close_Price": close_price,
+                "Distance_to_Resistance": resistance_strike - close_price if close_price else None,
+                "Touched_Resistance_Then_Pullback": "Yes",
+                "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+        if (proximity_percent >= 0 and 0 <= (resistance_strike - underlying) <= (resistance_strike * proximity_threshold)) or \
+           (proximity_percent < 0 and (underlying - resistance_strike) > 0 and (underlying - resistance_strike) <= (resistance_strike * abs(proximity_threshold))) or \
+           pullback_occurred:
             call_suggestion = suggest_call_options(data, expiry, underlying, ticker)
             if call_suggestion and call_suggestion['Potential_Gain_%'] > 0:
-                call_suggestion['Call_Volume_Spike'] = call_volume_spike
+                call_suggestion['Touched_Resistance_Then_Pullback'] = touched_resistance_then_pullback
                 call_suggestions.append(call_suggestion)
 
     return suggestions, call_suggestions, scanned_stocks
 
-# Ensure perform_parallel_scan does not send notifications
-def perform_parallel_scan(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, refresh_key: float) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+# Perform Parallel Scan
+def perform_parallel_scan(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, refresh_key: float, target_date: date) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     num_groups = 5
     group_size = max(1, len(tickers) // num_groups)
     ticker_groups = [tickers[i:i + group_size] for i in range(0, len(tickers), group_size)]
@@ -469,7 +380,7 @@ def perform_parallel_scan(tickers: List[str], expiry: str, bot_token: str, chat_
     all_scanned_stocks = []
 
     with ThreadPoolExecutor(max_workers=num_groups) as executor:
-        future_to_group = {executor.submit(process_ticker_group, group, expiry, bot_token, chat_id, proximity_percent, refresh_key): group for group in ticker_groups}
+        future_to_group = {executor.submit(process_ticker_group, group, expiry, bot_token, chat_id, proximity_percent, refresh_key, target_date): group for group in ticker_groups}
 
         for future in future_to_group:
             try:
@@ -552,7 +463,7 @@ def load_tickers() -> List[str]:
         return ["HDFCBANK"]
 
 # Check Resistance and Send Notification with Call Suggestions
-def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float):
+def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, target_date: date):
     refresh_key = time.time()
     suggestions = []
     call_suggestions = []
@@ -571,8 +482,12 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
             if resistance_strike is None:
                 continue
             
+            # Check opening price and pullback
+            pullback_occurred, opening_price, close_price = check_opening_pullback(ticker, target_date, resistance_strike)
+            
             proximity_threshold = abs(proximity_percent) / 100.0
             
+            # Standard proximity alert
             if proximity_percent >= 0:
                 distance_to_resistance = resistance_strike - underlying
                 if 0 <= distance_to_resistance <= (resistance_strike * proximity_threshold):
@@ -590,6 +505,7 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                         "Underlying": underlying,
                         "Resistance": resistance_strike,
                         "Distance_to_Resistance": distance_to_resistance,
+                        "Touched_Resistance_Then_Pullback": "Yes" if pullback_occurred else "No",
                         "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                     })
             else:
@@ -609,13 +525,38 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                         "Underlying": underlying,
                         "Resistance": resistance_strike,
                         "Distance_to_Resistance": -distance_to_resistance,
+                        "Touched_Resistance_Then_Pullback": "Yes" if pullback_occurred else "No",
                         "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                     })
 
+            # Pullback-specific alert
+            if pullback_occurred:
+                message = (
+                    f"*Opening Resistance Touch & Pullback Alert*\n"
+                    f"Stock: *{ticker}*\n"
+                    f"Opening Price: *₹{opening_price:.2f}*\n"
+                    f"Close Price: *₹{close_price:.2f}*\n"
+                    f"Resistance: *₹{resistance_strike:.2f}*\n"
+                    f"Reason: *Opened at/above resistance and pulled back below*"
+                )
+                asyncio.run(send_telegram_message(bot_token, chat_id, message))
+                suggestions.append({
+                    "Ticker": ticker,
+                    "Underlying": underlying,
+                    "Resistance": resistance_strike,
+                    "Opening_Price": opening_price,
+                    "Close_Price": close_price,
+                    "Distance_to_Resistance": resistance_strike - close_price if close_price else None,
+                    "Touched_Resistance_Then_Pullback": "Yes",
+                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                })
+
             if (proximity_percent >= 0 and 0 <= (resistance_strike - underlying) <= (resistance_strike * proximity_threshold)) or \
-               (proximity_percent < 0 and (underlying - resistance_strike) > 0 and (underlying - resistance_strike) <= (resistance_strike * abs(proximity_threshold))):
+               (proximity_percent < 0 and (underlying - resistance_strike) > 0 and (underlying - resistance_strike) <= (resistance_strike * abs(proximity_threshold))) or \
+               pullback_occurred:
                 call_suggestion = suggest_call_options(data, expiry, underlying, ticker)
                 if call_suggestion and call_suggestion['Potential_Gain_%'] > 0:
+                    call_suggestion['Touched_Resistance_Then_Pullback'] = "Yes" if pullback_occurred else "No"
                     call_message = (
                         f"*Call Option Suggestion (Most OTM)*\n"
                         f"Stock: *{ticker}*\n"
@@ -624,6 +565,7 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                         f"Call Last Price: *₹{call_suggestion['Call_Last_Price']:.2f}*\n"
                         f"Potential Gain: *{call_suggestion['Potential_Gain_%']:.2f}%*\n"
                         f"Expiry: *{expiry}*\n"
+                        f"Touched Resistance Then Pullback: *{call_suggestion['Touched_Resistance_Then_Pullback']}*\n"
                         f"Timestamp: *{call_suggestion['Timestamp']}*"
                     )
                     asyncio.run(send_telegram_message(bot_token, chat_id, call_message))
@@ -632,7 +574,7 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
     return suggestions, call_suggestions
 
 # Scan for Historical Data
-def scan_historical_data(tickers: List[str], expiry: str, proximity_percent: float) -> List[Dict]:
+def scan_historical_data(tickers: List[str], expiry: str, proximity_percent: float, target_date: date) -> List[Dict]:
     refresh_key = time.time()
     historical_data = []
     
@@ -650,18 +592,29 @@ def scan_historical_data(tickers: List[str], expiry: str, proximity_percent: flo
             if resistance_strike is None:
                 continue
             
+            # Check opening price and pullback
+            pullback_occurred, opening_price, close_price = check_opening_pullback(ticker, target_date, resistance_strike)
+            
             proximity_threshold = resistance_strike * (abs(proximity_percent) / 100)
             distance_to_resistance = resistance_strike - underlying
             
-            if 0 <= distance_to_resistance <= proximity_threshold:
-                historical_data.append({
+            if 0 <= distance_to_resistance <= proximity_threshold or pullback_occurred:
+                entry = {
                     "Ticker": ticker,
                     "Underlying": underlying,
                     "Resistance": resistance_strike,
                     "Support": support_strike,
+                    "Touched_Resistance_Then_Pullback": "Yes" if pullback_occurred else "No",
                     "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                })
-                print(f"Added {ticker} to historical data: Within {proximity_percent}% of resistance")
+                }
+                if pullback_occurred:
+                    entry.update({
+                        "Opening_Price": opening_price,
+                        "Close_Price": close_price,
+                        "Distance_to_Resistance": resistance_strike - close_price if close_price else None
+                    })
+                historical_data.append(entry)
+                print(f"Added {ticker} to historical data: Within {proximity_percent}% of resistance or touched resistance then pulled back")
     
     return historical_data
 
@@ -753,6 +706,9 @@ def check_historical_resistance(tickers: List[str], target_date: date, expiry: s
             if resistance_strike is None:
                 resistance_strike = 0.0
 
+            # Check opening price and pullback
+            pullback_occurred, opening_price, end_of_day_close = check_opening_pullback(ticker, target_date, resistance_strike)
+
             selected_date_resistance = combine_resistance_methods(ticker, target_date, high_price, low_price, close_price, hist)
 
             touched_resistance = high_price >= resistance_strike
@@ -764,20 +720,23 @@ def check_historical_resistance(tickers: List[str], target_date: date, expiry: s
             
             distance_to_resistance = resistance_strike - close_price
 
-            if touched_resistance:
-                results.append({
+            if touched_resistance or pullback_occurred:
+                entry = {
                     "Date": date_str,
                     "Time": "End of Day",
                     "Ticker": ticker,
                     "High_Price": float(high_price),
                     "Close_Price": float(close_price),
+                    "Opening_Price": float(opening_price) if opening_price else None,
                     "Resistance_Price": float(resistance_strike),
                     "Selected_Date_Resistance": float(selected_date_resistance),
                     "Distance_to_Resistance": float(distance_to_resistance),
                     "Volume": float(volume),
-                    "Touched_Resistance": "Yes",
-                    "Touched_Selected_Date_Resistance": "Yes" if touched_selected_date_resistance else "No"
-                })
+                    "Touched_Resistance": "Yes" if touched_resistance else "No",
+                    "Touched_Selected_Date_Resistance": "Yes" if touched_selected_date_resistance else "No",
+                    "Touched_Resistance_Then_Pullback": "Yes" if pullback_occurred else "No"
+                }
+                results.append(entry)
 
     save_historical_data(results)
     return results
@@ -794,7 +753,7 @@ def download_csv(data: List[Dict], filename: str):
     )
 
 # Generate Support/Resistance Table Data and Save to JSON
-def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[Dict]:
+def generate_support_resistance_table(tickers: List[str], expiry: str, target_date: date) -> List[Dict]:
     refresh_key = time.time()
     table_data = []
     volume_threshold = 100000
@@ -809,6 +768,10 @@ def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[D
             call_df, put_df = process_option_data(data, expiry)
             underlying = data['records'].get('underlyingValue', 0)
             support_strike, resistance_strike = identify_support_resistance(call_df, put_df)
+            
+            # Check opening price and pullback
+            pullback_occurred, opening_price, close_price = check_opening_pullback(ticker, target_date, resistance_strike if resistance_strike else 0)
+            touched_resistance_then_pullback = "Yes" if pullback_occurred else "No"
             
             total_volume = call_df['Volume'].sum() + put_df['Volume'].sum()
             high_volume_gainer = "Yes" if total_volume > volume_threshold else "No"
@@ -828,12 +791,12 @@ def generate_support_resistance_table(tickers: List[str], expiry: str) -> List[D
                 "Distance_%_from_Resistance": distance_percent_from_resistance,
                 "Distance_%_from_Support": distance_percent_from_support,
                 "High_Volume_Gainer": high_volume_gainer,
+                "Touched_Resistance_Then_Pullback": touched_resistance_then_pullback,
                 "Last_Updated": time.strftime("%Y-%m-%d %H:%M:%S")
             })
     
     save_table_data(table_data)
     return table_data
-
 
 # Main Application
 def main():
@@ -872,17 +835,13 @@ def main():
         st.session_state['previous_suggestions'] = []
     if 'previous_call_suggestions' not in st.session_state:
         st.session_state['previous_call_suggestions'] = []
-    if 'last_poll_time' not in st.session_state:
-        st.session_state['last_poll_time'] = 0
-    if 'z_score_threshold' not in st.session_state:
-        st.session_state['z_score_threshold'] = 2.0  # Default
-    if 'percent_change_threshold' not in st.session_state:
-        st.session_state['percent_change_threshold'] = 200  # Default
-    if 'specific_tickers' not in st.session_state:
-        st.session_state['specific_tickers'] = ""  # Initialize specific_tickers
 
     st.session_state['previous_suggestions'] = load_previous_suggestions()
     st.session_state['previous_call_suggestions'] = load_previous_call_suggestions()
+
+    # After updates, save them:
+    save_previous_suggestions(st.session_state['previous_suggestions'])
+    save_previous_call_suggestions(st.session_state['previous_call_suggestions'])
 
     # Sidebar Configuration
     with st.sidebar:
@@ -893,7 +852,7 @@ def main():
             st.session_state['telegram_config']['auto_running'] = st.session_state['auto_running']
             save_config(st.session_state['telegram_config'])
             if st.session_state['auto_running']:
-                st.session_state['last_auto_time'] = time.time()  # Fixed earlier
+                st.session_state['last_auto_time'] = time.time()
 
         status = "Running" if st.session_state['auto_running'] else "Stopped"
         st.write(f"Auto Scan (60s): {status}")
@@ -924,14 +883,6 @@ def main():
             min_value=-5.0,
             max_value=5.0,
             key="proximity_to_resistance_input"
-        )
-        z_score_threshold = st.slider(
-            "Call Volume Z-Score Threshold",
-            min_value=0.0, max_value=5.0, value=2.0, step=0.1, key="z_score_threshold"
-        )
-        percent_change_threshold = st.slider(
-            "Call Volume % Change Threshold",
-            min_value=10, max_value=500, value=200, step=10, key="percent_change_threshold"
         )
 
         st.subheader("Upload Tickers")
@@ -968,38 +919,12 @@ def main():
         if not telegram_bot_token or not telegram_chat_id:
             st.warning("Please configure Telegram Bot Token and Chat ID.")
 
-    # Rest of main() (unchanged, except polling fix below)
     # Fetch initial data to get expiry
-    data = fetch_options_data("HDFCBANK", st.session_state['refresh_key'], expiry=None)
+    data = fetch_options_data("HDFCBANK", st.session_state['refresh_key'])
     if not data or 'records' not in data:
         st.error("Failed to load initial data!")
         return
     expiry = data['records']['expiryDates'][0]
-
-    # Poll every 5 minutes during market hours
-    def is_market_open():
-        now = datetime.now().time()
-        market_open = datetime.strptime("09:15", "%H:%M").time()
-        market_close = datetime.strptime("15:30", "%H:%M").time()
-        return market_open <= now <= market_close and datetime.now().weekday() < 5
-
-    def poll_options_data(tickers: List[str], expiry: str):
-        if not is_market_open():
-            print("Market is closed. Skipping polling.")
-            return
-        
-        refresh_key = time.time()
-        for ticker in tickers:
-            data = fetch_options_data(ticker, refresh_key, expiry)  # Fixed typo: Refreshresh_key -> refresh_key
-            if data:
-                print(f"Polled data for {ticker} at {time.strftime('%Y-%m-%d %H:%M:%S')}")
-            time.sleep(1)  # Delay to avoid rate limits
-
-    current_time = time.time()
-    if is_market_open() and current_time - st.session_state['last_poll_time'] >= 300:
-        tickers = load_tickers()
-        poll_options_data(tickers, expiry)
-        st.session_state['last_poll_time'] = current_time
 
     # Define three tabs
     tabs = st.tabs(["Real-Time Resistance Alerts", "Support & Resistance Table", "Historical Scan Data"])
@@ -1022,66 +947,78 @@ def main():
                 return
 
             st.session_state['scan_in_progress'] = True
+
+            # Use today's date for real-time scanning
+            target_date = date.today()
+
+            # Fetch all data without sending notifications in perform_parallel_scan
             suggestions, call_suggestions, scanned_stocks = perform_parallel_scan(
-                tickers_to_scan, expiry, telegram_bot_token, telegram_chat_id, proximity_percent, refresh_key
+                tickers_to_scan, expiry, telegram_bot_token, telegram_chat_id, proximity_percent, refresh_key, target_date
             )
 
-            # Initialize last_alert_time if not present
-            if 'last_alert_time' not in st.session_state:
-                st.session_state['last_alert_time'] = {}
-
+            # Collect new suggestions (compare with previous to find new ones)
             new_resistance_alerts = {s['Ticker']: s for s in suggestions if s not in st.session_state['previous_suggestions']}
             new_call_suggestions = {s['Ticker']: s for s in call_suggestions if s not in st.session_state['previous_call_suggestions']}
+
+            # Get unique tickers that have either a resistance alert or call suggestion
             relevant_tickers = sorted(set(new_resistance_alerts.keys()) | set(new_call_suggestions.keys()))
 
+            # Combine and send notifications for each ticker in sorted order
             if relevant_tickers:
                 combined_message = ""
-                current_time = time.time()
                 for ticker in relevant_tickers:
-                    # Suppress alerts if notified within 30 minutes
-                    # if ticker in st.session_state['last_alert_time'] and (current_time - st.session_state['last_alert_time'][ticker] < 300):
-                    #     print(f"Suppressed alert for {ticker}: Last alerted at {st.session_state['last_alert_time'][ticker]}")
-                    #     continue
-
+                    # Add Resistance Alert if it exists
                     if ticker in new_resistance_alerts:
                         alert = new_resistance_alerts[ticker]
-                        combined_message += (
-                            f"Resistance Alert\n"
-                            f"Stock: *{alert['Ticker']}*\n"
-                            f"Underlying: *₹{alert['Underlying']:.2f}*\n"
-                            f"Resistance: *₹{alert['Resistance']:.2f}*\n"
-                            f"Distance: *{alert['Distance_to_Resistance']:.2f}*\n"
-                            f"Reason: *Within {proximity_percent}% of strong resistance*\n"
-                            f"Call Volume Spike: *{'Yes' if alert['Call_Volume_Spike'] else 'No'}*\n\n"
-                        )
+                        if alert.get('Touched_Resistance_Then_Pullback') == "Yes":
+                            combined_message += (
+                                f"*Opening Resistance Touch & Pullback Alert*\n"
+                                f"Stock: *{alert['Ticker']}*\n"
+                                f"Opening Price: *₹{alert['Opening_Price']:.2f}*\n"
+                                f"Close Price: *₹{alert['Close_Price']:.2f}*\n"
+                                f"Resistance: *₹{alert['Resistance']:.2f}*\n"
+                                f"Distance to Resistance: *{alert['Distance_to_Resistance']:.2f}*\n"
+                                f"Reason: *Opened at/above resistance and pulled back below*\n\n"
+                            )
+                        else:
+                            combined_message += (
+                                f"*Resistance Alert*\n"
+                                f"Stock: *{alert['Ticker']}*\n"
+                                f"Underlying: *₹{alert['Underlying']:.2f}*\n"
+                                f"Resistance: *₹{alert['Resistance']:.2f}*\n"
+                                f"Distance: *{alert['Distance_to_Resistance']:.2f}*\n"
+                                f"Reason: *Within {proximity_percent}% of strong resistance*\n"
+                                f"Touched Resistance Then Pullback: *{alert['Touched_Resistance_Then_Pullback']}*\n\n"
+                            )
+
+                    # Add Call Option Suggestion if it exists
                     if ticker in new_call_suggestions:
                         suggestion = new_call_suggestions[ticker]
-                        suggestion['Expiry'] = expiry
+                        suggestion['Expiry'] = expiry  # Ensure expiry is included
                         combined_message += (
-                            f"Call Option Suggestion (Most OTM)\n"
+                            f"*Call Option Suggestion (Most OTM)*\n"
                             f"Stock: *{suggestion['Ticker']}*\n"
                             f"Underlying: *₹{suggestion['Underlying']:.2f}*\n"
                             f"Suggested Call Strike: *₹{suggestion['Suggested_Call_Strike']:.2f}* (Most OTM)\n"
                             f"Call Last Price: *₹{suggestion['Call_Last_Price']:.2f}*\n"
                             f"Potential Gain: *{suggestion['Potential_Gain_%']:.2f}%*\n"
                             f"Expiry: *{suggestion['Expiry']}*\n"
-                            f"Timestamp: *{suggestion['Timestamp']}*\n"
-                            f"Call Volume Spike: *{'Yes' if suggestion['Call_Volume_Spike'] else 'No'}*\n\n"
+                            f"Touched Resistance Then Pullback: *{suggestion['Touched_Resistance_Then_Pullback']}*\n"
+                            f"Timestamp: *{suggestion['Timestamp']}*\n\n"
                         )
-                    
-                    # Update last alert time only if message was added
-                    if combined_message and (ticker in new_resistance_alerts or ticker in new_call_suggestions):
-                        st.session_state['last_alert_time'][ticker] = current_time
 
+                # Send the combined message, splitting if necessary
                 if combined_message:
                     send_split_telegram_message(telegram_bot_token, telegram_chat_id, combined_message)
 
+            # Update session state and storage only with new data
             new_suggestions_list = list(new_resistance_alerts.values())
             new_call_suggestions_list = list(new_call_suggestions.values())
             st.session_state['suggestions'].extend(new_suggestions_list)
             st.session_state['call_suggestions'].extend(new_call_suggestions_list)
             st.session_state['scanned_stocks'] = scanned_stocks
 
+            # Update previous state for next comparison
             st.session_state['previous_suggestions'] = st.session_state['suggestions'].copy()
             st.session_state['previous_call_suggestions'] = st.session_state['call_suggestions'].copy()
 
@@ -1090,9 +1027,17 @@ def main():
             st.session_state['last_scan_time'] = time.time()
             st.session_state['scan_in_progress'] = False
 
-            # Update scanned data (already handled in process_ticker_group)
+        # Automatic scanning logic (60s interval)
+        if st.session_state['auto_running']:
+            current_time = time.time()
+            if current_time - st.session_state['last_auto_time'] >= 60 and not st.session_state['scan_in_progress']:
+                tickers = load_tickers() if not specific_tickers else [t.strip() for t in specific_tickers.split(',')]
+                perform_scan(tickers, expiry, st.session_state['telegram_config']['telegram_bot_token'], 
+                            st.session_state['telegram_config']['telegram_chat_id'], 
+                            st.session_state['telegram_config']['proximity_to_resistance'],
+                            st.session_state['refresh_key'])
+                st.session_state['last_auto_time'] = current_time
 
-        # Scan buttons and UI
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Scan All Tickers") and not st.session_state['scan_in_progress']:
@@ -1116,23 +1061,6 @@ def main():
         status = "Running" if st.session_state['auto_running'] else "Stopped"
         st.write(f"Auto Scan (60s): {status}")
 
-        # Automatic scanning logic
-        if st.session_state['auto_running']:
-            current_time = time.time()
-            last_auto_time = st.session_state['last_auto_time']
-            if not isinstance(last_auto_time, (int, float)):
-                last_auto_time = current_time
-                st.session_state['last_auto_time'] = current_time
-            if current_time - last_auto_time >= 60 and not st.session_state['scan_in_progress']:
-                specific_tickers = st.session_state['specific_tickers']  # Use session state
-                tickers = load_tickers() if not specific_tickers else [t.strip() for t in specific_tickers.split(',')]
-                perform_scan(tickers, expiry, st.session_state['telegram_config']['telegram_bot_token'], 
-                            st.session_state['telegram_config']['telegram_chat_id'], 
-                            st.session_state['telegram_config']['proximity_to_resistance'],
-                            st.session_state['refresh_key'])
-                st.session_state['last_auto_time'] = current_time
-
-        # Display scanned stocks and alerts
         if st.session_state['scanned_stocks']:
             st.write("### Scanned Stocks (Sortable & Searchable)")
             search_query = st.text_input("Search Scanned Stocks by Ticker", key="scanned_search")
@@ -1153,8 +1081,7 @@ def main():
                     "Distance_%_from_Resistance": st.column_config.NumberColumn("Distance % from Resistance", format="%.2f"),
                     "Distance_%_from_Support": st.column_config.NumberColumn("Distance % from Support", format="%.2f"),
                     "High_Volume_Gainer": st.column_config.TextColumn("High Volume Gainer"),
-                    "Call_Volume_Spike": st.column_config.TextColumn("Call Volume Spike"),
-                    "Call_Volume": st.column_config.NumberColumn("Call Volume", format="%.0f"),
+                    "Touched_Resistance_Then_Pullback": st.column_config.TextColumn("Touched Resistance Then Pullback"),
                     "Last_Scanned": st.column_config.TextColumn("Last Scanned")
                 },
                 use_container_width=True,
@@ -1172,7 +1099,9 @@ def main():
             styled_df = suggestions_df.style.format({
                 'Underlying': '{:.2f}',
                 'Resistance': '{:.2f}',
-                'Distance_to_Resistance': '{:.2f}'
+                'Distance_to_Resistance': '{:.2f}',
+                'Opening_Price': '{:.2f}',
+                'Close_Price': '{:.2f}'
             })
             st.table(styled_df)
             
@@ -1207,7 +1136,7 @@ def main():
         st.subheader("Support & Resistance Levels for All Stocks")
         if st.button("Refresh Table"):
             tickers = load_tickers()
-            table_data = generate_support_resistance_table(tickers, expiry)
+            table_data = generate_support_resistance_table(tickers, expiry, date.today())
             st.session_state['table_data'] = table_data
             st.rerun()
 
@@ -1232,6 +1161,7 @@ def main():
                     "Distance_%_from_Resistance": st.column_config.NumberColumn("Distance % from Resistance", format="%.2f"),
                     "Distance_%_from_Support": st.column_config.NumberColumn("Distance % from Support", format="%.2f"),
                     "High_Volume_Gainer": st.column_config.TextColumn("High Volume Gainer"),
+                    "Touched_Resistance_Then_Pullback": st.column_config.TextColumn("Touched Resistance Then Pullback"),
                     "Last_Updated": st.column_config.TextColumn("Last Updated")
                 },
                 use_container_width=True,
@@ -1284,9 +1214,10 @@ def main():
             st.write("### Stocks that touched resistance on selected date")
             historical_df = pd.DataFrame(st.session_state['historical_data'])
             column_order = [
-                "Date", "Time", "Ticker", "High_Price", "Close_Price", 
+                "Date", "Time", "Ticker", "High_Price", "Close_Price", "Opening_Price",
                 "Resistance_Price", "Distance_to_Resistance", "Volume", "Touched_Resistance",
-                "Selected_Date_Resistance", "Touched_Selected_Date_Resistance"
+                "Selected_Date_Resistance", "Touched_Selected_Date_Resistance",
+                "Touched_Resistance_Then_Pullback"
             ]
             historical_df = historical_df[column_order]
             st.dataframe(
@@ -1297,12 +1228,14 @@ def main():
                     "Ticker": st.column_config.TextColumn("Ticker"),
                     "High_Price": st.column_config.NumberColumn("High Price", format="%.2f"),
                     "Close_Price": st.column_config.NumberColumn("Close Price", format="%.2f"),
+                    "Opening_Price": st.column_config.NumberColumn("Opening Price", format="%.2f"),
                     "Resistance_Price": st.column_config.NumberColumn("Resistance Price (Current)", format="%.2f"),
                     "Distance_to_Resistance": st.column_config.NumberColumn("Distance to Resistance (Close)", format="%.2f"),
                     "Volume": st.column_config.NumberColumn("Volume", format="%.0f"),
                     "Touched_Resistance": st.column_config.TextColumn("Touched Resistance"),
                     "Selected_Date_Resistance": st.column_config.NumberColumn("Selected Date Resistance", format="%.2f"),
-                    "Touched_Selected_Date_Resistance": st.column_config.TextColumn("Touched Selected Date Resistance")
+                    "Touched_Selected_Date_Resistance": st.column_config.TextColumn("Touched Selected Date Resistance"),
+                    "Touched_Resistance_Then_Pullback": st.column_config.TextColumn("Touched Resistance Then Pullback")
                 },
                 use_container_width=True,
                 height=400

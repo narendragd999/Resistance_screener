@@ -1,66 +1,65 @@
 [
     {
-        "Ticker": "ALKEM",
-        "Underlying": 4900,
-        "Resistance": 4900.0,
-        "Distance_to_Resistance": 0.0,
-        "Timestamp": "2025-04-15 09:10:00",
-        "Call_Volume_Spike": false
+        "Ticker": "AUBANK",
+        "Underlying": 583.5,
+        "Resistance": 583.3333333333334,
+        "Distance_to_Resistance": -0.16666666666662877,
+        "Timestamp": "2025-04-17 08:52:41"
     },
     {
-        "Ticker": "COLPAL",
-        "Underlying": 2540,
-        "Resistance": 2540.0,
-        "Distance_to_Resistance": 0.0,
-        "Timestamp": "2025-04-15 09:09:59",
-        "Call_Volume_Spike": false
+        "Ticker": "APOLLOHOSP",
+        "Underlying": 7010,
+        "Resistance": 7000.0,
+        "Distance_to_Resistance": -10.0,
+        "Timestamp": "2025-04-17 08:53:00"
     },
     {
-        "Ticker": "GMRAIRPORT",
-        "Underlying": 87,
-        "Resistance": 87.0,
-        "Distance_to_Resistance": 0.0,
-        "Timestamp": "2025-04-15 09:10:14",
-        "Call_Volume_Spike": false
+        "Ticker": "ASIANPAINT",
+        "Underlying": 2456,
+        "Resistance": 2453.3333333333335,
+        "Distance_to_Resistance": -2.666666666666515,
+        "Timestamp": "2025-04-17 08:53:02"
     },
     {
-        "Ticker": "MRF",
-        "Underlying": 119900,
-        "Resistance": 120000.0,
-        "Distance_to_Resistance": 100.0,
-        "Timestamp": "2025-04-15 09:10:22",
-        "Call_Volume_Spike": false
+        "Ticker": "ASTRAL",
+        "Underlying": 1322,
+        "Resistance": 1320.0,
+        "Distance_to_Resistance": -2.0,
+        "Timestamp": "2025-04-17 08:53:03"
     },
     {
-        "Ticker": "MARUTI",
-        "Underlying": 11790,
-        "Resistance": 11800.0,
-        "Distance_to_Resistance": 10.0,
-        "Timestamp": "2025-04-15 09:09:57",
-        "Call_Volume_Spike": false
+        "Ticker": "BHEL",
+        "Underlying": 225.25,
+        "Resistance": 225.0,
+        "Distance_to_Resistance": -0.25,
+        "Timestamp": "2025-04-17 08:53:12"
     },
     {
-        "Ticker": "MFSL",
-        "Underlying": 1180,
-        "Resistance": 1180.0,
-        "Distance_to_Resistance": 0.0,
-        "Timestamp": "2025-04-15 09:09:58",
-        "Call_Volume_Spike": false
+        "Ticker": "NESTLEIND",
+        "Underlying": 2382,
+        "Resistance": 2380.0,
+        "Distance_to_Resistance": -2.0,
+        "Timestamp": "2025-04-17 08:52:59"
     },
     {
-        "Ticker": "SHREECEM",
-        "Underlying": 31000,
-        "Resistance": 31000.0,
-        "Distance_to_Resistance": 0.0,
-        "Timestamp": "2025-04-15 09:10:25",
-        "Call_Volume_Spike": false
+        "Ticker": "POWERGRID",
+        "Underlying": 305.5,
+        "Resistance": 305.0,
+        "Distance_to_Resistance": -0.5,
+        "Timestamp": "2025-04-17 08:53:10"
     },
     {
-        "Ticker": "ULTRACEMCO",
-        "Underlying": 11749,
-        "Resistance": 11766.666666666666,
-        "Distance_to_Resistance": 17.66666666666606,
-        "Timestamp": "2025-04-15 09:10:21",
-        "Call_Volume_Spike": false
+        "Ticker": "FEDERALBNK",
+        "Underlying": 195.05,
+        "Resistance": 195.0,
+        "Distance_to_Resistance": -0.05000000000001137,
+        "Timestamp": "2025-04-17 08:53:04"
+    },
+    {
+        "Ticker": "INDHOTEL",
+        "Underlying": 840.05,
+        "Resistance": 840.0,
+        "Distance_to_Resistance": -0.049999999999954525,
+        "Timestamp": "2025-04-17 08:53:05"
     }
 ]
