@@ -1,0 +1,101 @@
+[
+    {
+        "Ticker": "ANGELONE",
+        "Today_Close": 2507.800048828125,
+        "Yesterday_Close": 2520.699951171875,
+        "Price_Drop_Percent": 0.511758741366771,
+        "Momentum_Gain_Percent": 18.317726721781902,
+        "Green_Candle_Count": 8,
+        "Momentum_Start_Date": "2025-04-07",
+        "Momentum_End_Date": "2025-04-22",
+        "Last_Scanned": "2025-04-23 17:25:34"
+    },
+    {
+        "Ticker": "APOLLOTYRE",
+        "Today_Close": 460.1499938964844,
+        "Yesterday_Close": 462.3999938964844,
+        "Price_Drop_Percent": 0.48659170192456763,
+        "Momentum_Gain_Percent": 16.3416730896012,
+        "Green_Candle_Count": 8,
+        "Momentum_Start_Date": "2025-04-07",
+        "Momentum_End_Date": "2025-04-22",
+        "Last_Scanned": "2025-04-23 17:25:36"
+    },
+    {
+        "Ticker": "AXISBANK",
+        "Today_Close": 1206.9000244140625,
+        "Yesterday_Close": 1216.800048828125,
+        "Price_Drop_Percent": 0.8136114412221637,
+        "Momentum_Gain_Percent": 15.198038136436582,
+        "Green_Candle_Count": 5,
+        "Momentum_Start_Date": "2025-04-09",
+        "Momentum_End_Date": "2025-04-21",
+        "Last_Scanned": "2025-04-23 17:25:37"
+    },
+    {
+        "Ticker": "DIXON",
+        "Today_Close": 16607.0,
+        "Yesterday_Close": 16675.0,
+        "Price_Drop_Percent": 0.4077961019490255,
+        "Momentum_Gain_Percent": 32.804506667174806,
+        "Green_Candle_Count": 8,
+        "Momentum_Start_Date": "2025-04-07",
+        "Momentum_End_Date": "2025-04-22",
+        "Last_Scanned": "2025-04-23 17:25:45"
+    },
+    {
+        "Ticker": "HUDCO",
+        "Today_Close": 231.4499969482422,
+        "Yesterday_Close": 233.11000061035156,
+        "Price_Drop_Percent": 0.7121117316987645,
+        "Momentum_Gain_Percent": 20.2986288072691,
+        "Green_Candle_Count": 7,
+        "Momentum_Start_Date": "2025-04-07",
+        "Momentum_End_Date": "2025-04-21",
+        "Last_Scanned": "2025-04-23 17:25:50"
+    },
+    {
+        "Ticker": "IREDA",
+        "Today_Close": 177.72999572753906,
+        "Yesterday_Close": 178.63999938964844,
+        "Price_Drop_Percent": 0.5094064404492528,
+        "Momentum_Gain_Percent": 16.336898212743073,
+        "Green_Candle_Count": 3,
+        "Momentum_Start_Date": "2025-04-09",
+        "Momentum_End_Date": "2025-04-16",
+        "Last_Scanned": "2025-04-23 17:25:53"
+    },
+    {
+        "Ticker": "LAURUSLABS",
+        "Today_Close": 650.7000122070312,
+        "Yesterday_Close": 651.7000122070312,
+        "Price_Drop_Percent": 0.15344483370706477,
+        "Momentum_Gain_Percent": 15.49845143234936,
+        "Green_Candle_Count": 6,
+        "Momentum_Start_Date": "2025-04-09",
+        "Momentum_End_Date": "2025-04-22",
+        "Last_Scanned": "2025-04-23 17:25:59"
+    },
+    {
+        "Ticker": "POLICYBZR",
+        "Today_Close": 1664.800048828125,
+        "Yesterday_Close": 1694.0,
+        "Price_Drop_Percent": 1.723727932224026,
+        "Momentum_Gain_Percent": 15.304766147052536,
+        "Green_Candle_Count": 6,
+        "Momentum_Start_Date": "2025-04-09",
+        "Momentum_End_Date": "2025-04-22",
+        "Last_Scanned": "2025-04-23 17:26:04"
+    },
+    {
+        "Ticker": "POONAWALLA",
+        "Today_Close": 402.70001220703125,
+        "Yesterday_Close": 407.6499938964844,
+        "Price_Drop_Percent": 1.2142724797170208,
+        "Momentum_Gain_Percent": 15.727464555424946,
+        "Green_Candle_Count": 6,
+        "Momentum_Start_Date": "2025-04-09",
+        "Momentum_End_Date": "2025-04-22",
+        "Last_Scanned": "2025-04-23 17:26:06"
+    }
+]

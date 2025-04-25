@@ -4,5 +4,8 @@
     "auto_scan_interval": 15,
     "proximity_to_resistance": -0.3,
     "price_gain_threshold": 50.0,
-    "auto_running": false
+    "auto_running": false,
+    "min_gain_percent": 15.0,
+    "min_green_candles": 3,
+    "lookback_days": 30
 }
