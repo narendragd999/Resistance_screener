@@ -199,9 +199,8 @@ def process_option_data(data: Dict, expiry: Optional[str] = None) -> tuple[pd.Da
         if expiry and expiry_date != expiry:
             continue
         call_oi = record.get('CE', {}).get('openInterest', 0)
-        call_price = record.get('CE', {}).get('lastPrice', 0)  # Get the call option premium
         put_oi = record.get('PE', {}).get('openInterest', 0)
-        call_data.append({'strikePrice': strike, 'callOI': call_oi, 'callPrice': call_price})
+        call_data.append({'strikePrice': strike, 'callOI': call_oi})
         put_data.append({'strikePrice': strike, 'putOI': put_oi})
 
     call_df = pd.DataFrame(call_data)
@@ -209,15 +208,14 @@ def process_option_data(data: Dict, expiry: Optional[str] = None) -> tuple[pd.Da
     return call_df, put_df
 
 # Identify Resistance Based on Option Chain OI
-def identify_resistance(data: Dict, underlying_price: float) -> Optional[pd.DataFrame]:
+def identify_resistance(data: Dict, underlying_price: float) -> Optional[float]:
     call_df, put_df = process_option_data(data)
     if call_df.empty or put_df.empty:
         return None
 
     combined_df = pd.DataFrame({
         'strikePrice': call_df['strikePrice'],
-        'totalOI': call_df['callOI'] + put_df['putOI'],
-        'callPrice': call_df['callPrice']  # Include call option premium
+        'totalOI': call_df['callOI'] + put_df['putOI']
     })
 
     # Filter strikes above the underlying price (for resistance)
@@ -225,9 +223,9 @@ def identify_resistance(data: Dict, underlying_price: float) -> Optional[pd.Data
     if resistance_candidates.empty:
         return None
 
-    # Sort by total OI in descending order
-    resistance_candidates = resistance_candidates.sort_values(by='totalOI', ascending=False)
-    return resistance_candidates
+    # Find the strike with the highest total OI
+    max_oi_strike = resistance_candidates.loc[resistance_candidates['totalOI'].idxmax(), 'strikePrice']
+    return float(max_oi_strike)
 
 # Fetch Historical Prices using yfinance
 def fetch_historical_data(ticker: str, start_date: date, end_date: date, refresh_key: float) -> Optional[pd.DataFrame]:
@@ -318,15 +316,14 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
         if nse_data is None:
             print(f"{ticker}: No option chain data available")
             return None
-        resistance_df = identify_resistance(nse_data, current_price)
-        if resistance_df is None or resistance_df.empty:
+        strike_price = identify_resistance(nse_data, current_price)
+        if strike_price is None:
             print(f"{ticker}: Could not determine resistance strike")
             return None
-
         momentum_start_date = dates[best_start_idx].strftime("%Y-%m-%d")
         momentum_end_date = dates[best_end_idx].strftime("%Y-%m-%d")
         
-        # Find the high or open of the day after the momentum period ends (red candle)
+        # Find the high of the day after the momentum period ends
         momentum_end = pd.to_datetime(momentum_end_date)
         hist.index = pd.to_datetime(hist.index)
         # Ensure momentum_end has the same timezone as hist.index
@@ -343,36 +340,10 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
                 next_day = idx
                 break
         if next_day is not None and next_day in hist.index:
-            # Use the maximum of Open and High for the red candle
-            red_candle_open = hist.loc[next_day, 'Open']
-            red_candle_high = hist.loc[next_day, 'High']
-            yesterday_high = max(red_candle_open, red_candle_high)
+            yesterday_high = hist.loc[next_day, 'Open']
         else:
             print(f"{ticker}: No data available for the day after momentum period ends")
-            # Fallback to the last day if next day not found
-            red_candle_open = hist.loc[yesterday, 'Open']
-            red_candle_high = hist.loc[yesterday, 'High']
-            yesterday_high = max(red_candle_open, red_candle_high)
-
-        # Filter resistance strikes above the red candle's high/open
-        valid_resistances = resistance_df[resistance_df['strikePrice'] > yesterday_high]
-        if valid_resistances.empty:
-            print(f"{ticker}: No resistance strikes found above red candle high/open ({yesterday_high})")
-            return None
-
-        # Select the strike with the highest call option premium
-        best_strike = valid_resistances.loc[valid_resistances['callPrice'].idxmax(), 'strikePrice']
-
-        # Alternative approach: Select the strike with the largest premium increase (delta)
-        # valid_resistances = valid_resistances.sort_values(by='strikePrice')
-        # valid_resistances['premium_delta'] = valid_resistances['callPrice'].diff()
-        # valid_resistances = valid_resistances.dropna(subset=['premium_delta'])
-        # if not valid_resistances.empty:
-        #     best_strike = valid_resistances.loc[valid_resistances['premium_delta'].idxmax(), 'strikePrice']
-        # else:
-        #     best_strike = valid_resistances.loc[valid_resistances['callPrice'].idxmax(), 'strikePrice']
-
-        strike_price = float(best_strike)
+            yesterday_high = hist.loc[yesterday, 'Open']  # Fallback to the last day if next day not found
 
         result = {
             "Ticker": ticker,
