@@ -58,7 +58,8 @@ def load_config() -> Dict:
         "min_green_candles": 3,
         "lookback_days": 30,
         "telegram_bot_token": "",
-        "telegram_chat_id": ""
+        "telegram_chat_id": "",
+        "price_proximity_percent": 1.0
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
@@ -271,7 +272,7 @@ def generate_option_candlestick(ticker: str, strike_price: float, start_date: da
     return fig
 
 # Check Momentum Loss and Suggest Resistance Strike
-def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_gain_percent: float, min_green_candles: int, bot_token: str, chat_id: str) -> Optional[Dict]:
+def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_gain_percent: float, min_green_candles: int, bot_token: str, chat_id: str, price_proximity_percent: float) -> Optional[Dict]:
     if hist.empty or len(hist) < min_green_candles + 2:
         print(f"{ticker}: Insufficient data (only {len(hist)} days)")
         return None
@@ -321,6 +322,29 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
             return None
         momentum_start_date = dates[best_start_idx].strftime("%Y-%m-%d")
         momentum_end_date = dates[best_end_idx].strftime("%Y-%m-%d")
+        
+        # Find the high of the day after the momentum period ends
+        momentum_end = pd.to_datetime(momentum_end_date)
+        hist.index = pd.to_datetime(hist.index)
+        # Ensure momentum_end has the same timezone as hist.index
+        if hist.index.tz is not None:
+            momentum_end = momentum_end.tz_localize(hist.index.tz)
+        else:
+            # If hist.index is timezone-naive, ensure momentum_end is also naive
+            momentum_end = momentum_end.tz_localize(None)
+        
+        next_day = None
+        yesterday_high = None
+        for idx in hist.index:
+            if idx > momentum_end:
+                next_day = idx
+                break
+        if next_day is not None and next_day in hist.index:
+            yesterday_high = hist.loc[next_day, 'Open']
+        else:
+            print(f"{ticker}: No data available for the day after momentum period ends")
+            yesterday_high = hist.loc[yesterday, 'Open']  # Fallback to the last day if next day not found
+
         result = {
             "Ticker": ticker,
             "Current_Price": current_price,
@@ -348,10 +372,32 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
         )
         print(f"{ticker}: Sending Telegram notification - Momentum Loss")
         send_split_telegram_message(bot_token, chat_id, message)
+        
+        print(f"yesterday_high ==={yesterday_high}===CURRENT_PRICE {current_price}")
+        # Check for momentum loss recovery using the high of the day after momentum period
+        if yesterday_high is not None:
+            proximity_threshold = price_proximity_percent / 100
+            if current_price >= yesterday_high:
+                recovery_message = (
+                    f"*Momentum Loss Recovery Alert*\n"
+                    f"Stock: *{ticker}*\n"
+                    f"Current Price: *₹{current_price:.2f}*\n"
+                    f"Red Candle High: *₹{yesterday_high:.2f}*\n"
+                    f"Price Proximity: *{((yesterday_high - current_price) / yesterday_high * 100):.2f}%*\n"
+                    f"Prior Momentum Gain: *{max_gain:.2f}%*\n"
+                    f"Green Candles: *{max_green_candles}*\n"
+                    f"Momentum Period: *{momentum_start_date} to {momentum_end_date}*\n"
+                    f"Suggested Strike (Call Selling): *₹{strike_price:.2f}*\n"
+                    f"Timestamp: *{result['Last_Scanned']}*\n"
+                    f"Action: *Consider selling call at suggested strike*"
+                )
+                print(f"{ticker}: Sending Telegram notification - Momentum Loss Recovery")
+                send_split_telegram_message(bot_token, chat_id, recovery_message)
+                result["Status"] = "Momentum Loss Recovery"
     return result
 
 # Screen Tickers
-def screen_tickers(tickers: List[str], min_gain_percent: float, min_green_candles: int, lookback_days: int, bot_token: str, chat_id: str, refresh_key: float) -> List[Dict]:
+def screen_tickers(tickers: List[str], min_gain_percent: float, min_green_candles: int, lookback_days: int, bot_token: str, chat_id: str, refresh_key: float, price_proximity_percent: float) -> List[Dict]:
     global nse_session
     end_date = date.today()
     start_date = end_date - timedelta(days=lookback_days)
@@ -373,7 +419,7 @@ def screen_tickers(tickers: List[str], min_gain_percent: float, min_green_candle
             if current_price is None:
                 st.warning(f"No current price for {ticker}.")
                 continue
-            result = check_momentum(ticker, hist, current_price, min_gain_percent, min_green_candles, bot_token, chat_id)
+            result = check_momentum(ticker, hist, current_price, min_gain_percent, min_green_candles, bot_token, chat_id, price_proximity_percent)
             if result:
                 results.append(result)
     nse_session = None
@@ -441,7 +487,7 @@ def backtest_momentum(ticker: str, start_date: date, end_date: date, min_gain_pe
 # Main Application
 def main():
     st.set_page_config(page_title="Momentum Loss Screener", layout="wide")
-    tabs = st.tabs(["Real-Time Screener"])
+    tabs = st.tabs(["Real-Time Screener", "Backtesting"])
 
     config = load_config()
     if 'config' not in st.session_state:
@@ -477,9 +523,16 @@ def main():
         lookback_days = st.number_input(
             "Lookback Period (Days):",
             value=st.session_state['config']['lookback_days'],
-            min_value=10,
+            min_value=4,
             step=1,
             key="lookback_days"
+        )
+        price_proximity_percent = st.number_input(
+            "Price Proximity for Recovery (%):",
+            value=st.session_state['config']['price_proximity_percent'],
+            min_value=0.1,
+            step=0.1,
+            key="price_proximity_percent"
         )
 
         st.subheader("Telegram Integration")
@@ -525,6 +578,9 @@ def main():
         if st.session_state['config']['telegram_chat_id'] != telegram_chat_id:
             st.session_state['config']['telegram_chat_id'] = telegram_chat_id
             config_changed = True
+        if st.session_state['config']['price_proximity_percent'] != price_proximity_percent:
+            st.session_state['config']['price_proximity_percent'] = price_proximity_percent
+            config_changed = True
         if config_changed:
             save_config(st.session_state['config'])
 
@@ -550,7 +606,8 @@ def main():
                 st.session_state['config']['lookback_days'],
                 st.session_state['config']['telegram_bot_token'],
                 st.session_state['config']['telegram_chat_id'],
-                st.session_state['refresh_key']
+                st.session_state['refresh_key'],
+                st.session_state['config']['price_proximity_percent']
             )
             st.session_state['screening_data'] = screening_data
             save_screening_data(screening_data)
@@ -597,12 +654,19 @@ def main():
                     height=400
                 )
                 selected_ticker = st.selectbox("Select Ticker for Candlestick Chart", screening_df['Ticker'].unique())
-                selected_strike = st.selectbox("Select Strike Price", screening_df[screening_df['Ticker'] == selected_ticker]['Strike_Price'].unique())
-                chart = generate_option_candlestick(selected_ticker, selected_strike, date.today() - timedelta(days=30), date.today())
-                if chart:
-                    st.plotly_chart(chart, use_container_width=True)
+                if 'Strike_Price' in screening_df.columns and not screening_df[screening_df['Ticker'] == selected_ticker].empty:
+                    strike_prices = screening_df[screening_df['Ticker'] == selected_ticker]['Strike_Price'].unique()
+                    if strike_prices.size > 0:
+                        selected_strike = st.selectbox("Select Strike Price", strike_prices)
+                        chart = generate_option_candlestick(selected_ticker, selected_strike, date.today() - timedelta(days=30), date.today())
+                        if chart:
+                            st.plotly_chart(chart, use_container_width=True)
+                        else:
+                            st.warning(f"No chart data available for {selected_ticker} at strike {selected_strike}.")
+                    else:
+                        st.warning(f"No strike prices available for {selected_ticker}.")
                 else:
-                    st.warning(f"No chart data available for {selected_ticker} at strike {selected_strike}.")
+                    st.warning(f"No data available for {selected_ticker}.")
             else:
                 st.info("No matching results found for the search query.")
             if st.button("Clear Screening Results"):
@@ -611,7 +675,72 @@ def main():
                 st.rerun()
         else:
             st.info("No results found. Run a scan to check for stocks.")
-    
+
+    with tabs[1]:
+        st.title("Backtest Momentum Loss")
+        st.subheader("Backtest Settings")
+        backtest_ticker = st.text_input("Enter Ticker for Backtest", value="HDFCBANK", key="backtest_ticker")
+        backtest_start_date = st.date_input("Start Date", value=date.today() - timedelta(days=365), key="backtest_start_date")
+        backtest_end_date = st.date_input("End Date", value=date.today(), key="backtest_end_date")
+        backtest_min_gain = st.number_input("Minimum Momentum Gain (%)", value=20.0, min_value=5.0, step=1.0, key="backtest_min_gain")
+        backtest_min_candles = st.number_input("Minimum Green Candles", value=3, min_value=1, step=1, key="backtest_min_candles")
+
+        if st.button("Run Backtest"):
+            with st.spinner(f"Backtesting {backtest_ticker}..."):
+                backtest_data = backtest_momentum(
+                    backtest_ticker,
+                    backtest_start_date,
+                    backtest_end_date,
+                    backtest_min_gain,
+                    backtest_min_candles
+                )
+                st.session_state['backtest_data'] = backtest_data
+                save_backtest_data(backtest_data)
+
+        if st.session_state['backtest_data']:
+            st.write("### Backtest Results")
+            backtest_df = pd.DataFrame(st.session_state['backtest_data'])
+            if not backtest_df.empty:
+                st.dataframe(
+                    backtest_df,
+                    column_config={
+                        "Ticker": st.column_config.TextColumn("Ticker"),
+                        "Date": st.column_config.TextColumn("Date"),
+                        "Current_Close": st.column_config.NumberColumn("Current Close", format="%.2f"),
+                        "Previous_Close": st.column_config.NumberColumn("Previous Close", format="%.2f"),
+                        "Price_Change_Percent": st.column_config.NumberColumn("Price Change %", format="%.2f"),
+                        "Momentum_Gain_Percent": st.column_config.NumberColumn("Momentum Gain %", format="%.2f"),
+                        "Green_Candle_Count": st.column_config.NumberColumn("Green Candles"),
+                        "Momentum_Start_Date": st.column_config.TextColumn("Momentum Start"),
+                        "Momentum_End_Date": st.column_config.TextColumn("Momentum End"),
+                        "Strike_Price": st.column_config.NumberColumn("Suggested Strike", format="%.2f"),
+                        "Status": st.column_config.TextColumn("Status")
+                    },
+                    use_container_width=True,
+                    height=400
+                )
+                selected_backtest_ticker = st.selectbox("Select Ticker for Backtest Chart", backtest_df['Ticker'].unique())
+                if 'Strike_Price' in backtest_df.columns and not backtest_df[backtest_df['Ticker'] == selected_backtest_ticker].empty:
+                    strike_prices = backtest_df[backtest_df['Ticker'] == selected_backtest_ticker]['Strike_Price'].unique()
+                    if strike_prices.size > 0:
+                        selected_backtest_strike = st.selectbox("Select Strike Price for Backtest", strike_prices)
+                        chart = generate_option_candlestick(selected_backtest_ticker, selected_backtest_strike, backtest_start_date, backtest_end_date)
+                        if chart:
+                            st.plotly_chart(chart, use_container_width=True)
+                        else:
+                            st.warning(f"No chart data available for {selected_backtest_ticker} at strike {selected_backtest_strike}.")
+                    else:
+                        st.warning(f"No strike prices available for {selected_backtest_ticker}.")
+                else:
+                    st.warning(f"No data available for {selected_backtest_ticker}.")
+            else:
+                st.info("No backtest results found.")
+            if st.button("Clear Backtest Results"):
+                st.session_state['backtest_data'] = []
+                save_backtest_data(st.session_state['backtest_data'])
+                st.rerun()
+        else:
+            st.info("No backtest results. Run a backtest to view results.")
 
 if __name__ == "__main__":
     try:
