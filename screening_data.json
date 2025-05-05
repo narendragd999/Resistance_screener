@@ -108,5 +108,16 @@
         "Momentum_Start_Date": "2025-04-17",
         "Momentum_End_Date": "2025-04-24",
         "Last_Scanned": "2025-04-25 16:02:30"
+        "Ticker": "INDUSINDBK",
+        "Current_Price": 850.5,
+        "Yesterday_Close": 856.4500122070312,
+        "Price_Drop_Percent": 0.6947296540633293,
+        "Momentum_Gain_Percent": 22.054384659383704,
+        "Green_Candle_Count": 5,
+        "Momentum_Start_Date": "2025-04-09",
+        "Momentum_End_Date": "2025-04-21",
+        "Strike_Price": 900.0,
+        "Status": "Momentum Loss Recovery",
+        "Last_Scanned": "2025-05-05 08:50:50"
     }
 ]

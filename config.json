@@ -8,6 +8,10 @@
     "min_gain_percent": 20.0,
     "min_green_candles": 3,
     "lookback_days": 30,
+<<<<<<< HEAD
     "min_call_price_increase": 10.0,
     "strike_price_proximity": 1.1
+=======
+    "price_proximity_percent": 0.5000000000000001
+>>>>>>> e787cf402ea37fe762cc9b57be88896a608046f4
 }
