@@ -1,1 +1,90 @@
-[]
+[
+    {
+        "Ticker": "CGPOWER",
+        "Today_Close": 620.5999755859375,
+        "Yesterday_Close": 626.7999877929688,
+        "Price_Drop_Percent": 0.9891532111961537,
+        "Momentum_Gain_Percent": 20.370023235141073,
+        "Green_Candle_Count": 7,
+        "Momentum_Start_Date": "2025-04-07",
+        "Momentum_End_Date": "2025-04-21",
+        "Last_Scanned": "2025-05-04 21:00:48"
+    },
+    {
+        "Ticker": "DIXON",
+        "Today_Close": 16409.0,
+        "Yesterday_Close": 16452.0,
+        "Price_Drop_Percent": 0.2613663992219791,
+        "Momentum_Gain_Percent": 32.804506667174806,
+        "Green_Candle_Count": 8,
+        "Momentum_Start_Date": "2025-04-07",
+        "Momentum_End_Date": "2025-04-22",
+        "Last_Scanned": "2025-05-04 21:00:53"
+    },
+    {
+        "Ticker": "HUDCO",
+        "Today_Close": 222.08999633789062,
+        "Yesterday_Close": 223.4600067138672,
+        "Price_Drop_Percent": 0.6130897408102263,
+        "Momentum_Gain_Percent": 20.2986288072691,
+        "Green_Candle_Count": 7,
+        "Momentum_Start_Date": "2025-04-07",
+        "Momentum_End_Date": "2025-04-21",
+        "Last_Scanned": "2025-05-04 21:00:59"
+    },
+    {
+        "Ticker": "KEI",
+        "Today_Close": 3037.0,
+        "Yesterday_Close": 3063.60009765625,
+        "Price_Drop_Percent": 0.8682627238652951,
+        "Momentum_Gain_Percent": 20.294853975744594,
+        "Green_Candle_Count": 9,
+        "Momentum_Start_Date": "2025-04-07",
+        "Momentum_End_Date": "2025-04-23",
+        "Last_Scanned": "2025-05-04 21:01:07"
+    },
+    {
+        "Ticker": "NBCC",
+        "Today_Close": 93.58999633789062,
+        "Yesterday_Close": 95.19000244140625,
+        "Price_Drop_Percent": 1.6808551974778034,
+        "Momentum_Gain_Percent": 26.868863226922834,
+        "Green_Candle_Count": 9,
+        "Momentum_Start_Date": "2025-04-07",
+        "Momentum_End_Date": "2025-04-23",
+        "Last_Scanned": "2025-05-04 21:01:13"
+    },
+    {
+        "Ticker": "PRESTIGE",
+        "Today_Close": 1359.5,
+        "Yesterday_Close": 1375.0999755859375,
+        "Price_Drop_Percent": 1.1344611928518336,
+        "Momentum_Gain_Percent": 22.636537932210572,
+        "Green_Candle_Count": 7,
+        "Momentum_Start_Date": "2025-04-09",
+        "Momentum_End_Date": "2025-04-23",
+        "Last_Scanned": "2025-05-04 21:01:19"
+    },
+    {
+        "Ticker": "MOTHERSON",
+        "Today_Close": 132.1300048828125,
+        "Yesterday_Close": 133.27000427246094,
+        "Price_Drop_Percent": 0.8554058325966516,
+        "Momentum_Gain_Percent": 20.51145904522055,
+        "Green_Candle_Count": 8,
+        "Momentum_Start_Date": "2025-04-09",
+        "Momentum_End_Date": "2025-04-24",
+        "Last_Scanned": "2025-05-04 21:01:23"
+    },
+    {
+        "Ticker": "SOLARINDS",
+        "Today_Close": 13069.0,
+        "Yesterday_Close": 13172.0,
+        "Price_Drop_Percent": 0.7819617370179168,
+        "Momentum_Gain_Percent": 21.827740139557044,
+        "Green_Candle_Count": 8,
+        "Momentum_Start_Date": "2025-04-09",
+        "Momentum_End_Date": "2025-04-24",
+        "Last_Scanned": "2025-05-04 21:01:25"
+    }
+]

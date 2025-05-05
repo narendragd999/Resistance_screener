@@ -1,5 +1,4 @@
 Sr. No.,SECURITY,SYMBOL
-1,ABB India Limited,ABB
 2,ACC Limited,ACC
 3,APL Apollo Tubes Limited,APLAPOLLO
 4,AU Small Finance Bank Limited,AUBANK
@@ -31,7 +30,6 @@ Sr. No.,SECURITY,SYMBOL
 30,Bandhan Bank Limited,BANDHANBNK
 31,Bank of Baroda,BANKBARODA
 32,Bank of India,BANKINDIA
-33,Berger Paints (I) Limited,BERGEPAINT
 34,Bharat Electronics Limited,BEL
 35,Bharat Forge Limited,BHARATFORG
 36,Bharat Heavy Electricals Limited,BHEL
@@ -106,7 +104,6 @@ Sr. No.,SECURITY,SYMBOL
 105,Info Edge (India) Limited,NAUKRI
 106,Infosys Limited,INFY
 107,InterGlobe Aviation Limited,INDIGO
-108,JK Cement Limited,JKCEMENT
 109,JSW Energy Limited,JSWENERGY
 110,JSW Steel Limited,JSWSTEEL
 111,Jindal Stainless Limited,JSL
@@ -118,7 +115,6 @@ Sr. No.,SECURITY,SYMBOL
 117,Kalyan Jewellers India Limited,KALYANKJIL
 118,Kotak Mahindra Bank Limited,KOTAKBANK
 119,L&T Finance Limited,LTF
-120,L&T Technology Services Limited,LTTS
 121,LIC Housing Finance Limited,LICHSGFIN
 122,LTIMindtree Limited,LTIM
 123,Larsen & Toubro Limited,LT
@@ -128,8 +124,6 @@ Sr. No.,SECURITY,SYMBOL
 127,MRF Limited,MRF
 128,Macrotech Developers Limited,LODHA
 129,Mahanagar Gas Limited,MGL
-130,Mahindra & Mahindra Financial Services Limited,M&MFIN
-131,Mahindra & Mahindra Limited,M&M
 132,Manappuram Finance Limited,MANAPPURAM
 133,Marico Limited,MARICO
 134,Maruti Suzuki India Limited,MARUTI
@@ -148,13 +142,10 @@ Sr. No.,SECURITY,SYMBOL
 147,Oberoi Realty Limited,OBEROIRLTY
 148,Oil & Natural Gas Corporation Limited,ONGC
 149,Oil India Limited,OIL
-150,One 97 Communications Limited,PAYTM
 151,Oracle Financial Services Software Limited,OFSS
 152,PB Fintech Limited,POLICYBZR
 153,PI Industries Limited,PIIND
-154,Page Industries Limited,PAGEIND
 155,Patanjali Foods Limited,PATANJALI
-156,Persistent Systems Limited,PERSISTENT
 157,Petronet LNG Limited,PETRONET
 158,Pidilite Industries Limited,PIDILITIND
 159,Piramal Enterprises Limited,PEL
@@ -212,6 +203,5 @@ Sr. No.,SECURITY,SYMBOL
 211,Vodafone Idea Limited,IDEA
 212,Voltas Limited,VOLTAS
 213,Wipro Limited,WIPRO
-214,Yes Bank Limited,YESBANK
 215,Zomato Limited,ZOMATO
 216,Zydus Lifesciences Limited,ZYDUSLIFE

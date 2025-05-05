@@ -441,7 +441,7 @@ def backtest_momentum(ticker: str, start_date: date, end_date: date, min_gain_pe
 # Main Application
 def main():
     st.set_page_config(page_title="Momentum Loss Screener", layout="wide")
-    tabs = st.tabs(["Real-Time Screener", "Backtesting"])
+    tabs = st.tabs(["Real-Time Screener"])
 
     config = load_config()
     if 'config' not in st.session_state:
@@ -611,65 +611,7 @@ def main():
                 st.rerun()
         else:
             st.info("No results found. Run a scan to check for stocks.")
-
-    # with tabs[1]:
-    #     st.title("Backtest Momentum Loss")
-    #     st.subheader("Backtest Settings")
-    #     backtest_ticker = st.text_input("Enter Ticker for Backtest", value="HDFCBANK", key="backtest_ticker")
-    #     backtest_start_date = st.date_input("Start Date", value=date.today() - timedelta(days=365), key="backtest_start_date")
-    #     backtest_end_date = st.date_input("End Date", value=date.today(), key="backtest_end_date")
-    #     backtest_min_gain = st.number_input("Minimum Momentum Gain (%)", value=20.0, min_value=5.0, step=1.0, key="backtest_min_gain")
-    #     backtest_min_candles = st.number_input("Minimum Green Candles", value=3, min_value=1, step=1, key="backtest_min_candles")
-
-    #     if st.button("Run Backtest"):
-    #         with st.spinner(f"Backtesting {backtest_ticker}..."):
-    #             backtest_data = backtest_momentum(
-    #                 backtest_ticker,
-    #                 backtest_start_date,
-    #                 backtest_end_date,
-    #                 backtest_min_gain,
-    #                 backtest_min_candles
-    #             )
-    #             st.session_state['backtest_data'] = backtest_data
-    #             save_backtest_data(backtest_data)
-
-    #     if st.session_state['backtest_data']:
-    #         st.write("### Backtest Results")
-    #         backtest_df = pd.DataFrame(st.session_state['backtest_data'])
-    #         if not backtest_df.empty:
-    #             st.dataframe(
-    #                 backtest_df,
-    #                 column_config={
-    #                     "Ticker": st.column_config.TextColumn("Ticker"),
-    #                     "Date": st.column_config.TextColumn("Date"),
-    #                     "Current_Close": st.column_config.NumberColumn("Current Close", format="%.2f"),
-    #                     "Previous_Close": st.column_config.NumberColumn("Previous Close", format="%.2f"),
-    #                     "Price_Change_Percent": st.column_config.NumberColumn("Price Change %", format="%.2f"),
-    #                     "Momentum_Gain_Percent": st.column_config.NumberColumn("Momentum Gain %", format="%.2f"),
-    #                     "Green_Candle_Count": st.column_config.NumberColumn("Green Candles"),
-    #                     "Momentum_Start_Date": st.column_config.TextColumn("Momentum Start"),
-    #                     "Momentum_End_Date": st.column_config.TextColumn("Momentum End"),
-    #                     "Strike_Price": st.column_config.NumberColumn("Suggested Strike", format="%.2f"),
-    #                     "Status": st.column_config.TextColumn("Status")
-    #                 },
-    #                 use_container_width=True,
-    #                 height=400
-    #             )
-    #             selected_backtest_ticker = st.selectbox("Select Ticker for Backtest Chart", backtest_df['Ticker'].unique())
-    #             selected_backtest_strike = st.selectbox("Select Strike Price for Backtest", backtest_df[backtest_df['Ticker'] == selected_backtest_ticker]['Strike_Price'].unique())
-    #             chart = generate_option_candlestick(selected_backtest_ticker, selected_backtest_strike, backtest_start_date, backtest_end_date)
-    #             if chart:
-    #                 st.plotly_chart(chart, use_container_width=True)
-    #             else:
-    #                 st.warning(f"No chart data available for {selected_backtest_ticker} at strike {selected_backtest_strike}.")
-    #         else:
-    #             st.info("No backtest results found.")
-    #         if st.button("Clear Backtest Results"):
-    #             st.session_state['backtest_data'] = []
-    #             save_backtest_data(st.session_state['backtest_data'])
-    #             st.rerun()
-    #     else:
-    #         st.info("No backtest results. Run a backtest to view results.")
+    
 
 if __name__ == "__main__":
     try:
