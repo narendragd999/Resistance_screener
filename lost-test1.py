@@ -11,12 +11,14 @@ from datetime import datetime, date, timedelta
 import numpy as np
 import plotly.graph_objects as go
 import requests
+import uuid
 
 # Constants
 STORED_TICKERS_PATH = "tickers.csv"
 CONFIG_FILE = "config.json"
 SCREENING_DATA_FILE = "screening_data.json"
 BACKTEST_DATA_FILE = "backtest_data.json"
+PORTFOLIO_FILE = "portfolio.json"
 api_call_counter = 0
 
 # Cache for performance
@@ -59,7 +61,12 @@ def load_config() -> Dict:
         "lookback_days": 30,
         "telegram_bot_token": "",
         "telegram_chat_id": "",
-        "price_proximity_percent": 1.0
+        "price_proximity_percent": 1.0,
+        "min_risk_reward_ratio": 0.1,  # New: Minimum risk-reward ratio
+        "iv_threshold": 30.0,  # New: Implied volatility threshold for alerts
+        "oi_score_weight": 0.5,  # New: Weight for OI in resistance scoring
+        "pcr_score_weight": 0.3,  # New: Weight for PCR in resistance scoring
+        "premium_score_weight": 0.2  # New: Weight for premium in resistance scoring
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
@@ -93,6 +100,17 @@ def load_backtest_data() -> List[Dict]:
 
 def save_backtest_data(data: List[Dict]):
     with open(BACKTEST_DATA_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
+
+# Load/Save Portfolio
+def load_portfolio() -> List[Dict]:
+    if os.path.exists(PORTFOLIO_FILE):
+        with open(PORTFOLIO_FILE, 'r') as f:
+            return json.load(f)
+    return []
+
+def save_portfolio(data: List[Dict]):
+    with open(PORTFOLIO_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
 # Telegram Integration
@@ -142,37 +160,45 @@ def load_tickers() -> List[str]:
 def fetch_nse_data(ticker: str, refresh_key: float) -> Optional[Dict]:
     global nse_session, api_call_counter
     api_call_counter += 1
+
     cache_key = f"{ticker}_{refresh_key}"
     if cache_key in cache and (time.time() - cache.get(f"{cache_key}_timestamp", 0)) < 60:
-        print(f"Using cached NSE data for {ticker}")
+        print(f"Using cached data for {ticker}")
         return cache[cache_key]
-    print(f"Fetching NSE data for API {api_call_counter}--{ticker}")
+
     try:
         if nse_session is None:
             print(f"No session available for {ticker}")
             return None
+
         option_chain_url = f"https://www.nseindia.com/api/option-chain-equities?symbol={ticker}"
         quote_url = f"https://www.nseindia.com/api/quote-equity?symbol={ticker}"
+
+        print(f"Fetching data for API {api_call_counter}--{ticker}")
+
         response = nse_session.get(option_chain_url, headers=headers)
-        print(f"Option chain response for {ticker}: Status {response.status_code}")
         if response.status_code != 200:
-            print(f"Failed to load option chain for {ticker}: {response.status_code}, Response: {response.text}")
+            print(f"Failed to load option chain for {ticker}: {response.status_code}")
             return None
+
         data = response.json()
+
         quote_response = nse_session.get(quote_url, headers=headers)
-        print(f"Quote response for {ticker}: Status {quote_response.status_code}")
         if quote_response.status_code == 200:
             quote_data = quote_response.json()
             last_price = quote_data.get('priceInfo', {}).get('lastPrice', 0)
             if last_price > 0 and 'records' in data:
                 data['records']['underlyingValue'] = last_price
-                print(f"Updated underlying value for {ticker}: {last_price}")
+                print(f"Updated underlying value for {ticker} with last price: {last_price}")
             else:
-                print(f"No valid last price for {ticker}")
+                print(f"No valid last price found for {ticker}, using default underlying.")
+        else:
+            print(f"Failed to load quote data for {ticker}: {quote_response.status_code}")
+
         cache[cache_key] = data
         cache[f"{cache_key}_timestamp"] = time.time()
-        print(f"Successfully fetched NSE data for {ticker}")
         return data
+
     except Exception as e:
         print(f"Error fetching NSE data for {ticker}: {str(e)}")
         return None
@@ -191,25 +217,30 @@ def process_option_data(data: Dict, expiry: Optional[str] = None) -> tuple[pd.Da
         if expiry and expiry_date != expiry:
             continue
         call_oi = record.get('CE', {}).get('openInterest', 0)
-        call_price = record.get('CE', {}).get('lastPrice', 0)  # Get the call option premium
+        call_price = record.get('CE', {}).get('lastPrice', 0)
+        call_iv = record.get('CE', {}).get('impliedVolatility', 0)  # New: Extract IV
         put_oi = record.get('PE', {}).get('openInterest', 0)
-        call_data.append({'strikePrice': strike, 'callOI': call_oi, 'callPrice': call_price})
-        put_data.append({'strikePrice': strike, 'putOI': put_oi})
+        put_iv = record.get('PE', {}).get('impliedVolatility', 0)  # New: Extract IV
+        call_data.append({'strikePrice': strike, 'callOI': call_oi, 'callPrice': call_price, 'callIV': call_iv})
+        put_data.append({'strikePrice': strike, 'putOI': put_oi, 'putIV': put_iv})
 
     call_df = pd.DataFrame(call_data)
     put_df = pd.DataFrame(put_data)
     return call_df, put_df
 
 # Identify Resistance Based on Option Chain OI
-def identify_resistance(data: Dict, underlying_price: float) -> Optional[pd.DataFrame]:
-    call_df, put_df = process_option_data(data)
+def identify_resistance(data: Dict, underlying_price: float, expiry: Optional[str], config: Dict) -> Optional[pd.DataFrame]:
+    call_df, put_df = process_option_data(data, expiry)
     if call_df.empty or put_df.empty:
         return None
 
     combined_df = pd.DataFrame({
         'strikePrice': call_df['strikePrice'],
         'totalOI': call_df['callOI'] + put_df['putOI'],
-        'callPrice': call_df['callPrice']  # Include call option premium
+        'callOI': call_df['callOI'],
+        'putOI': put_df['putOI'],
+        'callPrice': call_df['callPrice'],
+        'callIV': call_df['callIV']
     })
 
     # Filter strikes above the underlying price (for resistance)
@@ -217,9 +248,31 @@ def identify_resistance(data: Dict, underlying_price: float) -> Optional[pd.Data
     if resistance_candidates.empty:
         return None
 
-    # Sort by total OI in descending order
-    resistance_candidates = resistance_candidates.sort_values(by='totalOI', ascending=False)
+    # Calculate PCR
+    resistance_candidates['PCR'] = resistance_candidates['putOI'] / resistance_candidates['callOI'].replace(0, np.nan)
+    resistance_candidates['PCR'] = resistance_candidates['PCR'].fillna(1)
+
+    # Calculate OI concentration
+    total_oi = resistance_candidates['totalOI'].sum()
+    resistance_candidates['OI_Percent'] = resistance_candidates['totalOI'] / total_oi * 100
+
+    # Calculate resistance score
+    resistance_candidates['Score'] = (
+        resistance_candidates['totalOI'] / resistance_candidates['totalOI'].max() * config['oi_score_weight'] +
+        resistance_candidates['PCR'] / resistance_candidates['PCR'].max() * config['pcr_score_weight'] +
+        resistance_candidates['callPrice'] / resistance_candidates['callPrice'].max() * config['premium_score_weight']
+    )
+
+    # Sort by score
+    resistance_candidates = resistance_candidates.sort_values(by='Score', ascending=False)
     return resistance_candidates
+
+# Calculate Risk-Reward Ratio
+def calculate_risk_reward(resistance_df: pd.DataFrame, current_price: float) -> pd.DataFrame:
+    resistance_df['Risk'] = resistance_df['strikePrice'] - current_price
+    resistance_df['Reward'] = resistance_df['callPrice']
+    resistance_df['Risk_Reward_Ratio'] = resistance_df['Reward'] / resistance_df['Risk'].replace(0, np.nan)
+    return resistance_df
 
 # Fetch Historical Prices using yfinance
 def fetch_historical_data(ticker: str, start_date: date, end_date: date, refresh_key: float) -> Optional[pd.DataFrame]:
@@ -227,18 +280,18 @@ def fetch_historical_data(ticker: str, start_date: date, end_date: date, refresh
     api_call_counter += 1
     cache_key = f"{ticker}_{start_date}_{end_date}_{refresh_key}"
     if cache_key in cache and (time.time() - cache.get(f"{cache_key}_timestamp", 0)) < 3600:
-        print(f"Using cached historical data for {ticker}")
+        print(f"Using cached data for {ticker}")
         return cache[cache_key]
-    print(f"Fetching historical data for API {api_call_counter}--{ticker}")
+    print(f"Fetching data for API {api_call_counter}--{ticker}")
     try:
         stock = yf.Ticker(ticker + ".NS")
         hist = stock.history(start=start_date, end=end_date + timedelta(days=1))
         if hist.empty:
             print(f"No historical data found for {ticker}. Possible delisted or invalid ticker.")
             return None
-        print(f"Fetched {len(hist)} days of historical data for {ticker}: {hist.index[0]} to {hist.index[-1]}")
         cache[cache_key] = hist
         cache[f"{cache_key}_timestamp"] = time.time()
+        print(f"Successfully fetched {len(hist)} days of data for {ticker}")
         return hist
     except Exception as e:
         print(f"Error fetching historical data for {ticker}: {str(e)}")
@@ -266,7 +319,7 @@ def generate_option_candlestick(ticker: str, strike_price: float, start_date: da
     return fig
 
 # Check Momentum Loss and Suggest Resistance Strike
-def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_gain_percent: float, min_green_candles: int, bot_token: str, chat_id: str, price_proximity_percent: float) -> Optional[Dict]:
+def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_gain_percent: float, min_green_candles: int, bot_token: str, chat_id: str, price_proximity_percent: float, config: Dict, expiry: Optional[str]) -> Optional[Dict]:
     if hist.empty or len(hist) < min_green_candles + 2:
         print(f"{ticker}: Insufficient data (only {len(hist)} days)")
         return None
@@ -310,7 +363,7 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
         if nse_data is None:
             print(f"{ticker}: No option chain data available")
             return None
-        resistance_df = identify_resistance(nse_data, current_price)
+        resistance_df = identify_resistance(nse_data, current_price, expiry, config)
         if resistance_df is None or resistance_df.empty:
             print(f"{ticker}: Could not determine resistance strike")
             return None
@@ -321,11 +374,9 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
         # Find the high or open of the day after the momentum period ends (red candle)
         momentum_end = pd.to_datetime(momentum_end_date)
         hist.index = pd.to_datetime(hist.index)
-        # Ensure momentum_end has the same timezone as hist.index
         if hist.index.tz is not None:
             momentum_end = momentum_end.tz_localize(hist.index.tz)
         else:
-            # If hist.index is timezone-naive, ensure momentum_end is also naive
             momentum_end = momentum_end.tz_localize(None)
         
         next_day = None
@@ -335,13 +386,11 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
                 next_day = idx
                 break
         if next_day is not None and next_day in hist.index:
-            # Use the maximum of Open and High for the red candle
             red_candle_open = hist.loc[next_day, 'Open']
             red_candle_high = hist.loc[next_day, 'High']
             yesterday_high = max(red_candle_open, red_candle_high)
         else:
             print(f"{ticker}: No data available for the day after momentum period ends")
-            # Fallback to the last day if next day not found
             red_candle_open = hist.loc[yesterday, 'Open']
             red_candle_high = hist.loc[yesterday, 'High']
             yesterday_high = max(red_candle_open, red_candle_high)
@@ -352,17 +401,17 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
             print(f"{ticker}: No resistance strikes found above red candle high/open ({yesterday_high})")
             return None
 
-        # Select the strike with the highest call option premium
-        best_strike = valid_resistances.loc[valid_resistances['callPrice'].idxmax(), 'strikePrice']
+        # Calculate risk-reward ratio
+        valid_resistances = calculate_risk_reward(valid_resistances, current_price)
+        valid_resistances = valid_resistances[valid_resistances['Risk_Reward_Ratio'] >= config['min_risk_reward_ratio']]
+        if valid_resistances.empty:
+            print(f"{ticker}: No strikes meet the minimum risk-reward ratio")
+            return None
 
-        # Alternative approach: Select the strike with the largest premium increase (delta)
-        # valid_resistances = valid_resistances.sort_values(by='strikePrice')
-        # valid_resistances['premium_delta'] = valid_resistances['callPrice'].diff()
-        # valid_resistances = valid_resistances.dropna(subset=['premium_delta'])
-        # if not valid_resistances.empty:
-        #     best_strike = valid_resistances.loc[valid_resistances['premium_delta'].idxmax(), 'strikePrice']
-        # else:
-        #     best_strike = valid_resistances.loc[valid_resistances['callPrice'].idxmax(), 'strikePrice']
+        # Select the strike with the highest score
+        best_strike = valid_resistances.iloc[0]['strikePrice']
+        call_premium = valid_resistances.iloc[0]['callPrice']
+        call_iv = valid_resistances.iloc[0]['callIV']
 
         strike_price = float(best_strike)
 
@@ -376,9 +425,13 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
             "Momentum_Start_Date": momentum_start_date,
             "Momentum_End_Date": momentum_end_date,
             "Strike_Price": float(strike_price),
+            "Call_Premium": float(call_premium),
+            "Implied_Volatility": float(call_iv),
             "Status": "Momentum Loss",
-            "Last_Scanned": time.strftime("%Y-%m-%d %H:%M:%S")
+            "Last_Scanned": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "Expiry": expiry if expiry else "Nearest"
         }
+
         message = (
             f"*Momentum Loss Alert*\n"
             f"Stock: *{ticker}*\n"
@@ -389,13 +442,31 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
             f"Green Candles: *{max_green_candles}*\n"
             f"Momentum Period: *{momentum_start_date} to {momentum_end_date}*\n"
             f"Suggested Strike (Call Selling): *₹{strike_price:.2f}*\n"
+            f"Call Premium: *₹{call_premium:.2f}*\n"
+            f"Implied Volatility: *{call_iv:.2f}%*\n"
+            f"Expiry: *{result['Expiry']}*\n"
             f"Timestamp: *{result['Last_Scanned']}*"
         )
         print(f"{ticker}: Sending Telegram notification - Momentum Loss")
         send_split_telegram_message(bot_token, chat_id, message)
-        
+
+        # Volatility-Based Alert
+        if call_iv > config['iv_threshold']:
+            iv_message = (
+                f"*High IV Alert*\n"
+                f"Stock: *{ticker}*\n"
+                f"Strike: *₹{strike_price:.2f}*\n"
+                f"Implied Volatility: *{call_iv:.2f}%*\n"
+                f"Call Premium: *₹{call_premium:.2f}*\n"
+                f"Expiry: *{result['Expiry']}*\n"
+                f"Action: *High IV detected, consider selling call for higher premium*\n"
+                f"Timestamp: *{result['Last_Scanned']}*"
+            )
+            print(f"{ticker}: Sending Telegram notification - High IV")
+            send_split_telegram_message(bot_token, chat_id, iv_message)
+
         print(f"yesterday_high ==={yesterday_high}===CURRENT_PRICE {current_price}")
-        # Check for momentum loss recovery using the high of the day after momentum period
+        # Check for momentum loss recovery
         if yesterday_high is not None:
             proximity_threshold = price_proximity_percent / 100
             if current_price >= yesterday_high:
@@ -409,6 +480,8 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
                     f"Green Candles: *{max_green_candles}*\n"
                     f"Momentum Period: *{momentum_start_date} to {momentum_end_date}*\n"
                     f"Suggested Strike (Call Selling): *₹{strike_price:.2f}*\n"
+                    f"Call Premium: *₹{call_premium:.2f}*\n"
+                    f"Expiry: *{result['Expiry']}*\n"
                     f"Timestamp: *{result['Last_Scanned']}*\n"
                     f"Action: *Consider selling call at suggested strike*"
                 )
@@ -418,7 +491,7 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
     return result
 
 # Screen Tickers
-def screen_tickers(tickers: List[str], min_gain_percent: float, min_green_candles: int, lookback_days: int, bot_token: str, chat_id: str, refresh_key: float, price_proximity_percent: float) -> List[Dict]:
+def screen_tickers(tickers: List[str], min_gain_percent: float, min_green_candles: int, lookback_days: int, bot_token: str, chat_id: str, refresh_key: float, price_proximity_percent: float, config: Dict, expiry: Optional[str]) -> List[Dict]:
     global nse_session
     end_date = date.today()
     start_date = end_date - timedelta(days=lookback_days)
@@ -440,7 +513,7 @@ def screen_tickers(tickers: List[str], min_gain_percent: float, min_green_candle
             if current_price is None:
                 st.warning(f"No current price for {ticker}.")
                 continue
-            result = check_momentum(ticker, hist, current_price, min_gain_percent, min_green_candles, bot_token, chat_id, price_proximity_percent)
+            result = check_momentum(ticker, hist, current_price, min_gain_percent, min_green_candles, bot_token, chat_id, price_proximity_percent, config, expiry)
             if result:
                 results.append(result)
     nse_session = None
@@ -458,7 +531,6 @@ def backtest_momentum(ticker: str, start_date: date, end_date: date, min_gain_pe
         current_close = window['Close'][-1]
         prev_close = window['Close'][-2]
         momentum_high = window['High'].max()
-        # Use historical high as a proxy for resistance in backtesting
         strike_price = round(momentum_high / 50) * 50
         closes = window['Close'].values
         dates = window.index
@@ -508,7 +580,7 @@ def backtest_momentum(ticker: str, start_date: date, end_date: date, min_gain_pe
 # Main Application
 def main():
     st.set_page_config(page_title="Momentum Loss Screener", layout="wide")
-    tabs = st.tabs(["Real-Time Screener"])
+    tabs = st.tabs(["Real-Time Screener", "Portfolio"])  # New: Added Portfolio tab
 
     config = load_config()
     if 'config' not in st.session_state:
@@ -524,6 +596,8 @@ def main():
         st.session_state['last_scan_time'] = time.time()
     if 'scan_in_progress' not in st.session_state:
         st.session_state['scan_in_progress'] = False
+    if 'selected_expiry' not in st.session_state:
+        st.session_state['selected_expiry'] = None
 
     with st.sidebar:
         st.subheader("Screening Settings")
@@ -555,6 +629,46 @@ def main():
             step=0.1,
             key="price_proximity_percent"
         )
+        min_risk_reward_ratio = st.number_input(
+            "Minimum Risk-Reward Ratio:",
+            value=st.session_state['config']['min_risk_reward_ratio'],
+            min_value=0.01,
+            step=0.01,
+            key="min_risk_reward_ratio"
+        )
+        iv_threshold = st.number_input(
+            "Implied Volatility Threshold (%):",
+            value=st.session_state['config']['iv_threshold'],
+            min_value=10.0,
+            step=1.0,
+            key="iv_threshold"
+        )
+
+        st.subheader("Resistance Scoring Weights")
+        oi_score_weight = st.number_input(
+            "OI Score Weight:",
+            value=st.session_state['config']['oi_score_weight'],
+            min_value=0.0,
+            max_value=1.0,
+            step=0.1,
+            key="oi_score_weight"
+        )
+        pcr_score_weight = st.number_input(
+            "PCR Score Weight:",
+            value=st.session_state['config']['pcr_score_weight'],
+            min_value=0.0,
+            max_value=1.0,
+            step=0.1,
+            key="pcr_score_weight"
+        )
+        premium_score_weight = st.number_input(
+            "Premium Score Weight:",
+            value=st.session_state['config']['premium_score_weight'],
+            min_value=0.0,
+            max_value=1.0,
+            step=0.1,
+            key="premium_score_weight"
+        )
 
         st.subheader("Telegram Integration")
         telegram_bot_token = st.text_input(
@@ -583,6 +697,20 @@ def main():
         st.subheader("Screen Specific Stocks")
         specific_tickers = st.text_input("Enter tickers (comma-separated):", key="specific_tickers")
 
+        # Expiry Selection
+        st.subheader("Option Expiry")
+        nse_data = fetch_nse_data("HDFCBANK", time.time())  # Use a sample ticker to get expiries
+        expiries = nse_data.get('records', {}).get('expiryDates', []) if nse_data else []
+        if expiries:
+            st.session_state['selected_expiry'] = st.selectbox(
+                "Select Option Expiry",
+                ["Nearest"] + expiries,
+                index=0,
+                key="expiry_select"
+            )
+            if st.session_state['selected_expiry'] == "Nearest":
+                st.session_state['selected_expiry'] = expiries[0]
+
         config_changed = False
         if st.session_state['config']['min_gain_percent'] != min_gain_percent:
             st.session_state['config']['min_gain_percent'] = min_gain_percent
@@ -601,6 +729,21 @@ def main():
             config_changed = True
         if st.session_state['config']['price_proximity_percent'] != price_proximity_percent:
             st.session_state['config']['price_proximity_percent'] = price_proximity_percent
+            config_changed = True
+        if st.session_state['config']['min_risk_reward_ratio'] != min_risk_reward_ratio:
+            st.session_state['config']['min_risk_reward_ratio'] = min_risk_reward_ratio
+            config_changed = True
+        if st.session_state['config']['iv_threshold'] != iv_threshold:
+            st.session_state['config']['iv_threshold'] = iv_threshold
+            config_changed = True
+        if st.session_state['config']['oi_score_weight'] != oi_score_weight:
+            st.session_state['config']['oi_score_weight'] = oi_score_weight
+            config_changed = True
+        if st.session_state['config']['pcr_score_weight'] != pcr_score_weight:
+            st.session_state['config']['pcr_score_weight'] = pcr_score_weight
+            config_changed = True
+        if st.session_state['config']['premium_score_weight'] != premium_score_weight:
+            st.session_state['config']['premium_score_weight'] = premium_score_weight
             config_changed = True
         if config_changed:
             save_config(st.session_state['config'])
@@ -628,7 +771,9 @@ def main():
                 st.session_state['config']['telegram_bot_token'],
                 st.session_state['config']['telegram_chat_id'],
                 st.session_state['refresh_key'],
-                st.session_state['config']['price_proximity_percent']
+                st.session_state['config']['price_proximity_percent'],
+                st.session_state['config'],
+                st.session_state['selected_expiry']
             )
             st.session_state['screening_data'] = screening_data
             save_screening_data(screening_data)
@@ -668,8 +813,11 @@ def main():
                         "Momentum_Start_Date": st.column_config.TextColumn("Momentum Start"),
                         "Momentum_End_Date": st.column_config.TextColumn("Momentum End"),
                         "Strike_Price": st.column_config.NumberColumn("Suggested Strike", format="%.2f"),
+                        "Call_Premium": st.column_config.NumberColumn("Call Premium", format="%.2f"),
+                        "Implied_Volatility": st.column_config.NumberColumn("IV %", format="%.2f"),
                         "Status": st.column_config.TextColumn("Status"),
-                        "Last_Scanned": st.column_config.TextColumn("Last Scanned")
+                        "Last_Scanned": st.column_config.TextColumn("Last Scanned"),
+                        "Expiry": st.column_config.TextColumn("Expiry")
                     },
                     use_container_width=True,
                     height=400
@@ -696,6 +844,71 @@ def main():
                 st.rerun()
         else:
             st.info("No results found. Run a scan to check for stocks.")
+
+    with tabs[1]:
+        st.title("Call Selling Portfolio")
+        st.subheader("Manage Your Call Selling Trades")
+        with st.form("add_trade_form"):
+            st.write("Add New Trade")
+            trade_ticker = st.text_input("Ticker", key="trade_ticker")
+            trade_strike = st.number_input("Strike Price", min_value=0.0, step=0.1, key="trade_strike")
+            trade_premium = st.number_input("Premium Received", min_value=0.0, step=0.01, key="trade_premium")
+            trade_expiry = st.date_input("Expiry Date", min_value=date.today(), key="trade_expiry")
+            trade_status = st.selectbox("Status", ["Open", "Closed", "Exercised"], key="trade_status")
+            submitted = st.form_submit_button("Add Trade")
+            if submitted and trade_ticker:
+                portfolio = load_portfolio()
+                trade = {
+                    "Trade_ID": str(uuid.uuid4()),
+                    "Ticker": trade_ticker,
+                    "Strike": float(trade_strike),
+                    "Premium": float(trade_premium),
+                    "Expiry": trade_expiry.strftime("%Y-%m-%d"),
+                    "Status": trade_status,
+                    "Added": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                portfolio.append(trade)
+                save_portfolio(portfolio)
+                st.success("Trade added successfully!")
+                st.rerun()
+
+        portfolio_data = load_portfolio()
+        if portfolio_data:
+            portfolio_df = pd.DataFrame(portfolio_data)
+            st.write("### Current Portfolio")
+            st.dataframe(
+                portfolio_df,
+                column_config={
+                    "Trade_ID": st.column_config.TextColumn("Trade ID"),
+                    "Ticker": st.column_config.TextColumn("Ticker"),
+                    "Strike": st.column_config.NumberColumn("Strike", format="%.2f"),
+                    "Premium": st.column_config.NumberColumn("Premium", format="%.2f"),
+                    "Expiry": st.column_config.TextColumn("Expiry"),
+                    "Status": st.column_config.TextColumn("Status"),
+                    "Added": st.column_config.TextColumn("Added")
+                },
+                use_container_width=True,
+                height=400
+            )
+            st.subheader("Update Trade Status")
+            selected_trade_id = st.selectbox("Select Trade to Update", portfolio_df['Trade_ID'], key="update_trade_id")
+            new_status = st.selectbox("New Status", ["Open", "Closed", "Exercised"], key="new_trade_status")
+            if st.button("Update Trade"):
+                portfolio = load_portfolio()
+                for trade in portfolio:
+                    if trade['Trade_ID'] == selected_trade_id:
+                        trade['Status'] = new_status
+                        trade['Updated'] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        break
+                save_portfolio(portfolio)
+                st.success("Trade updated successfully!")
+                st.rerun()
+            if st.button("Clear Portfolio"):
+                save_portfolio([])
+                st.success("Portfolio cleared!")
+                st.rerun()
+        else:
+            st.info("No trades in portfolio. Add a trade to get started.")
     
 if __name__ == "__main__":
     try:
