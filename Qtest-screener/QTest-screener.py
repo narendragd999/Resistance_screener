@@ -12,44 +12,77 @@ st.set_page_config(layout="wide")
 # Function to scrape data from Screener.in
 @st.cache_data
 def scrape_screener_data(ticker):
-    url = f"https://www.screener.in/company/{ticker}/consolidated/"
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
-    except requests.RequestException as e:
-        return None, None, f"Error fetching URL for ticker {ticker}: {e}"
-
-    tables = soup.find_all('table', class_='data-table')
+    urls = [
+        f"https://www.screener.in/company/{ticker}/consolidated/",
+        f"https://www.screener.in/company/{ticker}/"
+    ]
+    
     quarterly_data = None
     yearly_data = None
-
-    for table in tables:
-        section = table.find_parent('section')
-        if section:
-            if section.get('id') == 'quarters':
-                quarterly_data = parse_table(table)
-            elif section.get('id') == 'profit-loss':
-                yearly_data = parse_table(table)
-
-    return quarterly_data, yearly_data, None
+    error = None
+    
+    for url in urls:
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            tables = soup.find_all('table', class_='data-table')
+            data_found = False
+            
+            for table in tables:
+                tbody = table.find('tbody')
+                if tbody and any(tr.find_all('td') for tr in tbody.find_all('tr')):  # Check for non-empty data rows
+                    section = table.find_parent('section')
+                    if section:
+                        if section.get('id') == 'quarters':
+                            quarterly_data = parse_table(table)
+                            # Validate quarterly_data: must have at least 2 columns and 1 row, and second column's first value non-empty
+                            if (quarterly_data is not None and 
+                                not quarterly_data.empty and
+                                quarterly_data.shape[1] >= 2 and 
+                                quarterly_data.shape[0] >= 1 and 
+                                str(quarterly_data.iloc[:, 1].values[0]).strip() != ""):
+                                data_found = True
+                        elif section.get('id') == 'profit-loss':
+                            yearly_data = parse_table(table)
+                            # Validate yearly_data: must have at least 1 row
+                            if (yearly_data is not None and 
+                                not yearly_data.empty and
+                                yearly_data.shape[0] >= 1):
+                                data_found = True
+            
+            if data_found:
+                break  # Exit loop if valid data is found
+            elif url == urls[0]:
+                continue  # Try non-consolidated URL if no valid data found
+            
+        except requests.RequestException as e:
+            error = f"Error fetching {url} for ticker {ticker}: {e}"
+        
+        if url == urls[1] and quarterly_data is None and yearly_data is None:
+            error = f"No financial data tables with valid data found for ticker {ticker}"
+    
+    return quarterly_data, yearly_data, error
 
 # Function to parse table data into a DataFrame
 def parse_table(table):
     headers = [th.text.strip() for th in table.find('thead').find_all('th')]
+    if not headers or len(headers) < 2:  # Ensure at least 2 columns
+        return None
     rows = []
     for tr in table.find('tbody').find_all('tr'):
         cells = [td.text.strip() for td in tr.find_all('td')]
-        if cells:
+        if cells and len(cells) == len(headers):  # Ensure row matches header length
             rows.append(cells)
-    return pd.DataFrame(rows, columns=headers)
+    return pd.DataFrame(rows, columns=headers) if rows else None
 
 # Function to determine if company is finance or non-finance
 def is_finance_company(quarterly_data):
-    if quarterly_data is None:
+    if quarterly_data is None or quarterly_data.empty:
         return False
     return "Financing Profit" in quarterly_data.iloc[:, 0].values
 
@@ -63,9 +96,7 @@ def find_row(data, row_name, threshold=0.8):
 
 # Function to clean numeric data
 def clean_numeric(series):
-    # Convert series to string type safely, handling non-string values
     series = series.astype(str).str.replace(',', '', regex=False)
-    # Convert to numeric, coercing errors to NaN, then fill NaN with 0
     return pd.to_numeric(series, errors='coerce').fillna(0)
 
 # Function to adjust Net Profit and Actual Income
@@ -91,6 +122,9 @@ def adjust_non_finance(data, is_finance):
 
 # Function to check if latest quarter/year is highest historically
 def check_highest_historical(data, is_quarterly, is_finance):
+    if data is None or data.empty:
+        return {}
+    
     data = data.set_index('')
     adjusted_net_profit, adjusted_actual_income = adjust_non_finance(data, is_finance)
     raw_net_profit = clean_numeric(data.loc[find_row(data, "Net Profit") or find_row(data, "Profit after tax")].iloc[1:]) if find_row(data, "Net Profit") or find_row(data, "Profit after tax") else None
@@ -114,17 +148,22 @@ def check_highest_historical(data, is_quarterly, is_finance):
             else:
                 is_highest = latest_value >= historical_values.max()
                 results[f"{prefix}{metric}"] = "PASS" if is_highest else "FAIL"
-        except Exception as e:
+        except Exception:
             results[f"{prefix}{metric}"] = "N/A"
     return results
 
 # Function to process quarterly data with Excel formulas
 def process_quarterly_data(quarterly_data, is_finance):
+    if quarterly_data is None or quarterly_data.empty:
+        return None
+    
     metrics = ["Revenue" if is_finance else "Sales", "Expenses", "Operating Profit", "Financing Profit",
                "OPM %", "Financing Margin %", "Other Income", "Interest", "Depreciation",
                "Profit before tax", "Tax %", "Net Profit", "Profit after tax", "EPS in Rs", "Actual Income"]
 
     data = quarterly_data[quarterly_data.iloc[:, 0].isin(metrics)].copy()
+    if data.empty:
+        return None
     data = data.set_index('')
 
     net_profit_row = find_row(data, "Net Profit") or find_row(data, "Profit after tax")
@@ -157,18 +196,23 @@ def process_quarterly_data(quarterly_data, is_finance):
                                               ['NET INCOME', 'PINK'] + [''] * (len(data.columns) - 2)],
                                              columns=data.columns)],
                          ignore_index=True)
-    except Exception as e:
+    except Exception:
         return data.reset_index()
 
     return data
 
 # Function to process yearly data with Excel formulas
 def process_yearly_data(yearly_data, is_finance):
+    if yearly_data is None or yearly_data.empty:
+        return None
+    
     metrics = ["Revenue" if is_finance else "Sales", "Expenses", "Operating Profit", "Financing Profit",
                "OPM %", "Financing Margin %", "Other Income", "Interest", "Depreciation",
                "Profit before tax", "Tax %", "Net Profit", "Profit after tax", "EPS in Rs", "Actual Income"]
 
     data = yearly_data[yearly_data.iloc[:, 0].isin(metrics)].copy()
+    if data.empty:
+        return None
     data = data.set_index('')
 
     net_profit_row = find_row(data, "Net Profit") or find_row(data, "Profit after tax")
@@ -199,7 +243,7 @@ def process_yearly_data(yearly_data, is_finance):
                                               ['NET INCOME', 'PINK'] + [''] * (len(data.columns) - 2)],
                                              columns=data.columns)],
                          ignore_index=True)
-    except Exception as e:
+    except Exception:
         return data.reset_index()
 
     return data
@@ -209,10 +253,10 @@ def save_to_csv(quarterly_data, yearly_data, ticker):
     output_dir = 'output_tables'
     os.makedirs(output_dir, exist_ok=True)
 
-    if quarterly_data is not None:
+    if quarterly_data is not None and not quarterly_data.empty:
         quarterly_data.to_csv(os.path.join(output_dir, f'{ticker}_quarterly_results.csv'), index=False)
 
-    if yearly_data is not None:
+    if yearly_data is not None and not yearly_data.empty:
         yearly_data.to_csv(os.path.join(output_dir, f'{ticker}_profit_loss.csv'), index=False)
 
 # Function to copy DataFrame to clipboard
@@ -266,8 +310,8 @@ def process_multiple_tickers(tickers):
             continue
 
         is_finance = st.session_state.finance_override or is_finance_company(quarterly_data)
-        qoq_results = check_highest_historical(quarterly_data, True, is_finance) if quarterly_data is not None else {}
-        yoy_results = check_highest_historical(yearly_data, False, is_finance) if yearly_data is not None else {}
+        qoq_results = check_highest_historical(quarterly_data, True, is_finance)
+        yoy_results = check_highest_historical(yearly_data, False, is_finance)
 
         screener_data.append({
             'Ticker': ticker,
@@ -289,7 +333,7 @@ def process_multiple_tickers(tickers):
 
 # Streamlit app
 def main():
-    st.title("Screener.in Financial Data Screener")
+    st.title("Financial Data Screener")
     st.write("Enter NSE tickers (comma-separated, e.g., RELIANCE,HDFCBANK) or upload a CSV file with a 'Ticker' column or tickers in the first column. "
              "The app scrapes Quarterly Results and Profit & Loss tables, applies Excel formulas, checks if latest results are historically highest "
              "(both raw and adjusted), downloads as CSV, and copies to clipboard. View screener-like summary for all tickers.")
@@ -371,7 +415,7 @@ def main():
             quarterly_data = st.session_state.quarterly_data.get(selected_ticker)
             yearly_data = st.session_state.yearly_data.get(selected_ticker)
 
-            if quarterly_data is not None:
+            if quarterly_data is not None and not quarterly_data.empty:
                 st.subheader(f"Raw Quarterly Results - {selected_ticker}")
                 st.dataframe(quarterly_data, use_container_width=True)
                 if st.button(f"Copy Raw Quarterly Results - {selected_ticker}"):
@@ -382,12 +426,13 @@ def main():
                     processed_quarterly = process_quarterly_data(quarterly_data, is_finance)
                     qoq_results = check_highest_historical(quarterly_data, True, is_finance)
                     st.subheader(f"Processed Quarterly Data - {selected_ticker} ({'Finance' if is_finance else 'Non-Finance'})")
-                    st.dataframe(processed_quarterly, use_container_width=True)
+                    if processed_quarterly is not None:
+                        st.dataframe(processed_quarterly, use_container_width=True)
                     display_results(f"QOQ Highest Historical Test - {selected_ticker}", qoq_results)
-                    if st.button(f"Copy Processed Quarterly Data - {selected_ticker}"):
+                    if processed_quarterly is not None and st.button(f"Copy Processed Quarterly Data - {selected_ticker}"):
                         copy_to_clipboard(processed_quarterly, f"Processed Quarterly Data - {selected_ticker}")
 
-            if yearly_data is not None:
+            if yearly_data is not None and not yearly_data.empty:
                 st.subheader(f"Raw Profit & Loss - {selected_ticker}")
                 st.dataframe(yearly_data, use_container_width=True)
                 if st.button(f"Copy Raw Profit & Loss - {selected_ticker}"):
@@ -398,9 +443,10 @@ def main():
                     processed_yearly = process_yearly_data(yearly_data, is_finance)
                     yoy_results = check_highest_historical(yearly_data, False, is_finance)
                     st.subheader(f"Processed Profit & Loss - {selected_ticker} ({'Finance' if is_finance else 'Non-Finance'})")
-                    st.dataframe(processed_yearly, use_container_width=True)
+                    if processed_yearly is not None:
+                        st.dataframe(processed_yearly, use_container_width=True)
                     display_results(f"YOY Highest Historical Test - {selected_ticker}", yoy_results)
-                    if st.button(f"Copy Processed Profit & Loss - {selected_ticker}"):
+                    if processed_yearly is not None and st.button(f"Copy Processed Profit & Loss - {selected_ticker}"):
                         copy_to_clipboard(processed_yearly, f"Processed Profit & Loss - {selected_ticker}")
 
 if __name__ == "__main__":
