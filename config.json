@@ -5,9 +5,9 @@
     "proximity_to_resistance": -0.3,
     "price_gain_threshold": 50.0,
     "auto_running": false,
-    "min_gain_percent": 20.0,
+    "min_gain_percent": 18.0,
     "min_green_candles": 3,
-    "lookback_days": 30,
+    "lookback_days": 20,
     "min_call_price_increase": 10.0,
     "strike_price_proximity": 1.1,
     "price_proximity_percent": 0.5000000000000001

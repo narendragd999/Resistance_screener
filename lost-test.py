@@ -142,45 +142,37 @@ def load_tickers() -> List[str]:
 def fetch_nse_data(ticker: str, refresh_key: float) -> Optional[Dict]:
     global nse_session, api_call_counter
     api_call_counter += 1
-
     cache_key = f"{ticker}_{refresh_key}"
     if cache_key in cache and (time.time() - cache.get(f"{cache_key}_timestamp", 0)) < 60:
-        print(f"Using cached data for {ticker}")
+        print(f"Using cached NSE data for {ticker}")
         return cache[cache_key]
-
+    print(f"Fetching NSE data for API {api_call_counter}--{ticker}")
     try:
         if nse_session is None:
             print(f"No session available for {ticker}")
             return None
-
         option_chain_url = f"https://www.nseindia.com/api/option-chain-equities?symbol={ticker}"
         quote_url = f"https://www.nseindia.com/api/quote-equity?symbol={ticker}"
-
-        print(f"Fetching data for API {api_call_counter}--{ticker}")
-
         response = nse_session.get(option_chain_url, headers=headers)
+        print(f"Option chain response for {ticker}: Status {response.status_code}")
         if response.status_code != 200:
-            print(f"Failed to load option chain for {ticker}: {response.status_code}")
+            print(f"Failed to load option chain for {ticker}: {response.status_code}, Response: {response.text}")
             return None
-
         data = response.json()
-
         quote_response = nse_session.get(quote_url, headers=headers)
+        print(f"Quote response for {ticker}: Status {quote_response.status_code}")
         if quote_response.status_code == 200:
             quote_data = quote_response.json()
             last_price = quote_data.get('priceInfo', {}).get('lastPrice', 0)
             if last_price > 0 and 'records' in data:
                 data['records']['underlyingValue'] = last_price
-                print(f"Updated underlying value for {ticker} with last price: {last_price}")
+                print(f"Updated underlying value for {ticker}: {last_price}")
             else:
-                print(f"No valid last price found for {ticker}, using default underlying.")
-        else:
-            print(f"Failed to load quote data for {ticker}: {quote_response.status_code}")
-
+                print(f"No valid last price for {ticker}")
         cache[cache_key] = data
         cache[f"{cache_key}_timestamp"] = time.time()
+        print(f"Successfully fetched NSE data for {ticker}")
         return data
-
     except Exception as e:
         print(f"Error fetching NSE data for {ticker}: {str(e)}")
         return None
@@ -235,18 +227,18 @@ def fetch_historical_data(ticker: str, start_date: date, end_date: date, refresh
     api_call_counter += 1
     cache_key = f"{ticker}_{start_date}_{end_date}_{refresh_key}"
     if cache_key in cache and (time.time() - cache.get(f"{cache_key}_timestamp", 0)) < 3600:
-        print(f"Using cached data for {ticker}")
+        print(f"Using cached historical data for {ticker}")
         return cache[cache_key]
-    print(f"Fetching data for API {api_call_counter}--{ticker}")
+    print(f"Fetching historical data for API {api_call_counter}--{ticker}")
     try:
         stock = yf.Ticker(ticker + ".NS")
         hist = stock.history(start=start_date, end=end_date + timedelta(days=1))
         if hist.empty:
             print(f"No historical data found for {ticker}. Possible delisted or invalid ticker.")
             return None
+        print(f"Fetched {len(hist)} days of historical data for {ticker}: {hist.index[0]} to {hist.index[-1]}")
         cache[cache_key] = hist
         cache[f"{cache_key}_timestamp"] = time.time()
-        print(f"Successfully fetched {len(hist)} days of data for {ticker}")
         return hist
     except Exception as e:
         print(f"Error fetching historical data for {ticker}: {str(e)}")
@@ -275,15 +267,18 @@ def generate_option_candlestick(ticker: str, strike_price: float, start_date: da
 
 # Check Momentum Loss and Suggest Resistance Strike
 def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_gain_percent: float, min_green_candles: int, bot_token: str, chat_id: str, price_proximity_percent: float) -> Optional[Dict]:
+    print(f"\n=== Processing {ticker} ===")
     if hist.empty or len(hist) < min_green_candles + 2:
         print(f"{ticker}: Insufficient data (only {len(hist)} days)")
         return None
     try:
         yesterday = hist.index[-1]
         yesterday_close = hist.loc[yesterday, 'Close']
+        print(f"{ticker}: Current price={current_price:.2f}, Yesterday close={yesterday_close:.2f}, Price drop={current_price < yesterday_close}")
     except KeyError:
         print(f"{ticker}: Missing data")
         return None
+    
     hist = hist.sort_index()
     closes = hist['Close'].values
     dates = hist.index
@@ -293,6 +288,7 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
     best_end_idx = None
     current_green_candles = 0
     current_start_idx = None
+    
     for i in range(1, len(closes)):
         if closes[i] > closes[i-1]:
             current_green_candles += 1
@@ -303,6 +299,7 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
                 start_price = closes[current_start_idx]
                 end_price = closes[current_end_idx]
                 gain_percent = ((end_price - start_price) / start_price) * 100
+                print(f"{ticker}: Found {current_green_candles} green candles, Gain={gain_percent:.2f}%")
                 if gain_percent >= min_gain_percent and current_green_candles >= max_green_candles:
                     max_green_candles = current_green_candles
                     max_gain = gain_percent
@@ -311,118 +308,109 @@ def check_momentum(ticker: str, hist: pd.DataFrame, current_price: float, min_ga
         else:
             current_green_candles = 0
             current_start_idx = None
-    result = None
-    if max_gain >= min_gain_percent and max_green_candles >= min_green_candles and current_price < yesterday_close:
-        # Momentum loss detected, fetch resistance strike
-        nse_data = fetch_nse_data(ticker, time.time())
-        if nse_data is None:
-            print(f"{ticker}: No option chain data available")
-            return None
-        resistance_df = identify_resistance(nse_data, current_price)
-        if resistance_df is None or resistance_df.empty:
-            print(f"{ticker}: Could not determine resistance strike")
-            return None
-
-        momentum_start_date = dates[best_start_idx].strftime("%Y-%m-%d")
-        momentum_end_date = dates[best_end_idx].strftime("%Y-%m-%d")
-        
-        # Find the high or open of the day after the momentum period ends (red candle)
-        momentum_end = pd.to_datetime(momentum_end_date)
-        hist.index = pd.to_datetime(hist.index)
-        # Ensure momentum_end has the same timezone as hist.index
-        if hist.index.tz is not None:
-            momentum_end = momentum_end.tz_localize(hist.index.tz)
-        else:
-            # If hist.index is timezone-naive, ensure momentum_end is also naive
-            momentum_end = momentum_end.tz_localize(None)
-        
-        next_day = None
-        yesterday_high = None
-        for idx in hist.index:
-            if idx > momentum_end:
-                next_day = idx
-                break
-        if next_day is not None and next_day in hist.index:
-            # Use the maximum of Open and High for the red candle
-            red_candle_open = hist.loc[next_day, 'Open']
-            red_candle_high = hist.loc[next_day, 'High']
-            yesterday_high = max(red_candle_open, red_candle_high)
-        else:
-            print(f"{ticker}: No data available for the day after momentum period ends")
-            # Fallback to the last day if next day not found
-            red_candle_open = hist.loc[yesterday, 'Open']
-            red_candle_high = hist.loc[yesterday, 'High']
-            yesterday_high = max(red_candle_open, red_candle_high)
-
-        # Filter resistance strikes above the red candle's high/open
-        valid_resistances = resistance_df[resistance_df['strikePrice'] > yesterday_high]
-        if valid_resistances.empty:
-            print(f"{ticker}: No resistance strikes found above red candle high/open ({yesterday_high})")
-            return None
-
-        # Select the strike with the highest call option premium
-        best_strike = valid_resistances.loc[valid_resistances['callPrice'].idxmax(), 'strikePrice']
-
-        # Alternative approach: Select the strike with the largest premium increase (delta)
-        # valid_resistances = valid_resistances.sort_values(by='strikePrice')
-        # valid_resistances['premium_delta'] = valid_resistances['callPrice'].diff()
-        # valid_resistances = valid_resistances.dropna(subset=['premium_delta'])
-        # if not valid_resistances.empty:
-        #     best_strike = valid_resistances.loc[valid_resistances['premium_delta'].idxmax(), 'strikePrice']
-        # else:
-        #     best_strike = valid_resistances.loc[valid_resistances['callPrice'].idxmax(), 'strikePrice']
-
-        strike_price = float(best_strike)
-
-        result = {
-            "Ticker": ticker,
-            "Current_Price": current_price,
-            "Yesterday_Close": float(yesterday_close),
-            "Price_Drop_Percent": float(((yesterday_close - current_price) / yesterday_close) * 100),
-            "Momentum_Gain_Percent": float(max_gain),
-            "Green_Candle_Count": int(max_green_candles),
-            "Momentum_Start_Date": momentum_start_date,
-            "Momentum_End_Date": momentum_end_date,
-            "Strike_Price": float(strike_price),
-            "Status": "Momentum Loss",
-            "Last_Scanned": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        message = (
-            f"*Momentum Loss Alert*\n"
+    
+    print(f"{ticker}: Max green candles={max_green_candles}, Max gain={max_gain:.2f}%")
+    
+    if max_gain < min_gain_percent or max_green_candles < min_green_candles or current_price >= yesterday_close:
+        print(f"{ticker}: Failed criteria - Gain={max_gain:.2f}% (<{min_gain_percent}%), Green candles={max_green_candles} (<{min_green_candles}), Price drop={current_price < yesterday_close}")
+        return None
+    
+    print(f"{ticker}: Momentum loss detected, fetching resistance")
+    nse_data = fetch_nse_data(ticker, time.time())
+    if nse_data is None:
+        print(f"{ticker}: No option chain data available")
+        return None
+    
+    resistance_df = identify_resistance(nse_data, current_price)
+    if resistance_df is None or resistance_df.empty:
+        print(f"{ticker}: No resistance strikes found")
+        return None
+    
+    momentum_start_date = dates[best_start_idx].strftime("%Y-%m-%d")
+    momentum_end_date = dates[best_end_idx].strftime("%Y-%m-%d")
+    momentum_end = pd.to_datetime(momentum_end_date)
+    hist.index = pd.to_datetime(hist.index)
+    if hist.index.tz is not None:
+        momentum_end = momentum_end.tz_localize(hist.index.tz)
+    else:
+        momentum_end = momentum_end.tz_localize(None)
+    
+    next_day = None
+    yesterday_high = None
+    for idx in hist.index:
+        if idx > momentum_end:
+            next_day = idx
+            break
+    if next_day is not None and next_day in hist.index:
+        red_candle_open = hist.loc[next_day, 'Open']
+        red_candle_high = hist.loc[next_day, 'High']
+        yesterday_high = max(red_candle_open, red_candle_high)
+    else:
+        print(f"{ticker}: No data for day after momentum end, using last day")
+        red_candle_open = hist.loc[yesterday, 'Open']
+        red_candle_high = hist.loc[yesterday, 'High']
+        yesterday_high = max(red_candle_open, red_candle_high)
+    
+    print(f"{ticker}: Red candle high/open={yesterday_high:.2f}")
+    
+    # Relaxed resistance filter for debugging
+    valid_resistances = resistance_df[resistance_df['strikePrice'] > current_price]  # Changed from yesterday_high
+    if valid_resistances.empty:
+        print(f"{ticker}: No resistance strikes above current price {current_price:.2f}")
+        return None
+    
+    best_strike = valid_resistances.loc[valid_resistances['callPrice'].idxmax(), 'strikePrice']
+    strike_price = float(best_strike)
+    print(f"{ticker}: Selected strike={strike_price:.2f}")
+    
+    result = {
+        "Ticker": ticker,
+        "Current_Price": current_price,
+        "Yesterday_Close": float(yesterday_close),
+        "Price_Drop_Percent": float(((yesterday_close - current_price) / yesterday_close) * 100),
+        "Momentum_Gain_Percent": float(max_gain),
+        "Green_Candle_Count": int(max_green_candles),
+        "Momentum_Start_Date": momentum_start_date,
+        "Momentum_End_Date": momentum_end_date,
+        "Strike_Price": float(strike_price),
+        "Status": "Momentum Loss",
+        "Last_Scanned": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    message = (
+        f"*Momentum Loss Alert*\n"
+        f"Stock: *{ticker}*\n"
+        f"Current Price: *₹{current_price:.2f}*\n"
+        f"Yesterday Close: *₹{yesterday_close:.2f}*\n"
+        f"Price Drop: *{result['Price_Drop_Percent']:.2f}%*\n"
+        f"Prior Momentum Gain: *{max_gain:.2f}%*\n"
+        f"Green Candles: *{max_green_candles}*\n"
+        f"Momentum Period: *{momentum_start_date} to {momentum_end_date}*\n"
+        f"Suggested Strike (Call Selling): *₹{strike_price:.2f}*\n"
+        f"Timestamp: *{result['Last_Scanned']}*"
+    )
+    print(f"{ticker}: Sending Telegram notification")
+    send_split_telegram_message(bot_token, chat_id, message)
+    
+    # Separate recovery logic
+    if yesterday_high is not None and current_price >= yesterday_high:
+        recovery_message = (
+            f"*Momentum Loss Recovery Alert*\n"
             f"Stock: *{ticker}*\n"
             f"Current Price: *₹{current_price:.2f}*\n"
-            f"Yesterday Close: *₹{yesterday_close:.2f}*\n"
-            f"Price Drop: *{result['Price_Drop_Percent']:.2f}%*\n"
+            f"Red Candle High: *₹{yesterday_high:.2f}*\n"
+            f"Price Proximity: *{((yesterday_high - current_price) / yesterday_high * 100):.2f}%*\n"
             f"Prior Momentum Gain: *{max_gain:.2f}%*\n"
             f"Green Candles: *{max_green_candles}*\n"
             f"Momentum Period: *{momentum_start_date} to {momentum_end_date}*\n"
             f"Suggested Strike (Call Selling): *₹{strike_price:.2f}*\n"
-            f"Timestamp: *{result['Last_Scanned']}*"
+            f"Timestamp: *{result['Last_Scanned']}*\n"
+            f"Action: *Consider selling call at suggested strike*"
         )
-        print(f"{ticker}: Sending Telegram notification - Momentum Loss")
-        send_split_telegram_message(bot_token, chat_id, message)
-        
-        print(f"yesterday_high ==={yesterday_high}===CURRENT_PRICE {current_price}")
-        # Check for momentum loss recovery using the high of the day after momentum period
-        if yesterday_high is not None:
-            proximity_threshold = price_proximity_percent / 100
-            if current_price >= yesterday_high:
-                recovery_message = (
-                    f"*Momentum Loss Recovery Alert*\n"
-                    f"Stock: *{ticker}*\n"
-                    f"Current Price: *₹{current_price:.2f}*\n"
-                    f"Red Candle High: *₹{yesterday_high:.2f}*\n"
-                    f"Price Proximity: *{((yesterday_high - current_price) / yesterday_high * 100):.2f}%*\n"
-                    f"Prior Momentum Gain: *{max_gain:.2f}%*\n"
-                    f"Green Candles: *{max_green_candles}*\n"
-                    f"Momentum Period: *{momentum_start_date} to {momentum_end_date}*\n"
-                    f"Suggested Strike (Call Selling): *₹{strike_price:.2f}*\n"
-                    f"Timestamp: *{result['Last_Scanned']}*\n"
-                    f"Action: *Consider selling call at suggested strike*"
-                )
-                print(f"{ticker}: Sending Telegram notification - Momentum Loss Recovery")
-                send_split_telegram_message(bot_token, chat_id, recovery_message)
-                result["Status"] = "Momentum Loss Recovery"
+        print(f"{ticker}: Sending recovery notification")
+        send_split_telegram_message(bot_token, chat_id, recovery_message)
+        result["Status"] = "Momentum Loss Recovery"
+    
     return result
 
 # Screen Tickers
