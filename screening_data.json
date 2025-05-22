@@ -1,28 +1,28 @@
 [
     {
-        "Ticker": "ANGELONE",
-        "Current_Price": 2909,
-        "Yesterday_Close": 2913.60009765625,
-        "Price_Drop_Percent": 0.15788363200393896,
-        "Momentum_Gain_Percent": 20.451323826697827,
-        "Green_Candle_Count": 6,
+        "Ticker": "HFCL",
+        "Current_Price": 90.28,
+        "Yesterday_Close": 90.33000183105469,
+        "Price_Drop_Percent": 0.055354621987283255,
+        "Momentum_Gain_Percent": 21.837068484878795,
+        "Green_Candle_Count": 5,
         "Momentum_Start_Date": "2025-05-09",
-        "Momentum_End_Date": "2025-05-19",
-        "Strike_Price": 2950.0,
-        "Status": "Momentum Loss Recovery",
-        "Last_Scanned": "2025-05-22 16:30:10"
+        "Momentum_End_Date": "2025-05-16",
+        "Strike_Price": 91.0,
+        "Status": "Momentum Loss",
+        "Last_Scanned": "2025-05-16 09:32:05"
     },
     {
-        "Ticker": "HFCL",
-        "Current_Price": 84.45,
-        "Yesterday_Close": 84.5,
-        "Price_Drop_Percent": 0.05917159763313273,
-        "Momentum_Gain_Percent": 21.49986859000679,
-        "Green_Candle_Count": 4,
+        "Ticker": "TITAGARH",
+        "Current_Price": 843.5,
+        "Yesterday_Close": 844.5499877929688,
+        "Price_Drop_Percent": 0.12432512085076744,
+        "Momentum_Gain_Percent": 22.888321250341033,
+        "Green_Candle_Count": 5,
         "Momentum_Start_Date": "2025-05-09",
-        "Momentum_End_Date": "2025-05-15",
-        "Strike_Price": 85.0,
+        "Momentum_End_Date": "2025-05-16",
+        "Strike_Price": 860.0,
         "Status": "Momentum Loss",
-        "Last_Scanned": "2025-05-22 16:32:01"
+        "Last_Scanned": "2025-05-16 09:33:15"
     }
 ]
