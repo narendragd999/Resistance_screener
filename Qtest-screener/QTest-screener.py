@@ -59,13 +59,13 @@ def scrape_screener_data(ticker):
                 break  # Exit loop if valid data is found
             elif url == urls[0]:
                 continue  # Try non-consolidated URL if no valid data found
-            
+           
         except requests.RequestException as e:
             error = f"Error fetching {url} for ticker {ticker}: {e}"
         
         if url == urls[1] and quarterly_data is None and yearly_data is None:
             error = f"No financial data tables with valid data found for ticker {ticker}"
-    
+    print(f"url=={url}") 
     return quarterly_data, yearly_data, error
 
 # Function to parse table data into a DataFrame
