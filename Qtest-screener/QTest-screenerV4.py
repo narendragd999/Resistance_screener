@@ -32,6 +32,7 @@ def scrape_screener_data(ticker):
             soup = BeautifulSoup(response.content, 'html.parser')
             
             tables = soup.find_all('table', class_='data-table')
+            print(f"Found {len(tables)} tables for {ticker} at {url}")
             data_found = False
             
             for table in tables:
@@ -55,8 +56,10 @@ def scrape_screener_data(ticker):
                                 data_found = True
             
             if data_found:
+                print(f"Data found for {ticker} at {url}")
                 break
             elif url == urls[0]:
+                print(f"No data found at {url}, trying next URL")
                 continue
            
         except requests.RequestException as e:
@@ -71,8 +74,8 @@ def scrape_screener_data(ticker):
 def parse_table(table):
     headers = [th.text.strip() for th in table.find('thead').find_all('th')]
     if not headers or len(headers) < 2:
+        print("No valid headers found in table")
         return None
-    # Ensure first column is named '' for row labels
     headers[0] = ''
     rows = []
     for tr in table.find('tbody').find_all('tr'):
@@ -80,7 +83,7 @@ def parse_table(table):
         if cells and len(cells) == len(headers):
             rows.append(cells)
     df = pd.DataFrame(rows, columns=headers) if rows else None
-    print(f"Parsed table columns: {df.columns.tolist() if df is not None else 'None'}")
+    print(f"Parsed table shape: {df.shape if df is not None else 'None'}, columns: {df.columns.tolist() if df is not None else 'None'}")
     return df
 
 # Function to load data from CSV files
@@ -145,6 +148,13 @@ def find_row(data, row_name, threshold=0.8):
 
 # Function to clean numeric data
 def clean_numeric(series):
+    # Ensure series is a pandas Series; if it's a DataFrame, convert to Series
+    if isinstance(series, pd.DataFrame):
+        series = series.iloc[0]  # Take the first row if it's a DataFrame
+    elif not isinstance(series, pd.Series):
+        series = pd.Series(series)
+    
+    # Convert to string, handling non-string data gracefully
     series = series.astype(str).str.replace(',', '', regex=False).str.replace('[^0-9.-]', '', regex=True)
     return pd.to_numeric(series, errors='coerce').fillna(0)
 
@@ -153,16 +163,17 @@ def adjust_non_finance(data, is_finance):
     if is_finance:
         net_profit_row = find_row(data, "Net Profit") or find_row(data, "Profit after tax")
         actual_income_row = find_row(data, "Actual Income") or net_profit_row
-        return (clean_numeric(data.loc[net_profit_row].iloc[1:]) if net_profit_row else None,
-                clean_numeric(data.loc[actual_income_row].iloc[1:]) if actual_income_row else None)
+        net_profit = clean_numeric(data.loc[net_profit_row].iloc[1:]) if net_profit_row and net_profit_row in data.index else None
+        actual_income = clean_numeric(data.loc[actual_income_row].iloc[1:]) if actual_income_row and actual_income_row in data.index else None
+        return net_profit, actual_income
 
     net_profit_row = find_row(data, "Net Profit") or find_row(data, "Profit after tax")
     actual_income_row = find_row(data, "Actual Income") or net_profit_row
     other_income_row = find_row(data, "Other Income")
 
-    net_profit = clean_numeric(data.loc[net_profit_row].iloc[1:]) if net_profit_row else None
-    actual_income = clean_numeric(data.loc[actual_income_row].iloc[1:]) if actual_income_row else net_profit
-    other_income = clean_numeric(data.loc[other_income_row].iloc[1:]) if other_income_row else pd.Series(0, index=net_profit.index if net_profit is not None else [])
+    net_profit = clean_numeric(data.loc[net_profit_row].iloc[1:]) if net_profit_row and net_profit_row in data.index else None
+    actual_income = clean_numeric(data.loc[actual_income_row].iloc[1:]) if actual_income_row and actual_income_row in data.index else net_profit
+    other_income = clean_numeric(data.loc[other_income_row].iloc[1:]) if other_income_row and other_income_row in data.index else pd.Series(0, index=net_profit.index if net_profit is not None else [])
 
     adjusted_net_profit = net_profit - other_income if net_profit is not None else None
     adjusted_actual_income = actual_income - other_income if actual_income is not None else adjusted_net_profit

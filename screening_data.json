@@ -1,28 +1,67 @@
 [
     {
-        "Ticker": "HFCL",
-        "Current_Price": 90.28,
-        "Yesterday_Close": 90.33000183105469,
-        "Price_Drop_Percent": 0.055354621987283255,
-        "Momentum_Gain_Percent": 21.837068484878795,
+        "Ticker": "BEL",
+        "Current_Price": 385.3,
+        "Yesterday_Close": 385.45001220703125,
+        "Price_Drop_Percent": 0.03891871897273795,
+        "Momentum_Gain_Percent": 18.476314871465004,
+        "Green_Candle_Count": 6,
+        "Momentum_Start_Date": "2025-05-08",
+        "Momentum_End_Date": "2025-05-16",
+        "Strike_Price": 390.0,
+        "Status": "Momentum Loss Recovery",
+        "Last_Scanned": "2025-05-28 10:25:16"
+    },
+    {
+        "Ticker": "BHEL",
+        "Current_Price": 267.1,
+        "Yesterday_Close": 267.239990234375,
+        "Price_Drop_Percent": 0.0523837148220979,
+        "Momentum_Gain_Percent": 15.565711332991103,
         "Green_Candle_Count": 5,
         "Momentum_Start_Date": "2025-05-09",
         "Momentum_End_Date": "2025-05-16",
-        "Strike_Price": 91.0,
+        "Strike_Price": 270.0,
+        "Status": "Momentum Loss Recovery",
+        "Last_Scanned": "2025-05-28 10:25:18"
+    },
+    {
+        "Ticker": "JINDALSTEL",
+        "Current_Price": 947.95,
+        "Yesterday_Close": 948.0,
+        "Price_Drop_Percent": 0.005274261603370731,
+        "Momentum_Gain_Percent": 15.326317033436924,
+        "Green_Candle_Count": 6,
+        "Momentum_Start_Date": "2025-05-08",
+        "Momentum_End_Date": "2025-05-16",
+        "Strike_Price": 950.0,
         "Status": "Momentum Loss",
-        "Last_Scanned": "2025-05-16 09:32:05"
+        "Last_Scanned": "2025-05-28 10:26:03"
     },
     {
         "Ticker": "TITAGARH",
-        "Current_Price": 843.5,
-        "Yesterday_Close": 844.5499877929688,
-        "Price_Drop_Percent": 0.12432512085076744,
-        "Momentum_Gain_Percent": 22.888321250341033,
-        "Green_Candle_Count": 5,
+        "Current_Price": 918.75,
+        "Yesterday_Close": 919.0,
+        "Price_Drop_Percent": 0.02720348204570185,
+        "Momentum_Gain_Percent": 36.340487449981815,
+        "Green_Candle_Count": 6,
         "Momentum_Start_Date": "2025-05-09",
-        "Momentum_End_Date": "2025-05-16",
-        "Strike_Price": 860.0,
+        "Momentum_End_Date": "2025-05-19",
+        "Strike_Price": 920.0,
         "Status": "Momentum Loss",
-        "Last_Scanned": "2025-05-16 09:33:15"
+        "Last_Scanned": "2025-05-28 10:26:46"
+    },
+    {
+        "Ticker": "UNIONBANK",
+        "Current_Price": 141.94,
+        "Yesterday_Close": 141.99000549316406,
+        "Price_Drop_Percent": 0.035217614782381446,
+        "Momentum_Gain_Percent": 16.741642618253962,
+        "Green_Candle_Count": 4,
+        "Momentum_Start_Date": "2025-05-08",
+        "Momentum_End_Date": "2025-05-14",
+        "Strike_Price": 142.5,
+        "Status": "Momentum Loss Recovery",
+        "Last_Scanned": "2025-05-28 10:27:00"
     }
 ]
