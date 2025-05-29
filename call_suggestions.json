@@ -1,0 +1,38 @@
+[
+    {
+        "Ticker": "OIL",
+        "Underlying": 447.05,
+        "Suggested_Call_Strike": 470.0,
+        "Call_Last_Price": 9.1,
+        "Potential_Gain_%": 252.1978021978021,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-29 17:54:59"
+    },
+    {
+        "Ticker": "OIL",
+        "Underlying": 447.05,
+        "Suggested_Call_Strike": 470.0,
+        "Call_Last_Price": 9.1,
+        "Potential_Gain_%": 252.1978021978021,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-29 17:57:00"
+    },
+    {
+        "Ticker": "OIL",
+        "Underlying": 447.05,
+        "Suggested_Call_Strike": 470.0,
+        "Call_Last_Price": 9.1,
+        "Potential_Gain_%": 252.1978021978021,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-29 17:57:46"
+    },
+    {
+        "Ticker": "OIL",
+        "Underlying": 447.05,
+        "Suggested_Call_Strike": 470.0,
+        "Call_Last_Price": 9.1,
+        "Potential_Gain_%": 252.1978021978021,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-29 17:59:16"
+    }
+]
