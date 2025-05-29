@@ -390,80 +390,182 @@ def suggest_call_options(data: Dict, expiry: str, underlying: float, ticker: str
     }
 
 # Suggest Options for Selling (CE and PE based on premium change from CSV)
+# def suggest_options_for_selling(data: Dict, expiry: str, underlying: float, ticker: str, premium_threshold: float, options_df: pd.DataFrame) -> List[Dict]:
+#     if not data or 'records' not in data or 'data' not in data['records']:
+#         print(f"No valid data for {ticker}")
+#         return []
+    
+#     call_df, put_df = process_option_data(data, expiry)
+#     if call_df.empty and put_df.empty:
+#         print(f"No options data for {ticker} with expiry {expiry}")
+#         return []
+#     print(f'options_df dddd===={options_df}')
+#     # Filter options_df for specific ticker and expiry, normalizing date format
+#     try:
+#         # Convert expiry to datetime for comparison
+#         csv_expiry = pd.to_datetime(options_df['EXPIRY'], format='%d-%b-%Y', errors='coerce')
+#         options_df['EXPIRY'] = pd.to_datetime(options_df['EXPIRY'].str.title(), format='%d-%b-%Y', errors='coerce')
+#         nse_expiry = pd.to_datetime(expiry.title(), format='%d-%b-%Y', errors='coerce')
+#         #nse_expiry = pd.to_datetime(expiry, format='%d-%b-%Y', errors='coerce')        
+#         print(f'csv_expiry===={csv_expiry}')
+#         print(f'nse_expiry===={nse_expiry}')
+#         print(f'options_df HELLO====={options_df['EXPIRY']}')
+#         date_str = csv_expiry
+#         updated_date = date_str.replace("2025", "25")
+#         print(f'expiry updated_date ===={updated_date}')
+#         options_df = options_df[(options_df['TICKER'] == ticker) & (options_df['EXPIRY'] == updated_date)]
+#     except Exception as e:
+#         print(f"Error normalizing expiry dates: {e}")
+#         options_df = options_df[(options_df['TICKER'] == ticker) & (options_df['EXPIRY'] == updated_date)]
+#         print(f"Options for {ticker}, expiry {expiry}:\n{options_df}")
+    
+#     if options_df.empty:
+#         print(f"No matching options in CSV for {ticker} with expiry {expiry}")
+#         return []
+    
+#     suggestions = []
+    
+#     for _, option in options_df.iterrows():
+#         try:
+#             strike = float(option['STRIKE_PRICE'])  # Ensure strike is float
+#             previous_price = float(option['PREVIOUS_PRICE'])  # Ensure price is float
+#             call_type = option['CALL TYPE']
+            
+#             print(f"Processing {ticker} {call_type} strike {strike}, previous_price: {previous_price}")
+            
+#             # Select appropriate DataFrame
+#             option_df = call_df if call_type == 'CE' else put_df
+#             #print(f"strike==={strike}\n")
+#             #print(f"option_df['Strike']===\n{option_df['Strike']}")
+            
+#             # Get all available strikes from NSE data as floats
+#             available_strikes = [float(strike) for strike in option_df['Strike'].tolist()]
+#             print(f"Available strikes for {ticker} {call_type}: {available_strikes}")
+            
+#             # Check if the CSV strike exists in NSE data
+#             if strike not in available_strikes:
+#                 print(f"No matching option found for {ticker} {call_type} strike {strike} in NSE data")
+#                 continue
+            
+#             # Find matching option for the strike
+#             matching_option = option_df[option_df['Strike'].astype(float) == strike]
+#             if matching_option.empty:
+#                 print(f"Unexpected: Matching option empty for {ticker} {call_type} strike {strike}")
+#                 continue
+            
+#             current_price = float(matching_option.iloc[0]['Last Price'])
+#             print(f"Current price for {ticker} {call_type} strike {strike}: {current_price}")
+            
+#             if previous_price > 0:
+#                 premium_change_percent = ((current_price - previous_price) / previous_price) * 100
+#             else:
+#                 premium_change_percent = 0
+#                 print(f"Previous price is 0 for {ticker} {call_type} strike {strike}, skipping")
+#                 continue
+            
+#             print(f"Premium change for {ticker} {call_type} strike {strike}: {premium_change_percent:.2f}%")
+            
+#             # Check threshold
+#             if abs(premium_change_percent) >= abs(premium_threshold) and (
+#                 (premium_threshold >= 0 and premium_change_percent >= premium_threshold) or 
+#                 (premium_threshold < 0 and premium_change_percent <= premium_threshold)
+#             ):
+#                 suggestion = {
+#                     "Ticker": ticker,
+#                     "Underlying": underlying,
+#                     "Option_Type": call_type,
+#                     "Suggested_Sell_Strike": strike,
+#                     "Current_Premium": current_price,
+#                     "Previous_Premium": previous_price,
+#                     "Premium_Change_%": premium_change_percent,
+#                     "Expiry": expiry,
+#                     "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+#                 }
+#                 suggestions.append(suggestion)
+#                 print(f"Added suggestion: {suggestion}")
+#             else:
+#                 print(f"Premium change {premium_change_percent:.2f}% does not meet threshold {premium_threshold}%")
+#         except Exception as e:
+#             print(f"Error processing option for {ticker} strike {strike}: {e}")
+    
+#     if not suggestions:
+#         print(f"No suggestions for {ticker} with threshold {premium_threshold}%")
+    
+#     return suggestions
+
+# Suggest Options for Selling (CE only based on premium change from CSV)
 def suggest_options_for_selling(data: Dict, expiry: str, underlying: float, ticker: str, premium_threshold: float, options_df: pd.DataFrame) -> List[Dict]:
     if not data or 'records' not in data or 'data' not in data['records']:
         print(f"No valid data for {ticker}")
         return []
     
-    call_df, put_df = process_option_data(data, expiry)
-    if call_df.empty and put_df.empty:
-        print(f"No options data for {ticker} with expiry {expiry}")
+    call_df, _ = process_option_data(data, expiry)
+    if call_df.empty:
+        print(f"No call options data for {ticker} with expiry {expiry}")
         return []
-    #print(f'options_df dddd===={options_df}')
-    # Filter options_df for specific ticker and expiry, normalizing date format
+    
+    # Filter options_df for specific ticker, CE only, and expiry
     try:
-        # Convert expiry to datetime for comparison
-        csv_expiry = pd.to_datetime(options_df['EXPIRY'], format='%d-%b-%Y', errors='coerce')
-        nse_expiry = pd.to_datetime(expiry, format='%d-%b-%Y', errors='coerce')        
-        # print(f'csv_expiry===={csv_expiry}')
-        # print(f'nse_expiry===={nse_expiry}')
-        # print(f'options_df====={options_df['EXPIRY']}')
-        date_str = expiry
-        updated_date = date_str.replace("2025", "25")
-        #print(f'expiry ===={updated_date}')
-        options_df = options_df[(options_df['TICKER'] == ticker) & (options_df['EXPIRY'] == updated_date)]
+        options_df['EXPIRY'] = pd.to_datetime(options_df['EXPIRY'].str.title(), format='%d-%b-%Y', errors='coerce')
+        nse_expiry = pd.to_datetime(expiry.title(), format='%d-%b-%Y', errors='coerce')
+        print(f'nse_expiry===={nse_expiry}')
+        print(f'options_df EXPIRY===={options_df["EXPIRY"]}')
+        
+        # Normalize year to '25' if 2025
+        updated_date = nse_expiry.strftime('%d-%b-25') if nse_expiry.year == 2025 else expiry
+        print(f'expiry updated_date ===={updated_date}')
+        
+        options_df = options_df[
+            (options_df['TICKER'] == ticker) & 
+            (options_df['CALL TYPE'] == 'CE') & 
+            (options_df['EXPIRY'].dt.strftime('%d-%b-%y') == updated_date)
+        ]
+        print(f"Filtered CE options for {ticker}, expiry {updated_date}:\n{options_df}")
     except Exception as e:
         print(f"Error normalizing expiry dates: {e}")
-        options_df = options_df[(options_df['TICKER'] == ticker) & (options_df['EXPIRY'] == updated_date)]
-        print(f"Options for {ticker}, expiry {expiry}:\n{options_df}")
+        # Fallback: Use original expiry format
+        options_df = options_df[
+            (options_df['TICKER'] == ticker) & 
+            (options_df['CALL TYPE'] == 'CE') & 
+            (options_df['EXPIRY'].dt.strftime('%d-%b-%Y') == expiry)
+        ]
+        print(f"Fallback CE options for {ticker}, expiry {expiry}:\n{options_df}")
     
     if options_df.empty:
-        print(f"No matching options in CSV for {ticker} with expiry {expiry}")
+        print(f"No matching CE options in CSV for {ticker} with expiry {expiry}")
         return []
     
     suggestions = []
     
     for _, option in options_df.iterrows():
         try:
-            strike = float(option['STRIKE_PRICE'])  # Ensure strike is float
-            previous_price = float(option['PREVIOUS_PRICE'])  # Ensure price is float
-            call_type = option['CALL TYPE']
+            strike = float(option['STRIKE_PRICE'])
+            previous_price = float(option.get('PREVIOUS_PRICE', 0))
             
-            print(f"Processing {ticker} {call_type} strike {strike}, previous_price: {previous_price}")
-            
-            # Select appropriate DataFrame
-            option_df = call_df if call_type == 'CE' else put_df
-            #print(f"strike==={strike}\n")
-            #print(f"option_df['Strike']===\n{option_df['Strike']}")
-            
-            # Get all available strikes from NSE data as floats
-            available_strikes = [float(strike) for strike in option_df['Strike'].tolist()]
-            print(f"Available strikes for {ticker} {call_type}: {available_strikes}")
-            
-            # Check if the CSV strike exists in NSE data
-            if strike not in available_strikes:
-                print(f"No matching option found for {ticker} {call_type} strike {strike} in NSE data")
+            if previous_price <= 0:
+                print(f"Skipping {ticker} CE strike {strike} due to invalid PREVIOUS_PRICE")
                 continue
             
-            # Find matching option for the strike
-            matching_option = option_df[option_df['Strike'].astype(float) == strike]
+            print(f"Processing {ticker} CE strike {strike}, previous_price: {previous_price}")
+            
+            available_strikes = [float(strike) for strike in call_df['Strike'].tolist()]
+            print(f"Available strikes for {ticker} CE: {available_strikes}")
+            
+            if strike not in available_strikes:
+                print(f"No matching option found for {ticker} CE strike {strike} in NSE data")
+                continue
+            
+            matching_option = call_df[call_df['Strike'].astype(float) == strike]
             if matching_option.empty:
-                print(f"Unexpected: Matching option empty for {ticker} {call_type} strike {strike}")
+                print(f"Unexpected: Matching option empty for {ticker} CE strike {strike}")
                 continue
             
             current_price = float(matching_option.iloc[0]['Last Price'])
-            print(f"Current price for {ticker} {call_type} strike {strike}: {current_price}")
+            print(f"Current price for {ticker} CE strike {strike}: {current_price}")
             
-            if previous_price > 0:
-                premium_change_percent = ((current_price - previous_price) / previous_price) * 100
-            else:
-                premium_change_percent = 0
-                print(f"Previous price is 0 for {ticker} {call_type} strike {strike}, skipping")
-                continue
+            premium_change_percent = ((current_price - previous_price) / previous_price) * 100
+            print(f"Premium change for {ticker} CE strike {strike}: {premium_change_percent:.2f}%")
             
-            print(f"Premium change for {ticker} {call_type} strike {strike}: {premium_change_percent:.2f}%")
-            
-            # Check threshold
             if abs(premium_change_percent) >= abs(premium_threshold) and (
                 (premium_threshold >= 0 and premium_change_percent >= premium_threshold) or 
                 (premium_threshold < 0 and premium_change_percent <= premium_threshold)
@@ -471,7 +573,7 @@ def suggest_options_for_selling(data: Dict, expiry: str, underlying: float, tick
                 suggestion = {
                     "Ticker": ticker,
                     "Underlying": underlying,
-                    "Option_Type": call_type,
+                    "Option_Type": "CE",
                     "Suggested_Sell_Strike": strike,
                     "Current_Premium": current_price,
                     "Previous_Premium": previous_price,
@@ -487,7 +589,7 @@ def suggest_options_for_selling(data: Dict, expiry: str, underlying: float, tick
             print(f"Error processing option for {ticker} strike {strike}: {e}")
     
     if not suggestions:
-        print(f"No suggestions for {ticker} with threshold {premium_threshold}%")
+        print(f"No CE suggestions for {ticker} with threshold {premium_threshold}%")
     
     return suggestions
 
@@ -884,7 +986,7 @@ def main():
             "Premium Change Threshold (%):",
             value=st.session_state['telegram_config']['premium_change_threshold'],
             min_value=-1000.0,
-            max_value=1000.0,
+            max_value=100000.0,
             step=10.0,
             key="premium_change_threshold_input"
         )

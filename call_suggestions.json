@@ -1,38 +1,20 @@
 [
     {
-        "Ticker": "OIL",
-        "Underlying": 447.05,
-        "Suggested_Call_Strike": 470.0,
-        "Call_Last_Price": 9.1,
-        "Potential_Gain_%": 252.1978021978021,
+        "Ticker": "ADANIPORTS",
+        "Underlying": 1435.5,
+        "Suggested_Call_Strike": 1520.0,
+        "Call_Last_Price": 14.95,
+        "Potential_Gain_%": 565.2173913043479,
         "Expiry": "26-Jun-2025",
-        "Timestamp": "2025-05-29 17:54:59"
+        "Timestamp": "2025-05-29 22:22:03"
     },
     {
-        "Ticker": "OIL",
-        "Underlying": 447.05,
-        "Suggested_Call_Strike": 470.0,
-        "Call_Last_Price": 9.1,
-        "Potential_Gain_%": 252.1978021978021,
+        "Ticker": "JINDALSTEL",
+        "Underlying": 975,
+        "Suggested_Call_Strike": 1030.0,
+        "Call_Last_Price": 14.0,
+        "Potential_Gain_%": 392.85714285714283,
         "Expiry": "26-Jun-2025",
-        "Timestamp": "2025-05-29 17:57:00"
-    },
-    {
-        "Ticker": "OIL",
-        "Underlying": 447.05,
-        "Suggested_Call_Strike": 470.0,
-        "Call_Last_Price": 9.1,
-        "Potential_Gain_%": 252.1978021978021,
-        "Expiry": "26-Jun-2025",
-        "Timestamp": "2025-05-29 17:57:46"
-    },
-    {
-        "Ticker": "OIL",
-        "Underlying": 447.05,
-        "Suggested_Call_Strike": 470.0,
-        "Call_Last_Price": 9.1,
-        "Potential_Gain_%": 252.1978021978021,
-        "Expiry": "26-Jun-2025",
-        "Timestamp": "2025-05-29 17:59:16"
+        "Timestamp": "2025-05-29 22:23:49"
     }
 ]

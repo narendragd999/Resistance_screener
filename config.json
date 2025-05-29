@@ -11,5 +11,5 @@
     "min_call_price_increase": 10.0,
     "strike_price_proximity": 1.1,
     "price_proximity_percent": 0.5000000000000001,
-    "premium_change_threshold": 10.0
+    "premium_change_threshold": 100.0
 }
