@@ -1,1 +1,46 @@
-[]
+[
+    {
+        "Ticker": "JINDALSTEL",
+        "Underlying": 975,
+        "Option_Type": "CE",
+        "Suggested_Sell_Strike": 1100.0,
+        "Current_Premium": 3.35,
+        "Previous_Premium": 1.5,
+        "Premium_Change_%": 123.33333333333334,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:14"
+    },
+    {
+        "Ticker": "JINDALSTEL",
+        "Underlying": 975,
+        "Option_Type": "CE",
+        "Suggested_Sell_Strike": 1040.0,
+        "Current_Premium": 11.8,
+        "Previous_Premium": 5.5,
+        "Premium_Change_%": 114.54545454545455,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:14"
+    },
+    {
+        "Ticker": "JINDALSTEL",
+        "Underlying": 975,
+        "Option_Type": "CE",
+        "Suggested_Sell_Strike": 1060.0,
+        "Current_Premium": 8.45,
+        "Previous_Premium": 3.85,
+        "Premium_Change_%": 119.48051948051948,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:14"
+    },
+    {
+        "Ticker": "OIL",
+        "Underlying": 447.05,
+        "Option_Type": "CE",
+        "Suggested_Sell_Strike": 500.0,
+        "Current_Premium": 3.3,
+        "Previous_Premium": 1.6,
+        "Premium_Change_%": 106.24999999999997,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:11"
+    }
+]

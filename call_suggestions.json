@@ -1,1 +1,686 @@
-[]
+[
+    {
+        "Ticker": "AARTIIND",
+        "Underlying": 478.6,
+        "Suggested_Call_Strike": 505.0,
+        "Call_Last_Price": 9.9,
+        "Potential_Gain_%": 266.6666666666664,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:35:35"
+    },
+    {
+        "Ticker": "ADANIGREEN",
+        "Underlying": 1019.5,
+        "Suggested_Call_Strike": 1080.0,
+        "Call_Last_Price": 30.05,
+        "Potential_Gain_%": 201.33111480865225,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:35:39"
+    },
+    {
+        "Ticker": "ADANIPORTS",
+        "Underlying": 1435.5,
+        "Suggested_Call_Strike": 1520.0,
+        "Call_Last_Price": 14.95,
+        "Potential_Gain_%": 565.2173913043479,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:35:42"
+    },
+    {
+        "Ticker": "ASTRAL",
+        "Underlying": 1503.2,
+        "Suggested_Call_Strike": 1580.0,
+        "Call_Last_Price": 22.45,
+        "Potential_Gain_%": 342.09354120267244,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:35:53"
+    },
+    {
+        "Ticker": "AXISBANK",
+        "Underlying": 1207.1,
+        "Suggested_Call_Strike": 1270.0,
+        "Call_Last_Price": 9.4,
+        "Potential_Gain_%": 669.1489361702137,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:35:58"
+    },
+    {
+        "Ticker": "BHARATFORG",
+        "Underlying": 1260,
+        "Suggested_Call_Strike": 1340.0,
+        "Call_Last_Price": 15.7,
+        "Potential_Gain_%": 509.5541401273886,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:06"
+    },
+    {
+        "Ticker": "BHARTIARTL",
+        "Underlying": 1865,
+        "Suggested_Call_Strike": 1960.0,
+        "Call_Last_Price": 9.85,
+        "Potential_Gain_%": 964.4670050761422,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:09"
+    },
+    {
+        "Ticker": "BRITANNIA",
+        "Underlying": 5485.5,
+        "Suggested_Call_Strike": 5800.0,
+        "Call_Last_Price": 34.0,
+        "Potential_Gain_%": 925.0,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:14"
+    },
+    {
+        "Ticker": "CGPOWER",
+        "Underlying": 698,
+        "Suggested_Call_Strike": 740.0,
+        "Call_Last_Price": 13.1,
+        "Potential_Gain_%": 320.6106870229008,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:17"
+    },
+    {
+        "Ticker": "CDSL",
+        "Underlying": 1513,
+        "Suggested_Call_Strike": 1600.0,
+        "Call_Last_Price": 27.8,
+        "Potential_Gain_%": 312.9496402877698,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:20"
+    },
+    {
+        "Ticker": "COALINDIA",
+        "Underlying": 398.5,
+        "Suggested_Call_Strike": 420.0,
+        "Call_Last_Price": 3.9,
+        "Potential_Gain_%": 551.2820512820513,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:26"
+    },
+    {
+        "Ticker": "COFORGE",
+        "Underlying": 8699,
+        "Suggested_Call_Strike": 9200.0,
+        "Call_Last_Price": 110.0,
+        "Potential_Gain_%": 455.4545454545455,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:29"
+    },
+    {
+        "Ticker": "CAMS",
+        "Underlying": 3987.4,
+        "Suggested_Call_Strike": 4200.0,
+        "Call_Last_Price": 80.8,
+        "Potential_Gain_%": 263.11881188118804,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:33"
+    },
+    {
+        "Ticker": "CONCOR",
+        "Underlying": 788,
+        "Suggested_Call_Strike": 830.0,
+        "Call_Last_Price": 9.45,
+        "Potential_Gain_%": 444.44444444444446,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:36"
+    },
+    {
+        "Ticker": "CROMPTON",
+        "Underlying": 358.95,
+        "Suggested_Call_Strike": 380.0,
+        "Call_Last_Price": 4.5,
+        "Potential_Gain_%": 467.77777777777806,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:39"
+    },
+    {
+        "Ticker": "CUMMINSIND",
+        "Underlying": 3170,
+        "Suggested_Call_Strike": 3350.0,
+        "Call_Last_Price": 51.5,
+        "Potential_Gain_%": 349.5145631067961,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:41"
+    },
+    {
+        "Ticker": "CYIENT",
+        "Underlying": 1358,
+        "Suggested_Call_Strike": 1440.0,
+        "Call_Last_Price": 24.6,
+        "Potential_Gain_%": 333.3333333333333,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:45"
+    },
+    {
+        "Ticker": "DLF",
+        "Underlying": 796,
+        "Suggested_Call_Strike": 840.0,
+        "Call_Last_Price": 10.95,
+        "Potential_Gain_%": 401.8264840182649,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:48"
+    },
+    {
+        "Ticker": "DABUR",
+        "Underlying": 482.25,
+        "Suggested_Call_Strike": 510.0,
+        "Call_Last_Price": 2.55,
+        "Potential_Gain_%": 1088.235294117647,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:51"
+    },
+    {
+        "Ticker": "DRREDDY",
+        "Underlying": 1245.1,
+        "Suggested_Call_Strike": 1310.0,
+        "Call_Last_Price": 12.15,
+        "Potential_Gain_%": 534.1563786008238,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:36:58"
+    },
+    {
+        "Ticker": "GAIL",
+        "Underlying": 192.24,
+        "Suggested_Call_Strike": 202.5,
+        "Call_Last_Price": 3.1,
+        "Potential_Gain_%": 330.96774193548356,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:04"
+    },
+    {
+        "Ticker": "GLENMARK",
+        "Underlying": 1410.8,
+        "Suggested_Call_Strike": 1500.0,
+        "Call_Last_Price": 18.75,
+        "Potential_Gain_%": 475.73333333333363,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:08"
+    },
+    {
+        "Ticker": "GRANULES",
+        "Underlying": 535.55,
+        "Suggested_Call_Strike": 570.0,
+        "Call_Last_Price": 7.45,
+        "Potential_Gain_%": 462.41610738255093,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:12"
+    },
+    {
+        "Ticker": "HCLTECH",
+        "Underlying": 1665.5,
+        "Suggested_Call_Strike": 1760.0,
+        "Call_Last_Price": 14.8,
+        "Potential_Gain_%": 638.5135135135135,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:15"
+    },
+    {
+        "Ticker": "HDFCBANK",
+        "Underlying": 1937.6,
+        "Suggested_Call_Strike": 2040.0,
+        "Call_Last_Price": 8.5,
+        "Potential_Gain_%": 1204.7058823529421,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:19"
+    },
+    {
+        "Ticker": "HEROMOTOCO",
+        "Underlying": 4355,
+        "Suggested_Call_Strike": 4600.0,
+        "Call_Last_Price": 49.2,
+        "Potential_Gain_%": 497.9674796747967,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:24"
+    },
+    {
+        "Ticker": "HINDALCO",
+        "Underlying": 651,
+        "Suggested_Call_Strike": 690.0,
+        "Call_Last_Price": 8.3,
+        "Potential_Gain_%": 469.87951807228916,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:27"
+    },
+    {
+        "Ticker": "HAL",
+        "Underlying": 5006,
+        "Suggested_Call_Strike": 5300.0,
+        "Call_Last_Price": 110.0,
+        "Potential_Gain_%": 267.2727272727273,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:30"
+    },
+    {
+        "Ticker": "HINDUNILVR",
+        "Underlying": 2364.2,
+        "Suggested_Call_Strike": 2500.0,
+        "Call_Last_Price": 8.6,
+        "Potential_Gain_%": 1579.0697674418625,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:34"
+    },
+    {
+        "Ticker": "ICICIBANK",
+        "Underlying": 1461,
+        "Suggested_Call_Strike": 1540.0,
+        "Call_Last_Price": 6.4,
+        "Potential_Gain_%": 1234.375,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:38"
+    },
+    {
+        "Ticker": "ICICIPRULI",
+        "Underlying": 668.2,
+        "Suggested_Call_Strike": 710.0,
+        "Call_Last_Price": 6.85,
+        "Potential_Gain_%": 610.2189781021891,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:41"
+    },
+    {
+        "Ticker": "IIFL",
+        "Underlying": 427.05,
+        "Suggested_Call_Strike": 450.0,
+        "Call_Last_Price": 10.0,
+        "Potential_Gain_%": 229.49999999999991,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:44"
+    },
+    {
+        "Ticker": "ITC",
+        "Underlying": 419.35,
+        "Suggested_Call_Strike": 445.0,
+        "Call_Last_Price": 2.25,
+        "Potential_Gain_%": 1139.9999999999989,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:47"
+    },
+    {
+        "Ticker": "INDIANB",
+        "Underlying": 601.25,
+        "Suggested_Call_Strike": 640.0,
+        "Call_Last_Price": 10.4,
+        "Potential_Gain_%": 372.5961538461538,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:49"
+    },
+    {
+        "Ticker": "IEX",
+        "Underlying": 199.9,
+        "Suggested_Call_Strike": 210.0,
+        "Call_Last_Price": 4.05,
+        "Potential_Gain_%": 249.38271604938257,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:52"
+    },
+    {
+        "Ticker": "IREDA",
+        "Underlying": 176.95,
+        "Suggested_Call_Strike": 187.5,
+        "Call_Last_Price": 3.0,
+        "Potential_Gain_%": 351.6666666666671,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:37:57"
+    },
+    {
+        "Ticker": "IGL",
+        "Underlying": 213.88,
+        "Suggested_Call_Strike": 225.0,
+        "Call_Last_Price": 4.15,
+        "Potential_Gain_%": 267.95180722891575,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:00"
+    },
+    {
+        "Ticker": "INDUSINDBK",
+        "Underlying": 825,
+        "Suggested_Call_Strike": 870.0,
+        "Call_Last_Price": 14.7,
+        "Potential_Gain_%": 306.12244897959187,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:04"
+    },
+    {
+        "Ticker": "INFY",
+        "Underlying": 1586.5,
+        "Suggested_Call_Strike": 1680.0,
+        "Call_Last_Price": 9.75,
+        "Potential_Gain_%": 958.9743589743589,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:07"
+    },
+    {
+        "Ticker": "INDIGO",
+        "Underlying": 5320,
+        "Suggested_Call_Strike": 5600.0,
+        "Call_Last_Price": 66.65,
+        "Potential_Gain_%": 420.1050262565641,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:09"
+    },
+    {
+        "Ticker": "JINDALSTEL",
+        "Underlying": 975,
+        "Suggested_Call_Strike": 1030.0,
+        "Call_Last_Price": 14.0,
+        "Potential_Gain_%": 392.85714285714283,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:17"
+    },
+    {
+        "Ticker": "JUBLFOOD",
+        "Underlying": 671.75,
+        "Suggested_Call_Strike": 710.0,
+        "Call_Last_Price": 8.75,
+        "Potential_Gain_%": 437.1428571428571,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:20"
+    },
+    {
+        "Ticker": "KEI",
+        "Underlying": 3659,
+        "Suggested_Call_Strike": 3900.0,
+        "Call_Last_Price": 57.7,
+        "Potential_Gain_%": 417.67764298093584,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:23"
+    },
+    {
+        "Ticker": "KOTAKBANK",
+        "Underlying": 2095.5,
+        "Suggested_Call_Strike": 2220.0,
+        "Call_Last_Price": 10.45,
+        "Potential_Gain_%": 1191.3875598086127,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:27"
+    },
+    {
+        "Ticker": "LTF",
+        "Underlying": 171.9,
+        "Suggested_Call_Strike": 182.5,
+        "Call_Last_Price": 2.35,
+        "Potential_Gain_%": 451.0638297872338,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:29"
+    },
+    {
+        "Ticker": "LT",
+        "Underlying": 3661.9,
+        "Suggested_Call_Strike": 3880.0,
+        "Call_Last_Price": 16.7,
+        "Potential_Gain_%": 1305.9880239520953,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:34"
+    },
+    {
+        "Ticker": "LICI",
+        "Underlying": 943,
+        "Suggested_Call_Strike": 1000.0,
+        "Call_Last_Price": 11.75,
+        "Potential_Gain_%": 485.10638297872345,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:37"
+    },
+    {
+        "Ticker": "LUPIN",
+        "Underlying": 1974.6,
+        "Suggested_Call_Strike": 2080.0,
+        "Call_Last_Price": 26.4,
+        "Potential_Gain_%": 399.24242424242465,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:40"
+    },
+    {
+        "Ticker": "MGL",
+        "Underlying": 1379.8,
+        "Suggested_Call_Strike": 1460.0,
+        "Call_Last_Price": 22.25,
+        "Potential_Gain_%": 360.4494382022474,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:44"
+    },
+    {
+        "Ticker": "MANAPPURAM",
+        "Underlying": 231.15,
+        "Suggested_Call_Strike": 245.0,
+        "Call_Last_Price": 0.6,
+        "Potential_Gain_%": 2308.3333333333326,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:46"
+    },
+    {
+        "Ticker": "MARICO",
+        "Underlying": 723.25,
+        "Suggested_Call_Strike": 760.0,
+        "Call_Last_Price": 6.1,
+        "Potential_Gain_%": 602.4590163934427,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:38:49"
+    },
+    {
+        "Ticker": "NESTLEIND",
+        "Underlying": 2437.8,
+        "Suggested_Call_Strike": 2560.0,
+        "Call_Last_Price": 12.3,
+        "Potential_Gain_%": 993.495934959348,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:02"
+    },
+    {
+        "Ticker": "OBEROIRLTY",
+        "Underlying": 1735.2,
+        "Suggested_Call_Strike": 1840.0,
+        "Call_Last_Price": 31.5,
+        "Potential_Gain_%": 332.69841269841254,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:06"
+    },
+    {
+        "Ticker": "ONGC",
+        "Underlying": 244.45,
+        "Suggested_Call_Strike": 257.5,
+        "Call_Last_Price": 2.8,
+        "Potential_Gain_%": 466.071428571429,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:09"
+    },
+    {
+        "Ticker": "OIL",
+        "Underlying": 447.05,
+        "Suggested_Call_Strike": 470.0,
+        "Call_Last_Price": 9.1,
+        "Potential_Gain_%": 252.1978021978021,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:13"
+    },
+    {
+        "Ticker": "OFSS",
+        "Underlying": 8519,
+        "Suggested_Call_Strike": 9135.0,
+        "Call_Last_Price": 265.0,
+        "Potential_Gain_%": 232.45283018867923,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:17"
+    },
+    {
+        "Ticker": "PIDILITIND",
+        "Underlying": 3044,
+        "Suggested_Call_Strike": 3260.0,
+        "Call_Last_Price": 25.0,
+        "Potential_Gain_%": 864.0,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:22"
+    },
+    {
+        "Ticker": "PRESTIGE",
+        "Underlying": 1507.8,
+        "Suggested_Call_Strike": 1600.0,
+        "Call_Last_Price": 42.0,
+        "Potential_Gain_%": 219.52380952380963,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:28"
+    },
+    {
+        "Ticker": "PNB",
+        "Underlying": 102.5,
+        "Suggested_Call_Strike": 108.0,
+        "Call_Last_Price": 1.55,
+        "Potential_Gain_%": 354.83870967741933,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:31"
+    },
+    {
+        "Ticker": "RBLBANK",
+        "Underlying": 216.8,
+        "Suggested_Call_Strike": 230.0,
+        "Call_Last_Price": 3.9,
+        "Potential_Gain_%": 338.46153846153817,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:35"
+    },
+    {
+        "Ticker": "RELIANCE",
+        "Underlying": 1419.5,
+        "Suggested_Call_Strike": 1500.0,
+        "Call_Last_Price": 7.9,
+        "Potential_Gain_%": 1018.9873417721518,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:38"
+    },
+    {
+        "Ticker": "SBILIFE",
+        "Underlying": 1827,
+        "Suggested_Call_Strike": 1920.0,
+        "Call_Last_Price": 15.0,
+        "Potential_Gain_%": 620.0,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:42"
+    },
+    {
+        "Ticker": "SJVN",
+        "Underlying": 102.2,
+        "Suggested_Call_Strike": 108.0,
+        "Call_Last_Price": 2.45,
+        "Potential_Gain_%": 236.73469387755088,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:46"
+    },
+    {
+        "Ticker": "MOTHERSON",
+        "Underlying": 152.12,
+        "Suggested_Call_Strike": 160.0,
+        "Call_Last_Price": 2.95,
+        "Potential_Gain_%": 267.1186440677964,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:48"
+    },
+    {
+        "Ticker": "SBIN",
+        "Underlying": 798.1,
+        "Suggested_Call_Strike": 840.0,
+        "Call_Last_Price": 6.35,
+        "Potential_Gain_%": 659.8425196850391,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:54"
+    },
+    {
+        "Ticker": "SUNPHARMA",
+        "Underlying": 1699.5,
+        "Suggested_Call_Strike": 1800.0,
+        "Call_Last_Price": 11.45,
+        "Potential_Gain_%": 877.7292576419213,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:39:57"
+    },
+    {
+        "Ticker": "SUPREMEIND",
+        "Underlying": 4264,
+        "Suggested_Call_Strike": 4500.0,
+        "Call_Last_Price": 79.0,
+        "Potential_Gain_%": 298.73417721518985,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:40:00"
+    },
+    {
+        "Ticker": "TATASTEEL",
+        "Underlying": 163.15,
+        "Suggested_Call_Strike": 172.5,
+        "Call_Last_Price": 1.9,
+        "Potential_Gain_%": 492.1052631578944,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:40:11"
+    },
+    {
+        "Ticker": "TECHM",
+        "Underlying": 1602,
+        "Suggested_Call_Strike": 1700.0,
+        "Call_Last_Price": 14.0,
+        "Potential_Gain_%": 700.0,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:40:14"
+    },
+    {
+        "Ticker": "FEDERALBNK",
+        "Underlying": 201.25,
+        "Suggested_Call_Strike": 212.5,
+        "Call_Last_Price": 1.75,
+        "Potential_Gain_%": 642.8571428571429,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:40:17"
+    },
+    {
+        "Ticker": "TITAN",
+        "Underlying": 3600,
+        "Suggested_Call_Strike": 3780.0,
+        "Call_Last_Price": 23.5,
+        "Potential_Gain_%": 765.9574468085107,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:40:27"
+    },
+    {
+        "Ticker": "TRENT",
+        "Underlying": 5651,
+        "Suggested_Call_Strike": 6000.0,
+        "Call_Last_Price": 98.05,
+        "Potential_Gain_%": 355.94084650688427,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:40:30"
+    },
+    {
+        "Ticker": "TIINDIA",
+        "Underlying": 3050,
+        "Suggested_Call_Strike": 3250.0,
+        "Call_Last_Price": 55.3,
+        "Potential_Gain_%": 361.6636528028933,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:40:33"
+    },
+    {
+        "Ticker": "UPL",
+        "Underlying": 630.1,
+        "Suggested_Call_Strike": 670.0,
+        "Call_Last_Price": 5.7,
+        "Potential_Gain_%": 699.9999999999995,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:40:35"
+    },
+    {
+        "Ticker": "UNIONBANK",
+        "Underlying": 141.24,
+        "Suggested_Call_Strike": 150.0,
+        "Call_Last_Price": 2.35,
+        "Potential_Gain_%": 372.7659574468081,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:40:38"
+    },
+    {
+        "Ticker": "WIPRO",
+        "Underlying": 250.52,
+        "Suggested_Call_Strike": 265.0,
+        "Call_Last_Price": 2.35,
+        "Potential_Gain_%": 616.170212765957,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-05-30 08:40:45"
+    }
+]

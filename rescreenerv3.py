@@ -698,7 +698,7 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                 sell_suggestion_list = suggest_options_for_selling(data, expiry, underlying, ticker, premium_threshold, options_df)
                 for sell_suggestion in sell_suggestion_list:
                     sell_message = (
-                        f"*Sell CE Option Suggestion*\n"
+                        f"*Sell CE Option Suggestion Premium Threshold*\n"
                         f"Stock: *{ticker}*\n"
                         f"Underlying: *₹{underlying:.2f}*\n"
                         f"Suggested Sell Strike: *₹{sell_suggestion['Suggested_Sell_Strike']:.2f}*\n"
@@ -992,7 +992,7 @@ def main():
             value=st.session_state['telegram_config']['proximity_to_resistance'],
             step=0.1,
             min_value=-5.0,
-            max_value=5.0,
+            max_value=10.0,
             key="proximity_to_resistance_input"
         )
         premium_change_threshold = st.number_input(
