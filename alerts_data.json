@@ -1,1 +1,9 @@
-[]
+[
+    {
+        "Ticker": "GLENMARK",
+        "Underlying": 1461,
+        "Resistance": 1466.6666666666667,
+        "Distance_to_Resistance": 5.6666666666667425,
+        "Timestamp": "2025-05-31 15:29:45"
+    }
+]
