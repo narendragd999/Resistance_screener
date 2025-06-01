@@ -404,10 +404,11 @@ def suggest_options_for_selling(data: Dict, expiry: str, underlying: float, tick
     print(f"ticker ----yeeee\n{ticker}")
     # Filter options_df for specific ticker, CE only, expiry, and OTM strikes
     try:
+        print(f'options_df EXPIRY=dooo==={options_df['EXPIRY']}')
         options_df['EXPIRY'] = pd.to_datetime(options_df['EXPIRY'].str.title(), format='%d-%b-%Y', errors='coerce')
         nse_expiry = pd.to_datetime(expiry.title(), format='%d-%b-%Y', errors='coerce')
         print(f'nse_expiry===={nse_expiry}')
-        print(f'options_df EXPIRY===={options_df["EXPIRY"]}')
+        
         
         # Normalize year to '25' if 2025
         updated_date = nse_expiry.strftime('%d-%b-25') if nse_expiry.year == 2025 else expiry
@@ -416,7 +417,7 @@ def suggest_options_for_selling(data: Dict, expiry: str, underlying: float, tick
         options_df = options_df[
             (options_df['TICKER'] == ticker) & 
             (options_df['CALL TYPE'] == 'CE') & 
-            (options_df['EXPIRY'].dt.strftime('%d-%b-%y') == updated_date) &
+            #(options_df['EXPIRY'].dt.strftime('%d-%b-%y') == updated_date) &
             (options_df['STRIKE_PRICE'] > underlying)  # Filter for OTM strikes
         ]
         print(f"Filtered CE options for {ticker}, expiry {updated_date}, OTM only:\n{options_df}")
@@ -426,7 +427,7 @@ def suggest_options_for_selling(data: Dict, expiry: str, underlying: float, tick
         options_df = options_df[
             (options_df['TICKER'] == ticker) & 
             (options_df['CALL TYPE'] == 'CE') & 
-            (options_df['EXPIRY'].dt.strftime('%d-%b-%Y') == expiry) &
+            #(options_df['EXPIRY'].dt.strftime('%d-%b-%Y') == expiry) &
             (options_df['STRIKE_PRICE'] > underlying)  # Filter for OTM strikes
         ]
         print(f"Fallback CE options for {ticker}, expiry {expiry}, OTM only:\n{options_df}")
