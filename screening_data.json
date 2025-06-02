@@ -1,16 +1,54 @@
 [
     {
+        "Ticker": "ANGELONE",
+        "Current_Price": 3035,
+        "Yesterday_Close": 3035.60009765625,
+        "Price_Drop_Percent": 0.019768666390323552,
+        "Momentum_Gain_Percent": 20.45132238721254,
+        "Green_Candle_Count": 6,
+        "Momentum_Start_Date": "2025-05-09",
+        "Momentum_End_Date": "2025-05-19",
+        "Strike_Price": 3050.0,
+        "Status": "Momentum Loss Recovery",
+        "Last_Scanned": "2025-06-01 16:32:46"
+    },
+    {
+        "Ticker": "HFCL",
+        "Current_Price": 87.49,
+        "Yesterday_Close": 87.58999633789062,
+        "Price_Drop_Percent": 0.11416410785642724,
+        "Momentum_Gain_Percent": 21.49986859000679,
+        "Green_Candle_Count": 4,
+        "Momentum_Start_Date": "2025-05-09",
+        "Momentum_End_Date": "2025-05-15",
+        "Strike_Price": 88.0,
+        "Status": "Momentum Loss",
+        "Last_Scanned": "2025-06-01 16:34:28"
+    },
+    {
         "Ticker": "SOLARINDS",
-        "Current_Price": 16146,
-        "Yesterday_Close": 16155.0,
-        "Price_Drop_Percent": 0.05571030640668524,
-        "Momentum_Gain_Percent": 19.764252353769738,
+        "Current_Price": 16045,
+        "Yesterday_Close": 16104.0,
+        "Price_Drop_Percent": 0.3663686040735221,
+        "Momentum_Gain_Percent": 20.461116465267995,
         "Green_Candle_Count": 7,
         "Momentum_Start_Date": "2025-05-20",
         "Momentum_End_Date": "2025-05-29",
         "Strike_Price": 16250.0,
         "Status": "Momentum Loss",
-        "Last_Scanned": "2025-05-29 12:21:14"
+        "Last_Scanned": "2025-06-01 16:36:41"
+    },
+    {
+        "Ticker": "TITAGARH",
+        "Current_Price": 891.45,
+        "Yesterday_Close": 891.5999755859375,
+        "Price_Drop_Percent": 0.016820949982518145,
+        "Momentum_Gain_Percent": 36.340487449981815,
+        "Green_Candle_Count": 6,
+        "Momentum_Start_Date": "2025-05-09",
+        "Momentum_End_Date": "2025-05-19",
+        "Strike_Price": 900.0,
+        "Status": "Momentum Loss",
+        "Last_Scanned": "2025-06-01 16:36:52"
     }
 ]
-
