@@ -1,16 +1,1 @@
-[
-    {
-        "Ticker": "SOLARINDS",
-        "Current_Price": 16146,
-        "Yesterday_Close": 16155.0,
-        "Price_Drop_Percent": 0.05571030640668524,
-        "Momentum_Gain_Percent": 19.764252353769738,
-        "Green_Candle_Count": 7,
-        "Momentum_Start_Date": "2025-05-20",
-        "Momentum_End_Date": "2025-05-29",
-        "Strike_Price": 16250.0,
-        "Status": "Momentum Loss",
-        "Last_Scanned": "2025-05-29 12:21:14"
-    }
-]
-
+[]
