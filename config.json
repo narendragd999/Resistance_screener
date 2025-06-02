@@ -2,14 +2,17 @@
     "telegram_bot_token": "7826437102:AAFdVAv7b0go3wOcPLNMZMVAfRM8O2SX3xQ",
     "telegram_chat_id": "542581131",
     "auto_scan_interval": 15,
-    "proximity_to_resistance": -0.4999999999999999,
+    "proximity_to_resistance": -0.30000000000000004,
     "price_gain_threshold": 50.0,
     "auto_running": false,
-    "min_gain_percent": 20.0,
+    "min_gain_percent": 18.0,
     "min_green_candles": 2,
-    "lookback_days": 10,
+    "lookback_days": 30,
     "min_call_price_increase": 10.0,
     "strike_price_proximity": 1.1,
     "price_proximity_percent": 0.5000000000000001,
-    "premium_change_threshold": 50.0
+    "premium_change_threshold": 50.0,
+    "notification_types": [
+        "Sell CE Option Suggestion Premium Threshold"
+    ]
 }

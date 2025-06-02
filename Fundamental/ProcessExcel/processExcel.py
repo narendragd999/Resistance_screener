@@ -9,7 +9,7 @@ st.set_page_config(page_title="Options Data Processor", layout="wide")
 st.title("Options Data Processor")
 
 # Defining expected output columns with exact header names
-OUTPUT_COLUMNS = ['TICKER', 'EXPIRY', 'CALL TYPE', 'STRIEK PRICE', 'CLOSE_PRIC']
+OUTPUT_COLUMNS = ['TICKER', 'EXPIRY', 'CALL TYPE', 'STRIKE_PRICE', 'PREVIOUS_PRICE']
 
 # Uploading the CSV file
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
@@ -42,8 +42,8 @@ if uploaded_file is not None:
                         ticker = match.group(1)
                         expiry = match.group(2)
                         call_type = match.group(3)
-                        striek_price = float(match.group(4))
-                        return ticker, expiry, call_type, striek_price
+                        strike_price = float(match.group(4))
+                        return ticker, expiry, call_type, strike_price
                     else:
                         return None, None, None, None
                 except Exception:
@@ -51,20 +51,23 @@ if uploaded_file is not None:
 
             # Applying parsing to CONTRACT_D column
             parsed_data = df['CONTRACT_D'].apply(parse_contract_d)
-            df[['TICKER', 'EXPIRY', 'CALL TYPE', 'STRIEK PRICE']] = pd.DataFrame(parsed_data.tolist(), index=df.index)
+            df[['TICKER', 'EXPIRY', 'CALL TYPE', 'STRIKE_PRICE']] = pd.DataFrame(parsed_data.tolist(), index=df.index)
 
             # Filtering out rows where parsing failed
-            df = df.dropna(subset=['TICKER', 'EXPIRY', 'CALL TYPE', 'STRIEK PRICE'])
+            df = df.dropna(subset=['TICKER', 'EXPIRY', 'CALL TYPE', 'STRIKE_PRICE'])
 
             # Removing rows where CLOSE_PRIC is blank (NaN or empty string)
             df = df.dropna(subset=['CLOSE_PRIC'])
             df = df[df['CLOSE_PRIC'].astype(str).str.strip() != '']
 
+            # Renaming CLOSE_PRIC to PREVIOUS_PRICE for output
+            df['PREVIOUS_PRICE'] = df['CLOSE_PRIC']
+
             # Filtering by selected CALL TYPE (CE or PE)
             df = df[df['CALL TYPE'] == call_type_option]
 
-            # Filtering by minimum CLOSE_PRIC
-            df = df[df['CLOSE_PRIC'] >= min_close_price]
+            # Filtering by minimum CLOSE_PRIC (now PREVIOUS_PRICE)
+            df = df[df['PREVIOUS_PRICE'] >= min_close_price]
 
             # Adding a selectbox for EXPIRY
             st.subheader("Select Expiry Date")
@@ -80,21 +83,21 @@ if uploaded_file is not None:
             # Verifying that the output contains exactly the required columns
             if list(final_df.columns) == OUTPUT_COLUMNS:
                 st.subheader("Processed Data")
-                st.write(f"Showing data for CALL TYPE: {call_type_option}, EXPIRY: {selected_expiry}, CLOSE_PRIC >= {min_close_price}")
-                st.write(f"The output contains the following columns: TICKER, EXPIRY, CALL TYPE, STRIEK PRICE, CLOSE_PRIC")
+                st.write(f"Showing data for CALL TYPE: {call_type_option}, EXPIRY: {selected_expiry}, PREVIOUS_PRICE >= {min_close_price}")
+                st.write(f"The output contains the following columns: TICKER, EXPIRY, CALL TYPE, STRIKE_PRICE, PREVIOUS_PRICE")
                 st.write(f"Number of rows after filtering: {len(final_df)}")
                 st.dataframe(final_df)
 
                 # Providing a download button for the processed CSV
                 csv = final_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label=f"Download Processed CSV ({call_type_option}, {selected_expiry}, CLOSE_PRIC >= {min_close_price})",
+                    label=f"Download Processed CSV ({call_type_option}, {selected_expiry}, PREVIOUS_PRICE >= {min_close_price})",
                     data=csv,
                     file_name=f"processed_options_data_{call_type_option}_{selected_expiry.replace('-', '')}.csv",
                     mime="text/csv"
                 )
             else:
-                st.error("Error: The processed data does not match the required columns: TICKER, EXPIRY, CALL TYPE, STRIEK PRICE, CLOSE_PRIC")
+                st.error("Error: The processed data does not match the required columns: TICKER, EXPIRY, CALL TYPE, STRIKE_PRICE, PREVIOUS_PRICE")
     except Exception as e:
         st.error(f"Error processing the file: {str(e)}")
 else:
