@@ -1,1 +1,86 @@
-[]
+[
+    {
+        "Ticker": "HUDCO",
+        "Underlying": 245.79,
+        "Resistance": 245.0,
+        "Distance_to_Resistance": -0.789999999999992,
+        "Timestamp": "2025-06-02 12:33:48"
+    },
+    {
+        "Ticker": "MUTHOOTFIN",
+        "Underlying": 2200.7,
+        "Resistance": 2200.0,
+        "Distance_to_Resistance": -0.6999999999998181,
+        "Timestamp": "2025-06-02 12:34:15"
+    },
+    {
+        "Ticker": "BANKINDIA",
+        "Underlying": 125.15,
+        "Resistance": 125.0,
+        "Distance_to_Resistance": -0.15000000000000568,
+        "Timestamp": "2025-06-02 13:33:05"
+    },
+    {
+        "Ticker": "GLENMARK",
+        "Underlying": 1483.7,
+        "Resistance": 1480.0,
+        "Distance_to_Resistance": -3.7000000000000455,
+        "Timestamp": "2025-06-02 13:33:23"
+    },
+    {
+        "Ticker": "INDIANB",
+        "Underlying": 641.45,
+        "Resistance": 640.0,
+        "Distance_to_Resistance": -1.4500000000000455,
+        "Timestamp": "2025-06-02 13:33:38"
+    },
+    {
+        "Ticker": "LTF",
+        "Underlying": 175.7,
+        "Resistance": 175.0,
+        "Distance_to_Resistance": -0.6999999999999886,
+        "Timestamp": "2025-06-02 13:33:47"
+    },
+    {
+        "Ticker": "MUTHOOTFIN",
+        "Underlying": 2205.3,
+        "Resistance": 2200.0,
+        "Distance_to_Resistance": -5.300000000000182,
+        "Timestamp": "2025-06-02 13:33:56"
+    },
+    {
+        "Ticker": "PFC",
+        "Underlying": 410.2,
+        "Resistance": 410.0,
+        "Distance_to_Resistance": -0.19999999999998863,
+        "Timestamp": "2025-06-02 13:34:17"
+    },
+    {
+        "Ticker": "BANKINDIA",
+        "Underlying": 125.45,
+        "Resistance": 125.0,
+        "Distance_to_Resistance": -0.45000000000000284,
+        "Timestamp": "2025-06-02 15:12:21"
+    },
+    {
+        "Ticker": "PRESTIGE",
+        "Underlying": 1541.1,
+        "Resistance": 1540.0,
+        "Distance_to_Resistance": -1.099999999999909,
+        "Timestamp": "2025-06-02 15:13:42"
+    },
+    {
+        "Ticker": "INDHOTEL",
+        "Underlying": 783.65,
+        "Resistance": 783.3333333333334,
+        "Distance_to_Resistance": -0.31666666666660603,
+        "Timestamp": "2025-06-02 15:14:04"
+    },
+    {
+        "Ticker": "INDHOTEL",
+        "Underlying": 785.4,
+        "Resistance": 783.3333333333334,
+        "Distance_to_Resistance": -2.066666666666606,
+        "Timestamp": "2025-06-02 16:27:41"
+    }
+]
