@@ -550,7 +550,7 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
             proximity_threshold = abs(proximity_percent) / 100.0
             
             # Check proximity to resistance
-            meets_proximity = False
+            meets_proximity = True
             if proximity_percent >= 0:
                 distance_to_resistance = resistance_strike - underlying
                 if 0 <= distance_to_resistance <= (resistance_strike * proximity_threshold):
