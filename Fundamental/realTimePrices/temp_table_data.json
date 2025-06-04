@@ -1,0 +1,14 @@
+[
+    {
+        "Ticker": "BANKINDIA",
+        "Underlying": 124.59,
+        "Support": 120.0,
+        "Resistance": 125.0,
+        "Distance_from_Resistance": 0.4099999999999966,
+        "Distance_from_Support": 4.590000000000003,
+        "Distance_%_from_Resistance": 0.32799999999999724,
+        "Distance_%_from_Support": 3.825000000000003,
+        "High_Volume_Gainer": "No",
+        "Last_Updated": "2025-06-04 07:41:22"
+    }
+]
