@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Random Word Generator with Hindi Meanings</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .spinner {
+      border: 4px solid rgba(0, 0, 0, 0.1);
+      border-left-color: #3b82f6;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .table-container {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-r from-blue-100 to-purple-100 flex items-center justify-center min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    // Expanded fallback dictionary for common words
+    const fallbackDictionary = {
+      exemplary: 'उत्कृष्ट',
+      forest: 'जंगल',
+      river: 'नदी',
+      mountain: 'पहाड़',
+      ocean: 'महासागर',
+      tree: 'पेड़',
+      technology: 'प्रौद्योगिकी',
+      circuit: 'सर्किट',
+      byte: 'बाइट',
+      pizza: 'पिज़्ज़ा',
+      sushi: 'सुशी',
+      tiger: 'बाघ',
+      elephant: 'हाथी',
+      happy: 'खुश',
+      bright: 'उज्ज्वल',
+      swift: 'तेज',
+      calm: 'शांत',
+      vivid: 'जीवंत',
+      bold: 'नन्हा',
+      quiet: 'चुप',
+      strong: 'मजबूत'
+    };
+
+    const RandomWordGenerator = () => {
+      const [topic, setTopic] = useState('general');
+      const [numWords, setNumWords] = useState(1);
+      const [generatedWords, setGeneratedWords] = useState([]);
+      const [error, setError] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      // Mock Google Translate API function (replace with actual API call)
+      const translateToHindi = async (word) => {
+        // Placeholder: In a real app, make an HTTP request to Google Translate API
+        // Example: https://translation.googleapis.com/language/translate/v2?key=YOUR_API_KEY
+        try {
+          // Simulated API call (replace with actual fetch)
+          const response = await fetch('https://translation.googleapis.com/language/translate/v2', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              // Include your API key (securely on server-side)
+              // 'Authorization': `Bearer YOUR_API_KEY`
+            },
+            body: JSON.stringify({
+              q: word,
+              source: 'en',
+              target: 'hi',
+              format: 'text'
+            })
+          });
+          if (!response.ok) {
+            throw new Error(`Translation API failed: ${response.status}`);
+          }
+          const data = await response.json();
+          return data.data.translations[0].translatedText || 'Translation unavailable';
+        } catch (err) {
+          console.error(`Translation error for ${word}:`, err);
+          return fallbackDictionary[word] || 'Translation unavailable';
+        }
+      };
+
+      // Fetch random words from Datamuse API based on topic
+      const fetchWords = async () => {
+        setError('');
+        setLoading(true);
+        const num = parseInt(numWords, 10);
+        if (isNaN(num) || num < 1 || num > 100) {
+          setError('Please enter a number between 1 and 100.');
+          setGeneratedWords([]);
+          setLoading(false);
+          return;
+        }
+
+        try {
+          // Datamuse API to get words related to the topic
+          const url = `https://api.datamuse.com/words?rel_jjb=${encodeURIComponent(topic)}&max=${num}`;
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`API request failed: ${response.status}`);
+          }
+          const data = await response.json();
+          if (data.length === 0) {
+            setError('No words found for this topic. Try another topic.');
+            setGeneratedWords([]);
+            setLoading(false);
+            return;
+          }
+
+          // For each word, get Hindi meaning
+          const wordsWithMeanings = [];
+          for (const item of data) {
+            const word = item.word;
+            let hindiMeaning = fallbackDictionary[word] || null;
+            let translationSource = hindiMeaning ? 'Fallback Dictionary' : 'Google Translate';
+
+            if (!hindiMeaning) {
+              hindiMeaning = await translateToHindi(word);
+              if (hindiMeaning === 'Translation unavailable' && fallbackDictionary[word]) {
+                hindiMeaning = fallbackDictionary[word];
+                translationSource = 'Fallback Dictionary';
+              }
+            }
+            wordsWithMeanings.push({ word, hindiMeaning, source: translationSource });
+          }
+          setGeneratedWords(wordsWithMeanings);
+        } catch (err) {
+          setError(`Failed to fetch words: ${err.message}`);
+          setGeneratedWords([]);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleGenerate = () => {
+        fetchWords();
+      };
+
+      return (
+        <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-lg">
+          <h1 className="text-3xl font-bold text-center text-gray-800 mb-6">Random Word Generator</h1>
+          
+          <div className="mb-6">
+            <label className="block text-gray-700 font-semibold mb-2" htmlFor="topic">
+              Topic
+            </label>
+            <input
+              id="topic"
+              type="text"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+              placeholder="e.g., nature, technology, food"
+            />
+            <p className="text-sm text-gray-500 mt-1">Enter a topic for related random words</p>
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-gray-700 font-semibold mb-2" htmlFor="numWords">
+              Number of Words (1-100)
+            </label>
+            <input
+              id="numWords"
+              type="number"
+              value={numWords}
+              onChange={(e) => setNumWords(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+              min="1"
+              max="100"
+              placeholder="Enter a number (1-100)"
+            />
+          </div>
+
+          <button
+            onClick={handleGenerate}
+            className="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 transition duration-200 disabled:bg-gray-400 font-semibold"
+            disabled={loading}
+          >
+            {loading ? 'Generating...' : 'Generate Words'}
+          </button>
+
+          {error && (
+            <div className="mt-6 p-3 bg-red-100 text-red-700 rounded-lg">
+              {error}
+            </div>
+          )}
+
+          {generatedWords.length > 0 && !loading && (
+            <div className="mt-6">
+              <h2 className="text-xl font-semibold text-gray-700 mb-4">Generated Words:</h2>
+              <div className="table-container">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="p-3 font-semibold text-gray-700 border-b">Hindi Meaning</th>
+                      <th className="p-3 font-semibold text-gray-700 border-b">English Word</th>
+                      <th className="p-3 font-semibold text-gray-700 border-b">Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {generatedWords.map((item, index) => (
+                      <tr key={index} className="hover:bg-gray-50">
+                        <td className="p-3 border-b text-gray-800 font-medium">{item.hindiMeaning}</td>
+                        <td className="p-3 border-b text-gray-800">{item.word}</td>
+                        <td className="p-3 border-b text-gray-500 text-sm">{item.source}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {loading && (
+            <div className="mt-6 text-center">
+              <div className="spinner"></div>
+              <p className="text-gray-600 mt-2">Loading words and translations...</p>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<RandomWordGenerator />);
+  </script>
+</body>
+</html>

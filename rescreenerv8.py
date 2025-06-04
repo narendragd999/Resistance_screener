@@ -726,9 +726,9 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                 # Send each chunk
                 for i, chunk in enumerate(chunks, 1):
                     logger.info(f"Sending message chunk {i}/{len(chunks)} (length: {len(chunk)})")
-                    asyncio.run(send_telegram_message(bot_token, chat_id, chunk))
+                    #asyncio.run(send_telegram_message(bot_token, chat_id, chunk))
             else:
-                asyncio.run(send_telegram_message(bot_token, chat_id, combined_message))
+                #asyncio.run(send_telegram_message(bot_token, chat_id, combined_message))
         except Exception as e:
             logger.error(f"Error sending combined Telegram message: {e}")
             st.error(f"Failed to send combined Telegram message: {e}")

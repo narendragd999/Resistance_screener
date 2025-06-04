@@ -1,1 +1,16 @@
-[]
+[
+    {
+        "Ticker": "CANBK",
+        "Underlying": 115.28,
+        "Resistance": 115.0,
+        "Distance_to_Resistance": -0.28000000000000114,
+        "Timestamp": "2025-06-03 12:09:46"
+    },
+    {
+        "Ticker": "BHARATFORG",
+        "Underlying": 1280.5,
+        "Resistance": 1280.0,
+        "Distance_to_Resistance": -0.5,
+        "Timestamp": "2025-06-03 13:47:44"
+    }
+]

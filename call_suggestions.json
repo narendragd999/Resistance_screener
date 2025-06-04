@@ -1,29 +1,20 @@
 [
     {
-        "Ticker": "BANKINDIA",
-        "Underlying": 125.25,
-        "Suggested_Call_Strike": 132.0,
-        "Call_Last_Price": 2.55,
-        "Potential_Gain_%": 264.7058823529412,
+        "Ticker": "CANBK",
+        "Underlying": 115.28,
+        "Suggested_Call_Strike": 122.0,
+        "Call_Last_Price": 1.55,
+        "Potential_Gain_%": 433.54838709677415,
         "Expiry": "26-Jun-2025",
-        "Timestamp": "2025-06-03 08:53:17"
+        "Timestamp": "2025-06-03 12:09:46"
     },
     {
-        "Ticker": "LTF",
-        "Underlying": 175.1,
-        "Suggested_Call_Strike": 185.0,
-        "Call_Last_Price": 2.4,
-        "Potential_Gain_%": 412.5000000000003,
+        "Ticker": "BHARATFORG",
+        "Underlying": 1280.5,
+        "Suggested_Call_Strike": 1360.0,
+        "Call_Last_Price": 14.3,
+        "Potential_Gain_%": 555.9440559440559,
         "Expiry": "26-Jun-2025",
-        "Timestamp": "2025-06-03 08:54:02"
-    },
-    {
-        "Ticker": "INDHOTEL",
-        "Underlying": 785.4,
-        "Suggested_Call_Strike": 830.0,
-        "Call_Last_Price": 10.5,
-        "Potential_Gain_%": 424.76190476190493,
-        "Expiry": "26-Jun-2025",
-        "Timestamp": "2025-06-03 08:54:55"
+        "Timestamp": "2025-06-03 13:47:44"
     }
 ]

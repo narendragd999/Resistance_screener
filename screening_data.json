@@ -1,1 +1,41 @@
-[]
+[
+    {
+        "Ticker": "BSE",
+        "Current_Price": 2758,
+        "Yesterday_Close": 2764.89990234375,
+        "Price_Drop_Percent": 0.24955342281654,
+        "Momentum_Gain_Percent": 15.012475139091098,
+        "Green_Candle_Count": 4,
+        "Momentum_Start_Date": "2025-05-28",
+        "Momentum_End_Date": "2025-06-03",
+        "Strike_Price": 2800.0,
+        "Status": "Momentum Loss",
+        "Last_Scanned": "2025-06-03 17:20:24"
+    },
+    {
+        "Ticker": "CDSL",
+        "Current_Price": 1708,
+        "Yesterday_Close": 1708.9000244140625,
+        "Price_Drop_Percent": 0.05266688520126243,
+        "Momentum_Gain_Percent": 12.947787469534862,
+        "Green_Candle_Count": 3,
+        "Momentum_Start_Date": "2025-05-29",
+        "Momentum_End_Date": "2025-06-03",
+        "Strike_Price": 1720.0,
+        "Status": "Momentum Loss",
+        "Last_Scanned": "2025-06-03 17:20:43"
+    },
+    {
+        "Ticker": "CUMMINSIND",
+        "Current_Price": 3309.7,
+        "Yesterday_Close": 3318.60009765625,
+        "Price_Drop_Percent": 0.26818831417909755,
+        "Momentum_Gain_Percent": 12.724986033591348,
+        "Green_Candle_Count": 5,
+        "Momentum_Start_Date": "2025-05-26",
+        "Momentum_End_Date": "2025-06-02",
+        "Strike_Price": 3350.0,
+        "Status": "Momentum Loss",
+        "Last_Scanned": "2025-06-03 17:20:54"
+    }
+]
