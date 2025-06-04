@@ -1,5 +1,21 @@
 [
     {
+        "Ticker": "CANBK",
+        "Underlying": 115.28,
+        "Suggested_Call_Strike": 122.0,
+        "Call_Last_Price": 1.55,
+        "Potential_Gain_%": 433.54838709677415,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-06-03 12:09:46"
+    },
+    {
+        "Ticker": "BHARATFORG",
+        "Underlying": 1280.5,
+        "Suggested_Call_Strike": 1360.0,
+        "Call_Last_Price": 14.3,
+        "Potential_Gain_%": 555.9440559440559,
+        "Expiry": "26-Jun-2025",
+        "Timestamp": "2025-06-03 13:47:44",
         "Ticker": "ACC",
         "Underlying": 1875,
         "Suggested_Call_Strike": 1980.0,
