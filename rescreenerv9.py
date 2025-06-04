@@ -12,6 +12,26 @@ from datetime import datetime, date, timedelta
 import yfinance as yf
 import numpy as np
 import logging
+import threading
+import queue
+
+# Queue to handle async tasks
+async_queue = queue.Queue()
+
+def run_async_task(coro):
+    """Run an async coroutine in a separate thread and return the result."""
+    result = []
+    def run_in_thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result.append(loop.run_until_complete(coro))
+        finally:
+            loop.close()
+    thread = threading.Thread(target=run_in_thread)
+    thread.start()
+    thread.join()
+    return result[0] if result else None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,7 +49,7 @@ scraper = cloudscraper.create_scraper()
 
 # Constants
 BASE_URL = "https://www.nseindia.com"
-STORED_TICKERS_PATH = "tickers-test.csv"
+STORED_TICKERS_PATH = "tickers.csv"
 CONFIG_FILE = "config.json"
 TEMP_TABLE_DATA_FILE = "temp_table_data.json"
 ALERTS_DATA_FILE = "alerts_data.json"
@@ -364,8 +384,8 @@ def process_option_data(data: Dict, expiry: str) -> Tuple[pd.DataFrame, pd.DataF
         if col not in put_df.columns:
             put_df[col] = 0
     
-    print(f"Call DataFrame columns: {call_df.columns.tolist()}")
-    print(f"Put DataFrame columns: {put_df.columns.tolist()}")
+    #print(f"Call DataFrame columns: {call_df.columns.tolist()}")
+    #print(f"Put DataFrame columns: {put_df.columns.tolist()}")
     
     return call_df, put_df
 
@@ -547,8 +567,8 @@ def load_tickers() -> List[str]:
         return ["HDFCBANK"]
 
 # Check Resistance and Send Notification with Suggestions
-def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, premium_threshold: float, options_df: pd.DataFrame, notification_types: List[str]):
-    refresh_key = time.time()
+def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str, chat_id: str, proximity_percent: float, premium_threshold: float, options_df: pd.DataFrame, notification_types: List[str], fetched_data: Dict[str, Optional[Dict]] = None):
+    logger.info(f"Starting check_resistance_and_notify for tickers: {tickers}, expiry: {expiry}")
     suggestions = []
     call_suggestions = []
     sell_suggestions = []
@@ -560,22 +580,25 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
     
     for ticker in tickers:
         try:
-            with st.spinner(f"Fetching data for {ticker}..."):
-                data = fetch_options_data(ticker, refresh_key)
+            with st.spinner(f"Processing {ticker}..."):
+                data = fetched_data.get(ticker) if fetched_data is not None else fetch_options_data(ticker, time.time())
                 if not data or 'records' not in data:
-                    logger.error(f"Failed to fetch data for {ticker}")
+                    logger.error(f"Failed to fetch or retrieve data for {ticker}")
                     continue
                 
+                logger.info(f"Processing {ticker}: underlyingValue={data['records'].get('underlyingValue', 'N/A')}")
                 call_df, put_df = process_option_data(data, expiry)
                 underlying = data['records'].get('underlyingValue', 0)
                 resistance_strike = identify_support_resistance(call_df, put_df)[1]
                 
                 if resistance_strike is None:
+                    logger.warning(f"No resistance strike identified for {ticker}")
                     continue
                 
                 proximity_threshold = abs(proximity_percent) / 100.0
+                logger.info(f"{ticker}: proximity_percent={proximity_percent}, threshold={proximity_threshold}")
                 
-                meets_proximity = True
+                meets_proximity = False
                 if proximity_percent >= 0:
                     distance_to_resistance = resistance_strike - underlying
                     if 0 <= distance_to_resistance <= (resistance_strike * proximity_threshold):
@@ -590,6 +613,7 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                                 f"---"
                             )
                             resistance_alerts.append(message)
+                            logger.info(f"Resistance alert for {ticker}: distance={distance_to_resistance}")
                         suggestions.append({
                             "Ticker": ticker,
                             "Underlying": underlying,
@@ -611,12 +635,13 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                                 f"---"
                             )
                             resistance_crossed_alerts.append(message)
+                            logger.info(f"Resistance crossed alert for {ticker}: crossed by={distance_to_resistance}")
                         suggestions.append({
                             "Ticker": ticker,
                             "Underlying": underlying,
                             "Resistance": resistance_strike,
                             "Distance_to_Resistance": -distance_to_resistance,
-                            "Timestamp": time.strftime("%Y-m-%d %H:%M:%S")
+                            "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                         })
 
                 if meets_proximity:
@@ -636,6 +661,7 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                             )
                             sell_option_suggestions.append(sell_message)
                             sell_suggestions.append(sell_suggestion)
+                            logger.info(f"Sell suggestion for {ticker}: strike={sell_suggestion['Suggested_Sell_Strike']}, premium_change={sell_suggestion['Premium_Change_%']}%")
 
                 if meets_proximity and (
                     (proximity_percent >= 0 and 0 <= (resistance_strike - underlying) <= (resistance_strike * proximity_threshold)) or
@@ -647,7 +673,7 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                             call_message = (
                                 f"Stock: *{ticker}*\n"
                                 f"Underlying: *₹{underlying:.2f}*\n"
-                                f"Suggested Call Strike: *₹{call_suggestion['Suggested_Call_Strike']:.2f}* (Most OTM)\n"
+                            f"Suggested Call Strike: *₹{call_suggestion['Suggested_Call_Strike']:.2f}* (Most OTM)\n"
                                 f"Call Last Price: *₹{call_suggestion['Call_Last_Price']:.2f}*\n"
                                 f"Potential Gain: *{call_suggestion['Potential_Gain_%']:.2f}%*\n"
                                 f"Expiry: *{expiry}*\n"
@@ -655,11 +681,12 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                             )
                             call_option_suggestions.append(call_message)
                             call_suggestions.append(call_suggestion)
+                            logger.info(f"Call suggestion for {ticker}: strike={call_suggestion['Suggested_Call_Strike']}, gain={call_suggestion['Potential_Gain_%']}%")
         except Exception as e:
             logger.error(f"Error processing ticker {ticker}: {e}")
             continue
     
-    # Combine all messages into one, handle length limit
+    # Combine and send notifications
     combined_message = f"*Resistance Screener Update* - {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     has_content = False
     
@@ -683,12 +710,10 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
         combined_message += "\n".join(call_option_suggestions) + "\n"
         has_content = True
     
-    # Check message length (Telegram limit: 4096 characters)
     if has_content:
         try:
             if len(combined_message) > 4096:
                 logger.warning(f"Combined message too long ({len(combined_message)} chars), splitting...")
-                # Split into chunks under 4096 chars
                 chunks = []
                 current_chunk = f"*Resistance Screener Update* - {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                 current_length = len(current_chunk)
@@ -705,7 +730,7 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                         section_header = "*Call Option Suggestions (Most OTM)*\n"
                     
                     if section_header:
-                        if current_length + len(section_header) > 4000:  # Leave room for safety
+                        if current_length + len(section_header) > 4000:
                             chunks.append(current_chunk)
                             current_chunk = f"*Resistance Screener Update (Part {len(chunks) + 1})* - {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                             current_length = len(current_chunk)
@@ -723,12 +748,12 @@ def check_resistance_and_notify(tickers: List[str], expiry: str, bot_token: str,
                 if current_chunk.strip():
                     chunks.append(current_chunk)
                 
-                # Send each chunk
                 for i, chunk in enumerate(chunks, 1):
                     logger.info(f"Sending message chunk {i}/{len(chunks)} (length: {len(chunk)})")
-                    #asyncio.run(send_telegram_message(bot_token, chat_id, chunk))
+                    run_async_task(send_telegram_message(bot_token, chat_id, chunk))
             else:
-                #asyncio.run(send_telegram_message(bot_token, chat_id, combined_message))
+                logger.info(f"Sending combined message (length: {len(combined_message)})")
+                run_async_task(send_telegram_message(bot_token, chat_id, combined_message))
         except Exception as e:
             logger.error(f"Error sending combined Telegram message: {e}")
             st.error(f"Failed to send combined Telegram message: {e}")
@@ -1112,13 +1137,35 @@ def main():
         st.write(f"Next Scan in: {minutes_to_next_scan} minutes {seconds_to_next_scan} seconds")
 
         def perform_scan(tickers_to_scan):
+            logger.info(f"Starting perform_scan for tickers: {tickers_to_scan}")
+            refresh_key = time.time()  # Set refresh_key once
+            fetched_data = {}  # Cache for fetched data
+            volume_threshold = 100000
+
+            # Fetch data once for each ticker
+            for ticker in tickers_to_scan:
+                with st.spinner(f"Fetching data for {ticker}..."):
+                    logger.info(f"Fetching data for {ticker} with refresh_key: {refresh_key}")
+                    data = fetch_options_data(ticker, refresh_key)
+                    if data and 'records' in data:
+                        fetched_data[ticker] = data
+                        logger.info(f"Successfully fetched data for {ticker}: underlyingValue={data['records'].get('underlyingValue', 'N/A')}")
+                    else:
+                        logger.error(f"No data fetched for ticker: {ticker}")
+                        fetched_data[ticker] = None
+
+            # Check resistance and send notifications using cached data
+            logger.info("Calling check_resistance_and_notify with cached data")
             new_suggestions, new_call_suggestions, new_sell_suggestions = check_resistance_and_notify(
                 tickers_to_scan, expiry, telegram_bot_token, telegram_chat_id,
                 st.session_state['telegram_config']['proximity_to_resistance'],
                 st.session_state['telegram_config']['premium_change_threshold'],
                 st.session_state['options_data'],
-                st.session_state['telegram_config']['notification_types']
+                st.session_state['telegram_config']['notification_types'],
+                fetched_data
             )
+            logger.info(f"Received {len(new_suggestions)} resistance alerts, {len(new_call_suggestions)} call suggestions, {len(new_sell_suggestions)} sell suggestions")
+            
             st.session_state['suggestions'].extend(new_suggestions)
             st.session_state['call_suggestions'].extend(new_call_suggestions)
             st.session_state['sell_suggestions'].extend(new_sell_suggestions)
@@ -1126,13 +1173,13 @@ def main():
             save_call_suggestions(st.session_state['call_suggestions'])
             save_sell_suggestions(st.session_state['sell_suggestions'])
 
-            refresh_key = time.time()
+            # Build scanned stocks table using cached data
             scanned_data = []
-            volume_threshold = 100000
-
+            logger.info("Building scanned stocks table from cached data")
             for ticker in tickers_to_scan:
-                data = fetch_options_data(ticker, refresh_key)
+                data = fetched_data.get(ticker)
                 if data and 'records' in data:
+                    logger.info(f"Processing cached data for {ticker}")
                     call_df, put_df = process_option_data(data, expiry)
                     underlying = data['records'].get('underlyingValue', 0)
                     support_strike, resistance_strike = identify_support_resistance(call_df, put_df)
@@ -1157,40 +1204,61 @@ def main():
                         "High_Volume_Gainer": high_volume_gainer,
                         "Last_Scanned": time.strftime("%Y-%m-%d %H:%M:%S")
                     })
+                    logger.info(f"Added {ticker} to scanned_data: Underlying={underlying}, Resistance={resistance_strike}")
                 else:
-                    print(f"No data fetched for ticker: {ticker}")
+                    logger.error(f"No valid cached data for ticker: {ticker}")
 
             st.session_state['scanned_stocks'] = scanned_data
+            logger.info(f"Scan complete. Scanned stocks: {len(scanned_data)}")
 
-        if st.session_state['auto_running']:
+        # Add scan in progress flag
+        if 'scan_in_progress' not in st.session_state:
+            st.session_state['scan_in_progress'] = False    
+        
+        if st.session_state['auto_running'] and not st.session_state['scan_in_progress']:
             current_time = time.time()
             if current_time - st.session_state['last_auto_time'] >= 60:
                 tickers = load_tickers() if not specific_tickers else [t.strip() for t in specific_tickers.split(',')]
+                st.session_state['scan_in_progress'] = True
                 perform_scan(tickers)
                 st.session_state['last_scan_time'] = current_time
                 st.session_state['last_auto_time'] = current_time
+                st.session_state['scan_in_progress'] = False
                 st.rerun()
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("Scan All Tickers"):
+            if st.button("Scan All Tickers") and not st.session_state['scan_in_progress']:
                 tickers = load_tickers()
+                st.session_state['scan_in_progress'] = True
                 perform_scan(tickers)
                 st.session_state['last_scan_time'] = time.time()
                 st.session_state['auto_scan_triggered'] = False
-                st.rerun()
+                st.session_state['scan_in_progress'] = False
+                # Delay rerun to ensure UI updates
+                st.session_state['needs_rerun'] = True
         with col2:
-            if st.button("Scan Specific Tickers") and specific_tickers:
+            if st.button("Scan Specific Tickers") and specific_tickers and not st.session_state['scan_in_progress']:
                 tickers = [t.strip() for t in specific_tickers.split(',')]
+                st.session_state['scan_in_progress'] = True
                 perform_scan(tickers)
                 st.session_state['last_scan_time'] = time.time()
                 st.session_state['auto_scan_triggered'] = False
-                st.rerun()
+                st.session_state['scan_in_progress'] = False
+                st.session_state['needs_rerun'] = True
+
+        # Handle delayed rerun
+        if 'needs_rerun' in st.session_state and st.session_state['needs_rerun']:
+            st.session_state['needs_rerun'] = False
+            st.rerun()
 
         status = "Running" if st.session_state['auto_running'] else "Stopped"
-        st.write(f"Auto Scan (60s): {status}")
+        st.write(f"Auto Scan (60s): {status}")        
+        
 
+        # Force UI update with debug info
         if st.session_state['scanned_stocks']:
+            logger.info(f"Rendering scanned_stocks: {len(st.session_state['scanned_stocks'])} entries")
             st.write("### Scanned Stocks (Sortable & Searchable)")
             search_query = st.text_input("Search Scanned Stocks by Ticker", key="scanned_search")
             scanned_df = pd.DataFrame(st.session_state['scanned_stocks'])
@@ -1215,8 +1283,12 @@ def main():
                 use_container_width=True,
                 height=400
             )
+        else:
+            st.info("No scanned stocks available. Run a scan to populate data.")
 
+        # Update for "Stocks Near Resistance (Alerts)" table
         if st.session_state['suggestions']:
+            logger.info(f"Rendering suggestions: {len(st.session_state['suggestions'])} entries")
             st.write("### Stocks Near Resistance (Alerts)")
             alert_search_query = st.text_input("Search Alerts by Ticker", key="alerts_search")
             suggestions_df = pd.DataFrame(st.session_state['suggestions'])
@@ -1224,21 +1296,29 @@ def main():
             if alert_search_query:
                 suggestions_df = suggestions_df[suggestions_df['Ticker'].str.contains(alert_search_query, case=False, na=False)]
             
-            styled_df = suggestions_df.style.format({
-                'Underlying': '{:.2f}',
-                'Resistance': '{:.2f}',
-                'Distance_to_Resistance': '{:.2f}'
-            })
-            st.table(styled_df)
+            st.dataframe(
+                suggestions_df,
+                column_config={
+                    "Ticker": st.column_config.TextColumn("Ticker"),
+                    "Underlying": st.column_config.NumberColumn("Underlying", format="%.2f"),
+                    "Resistance": st.column_config.NumberColumn("Resistance", format="%.2f"),
+                    "Distance_to_Resistance": st.column_config.NumberColumn("Distance to Resistance", format="%.2f"),
+                    "Timestamp": st.column_config.TextColumn("Timestamp")
+                },
+                use_container_width=True,
+                height=400
+            )
             
             if st.button("Clear Alerts"):
                 st.session_state['suggestions'] = []
                 save_alerts_data(st.session_state['suggestions'])
-                st.rerun()
+                st.session_state['needs_rerun'] = True
         else:
             st.info("No stocks currently near strong resistance.")
 
+        # Update for "Suggested Call Options (OTM with maximum price Above Spot)" table
         if st.session_state['call_suggestions']:
+            logger.info(f"Rendering call_suggestions: {len(st.session_state['call_suggestions'])} entries")
             st.write("### Suggested Call Options (OTM with maximum price Above Spot)")
             call_search_query = st.text_input("Search Call Suggestions by Ticker", key="call_search")
             call_suggestions_df = pd.DataFrame(st.session_state['call_suggestions'])
@@ -1246,24 +1326,30 @@ def main():
             if call_search_query:
                 call_suggestions_df = call_suggestions_df[call_suggestions_df['Ticker'].str.contains(call_search_query, case=False, na=False)]
             
-            styled_call_df = call_suggestions_df.style.format({
-                'Underlying': '{:.2f}',
-                'Suggested_Call_Strike': '{:.2f}',
-                'Call_Last_Price': '{:.2f}',
-                'Potential_Gain_%': '{:.2f}'
-            })
-            st.table(styled_call_df)
+            st.dataframe(
+                call_suggestions_df,
+                column_config={
+                    "Ticker": st.column_config.TextColumn("Ticker"),
+                    "Underlying": st.column_config.NumberColumn("Underlying", format="%.2f"),
+                    "Suggested_Call_Strike": st.column_config.NumberColumn("Suggested Call Strike", format="%.2f"),
+                    "Call_Last_Price": st.column_config.NumberColumn("Call Last Price", format="%.2f"),
+                    "Potential_Gain_%": st.column_config.NumberColumn("Potential Gain %", format="%.2f"),
+                    "Expiry": st.column_config.TextColumn("Expiry"),
+                    "Timestamp": st.column_config.TextColumn("Timestamp")
+                },
+                use_container_width=True,
+                height=400
+            )
             
             if st.button("Clear Call Suggestions"):
                 st.session_state['call_suggestions'] = []
                 save_call_suggestions(st.session_state['call_suggestions'])
-                st.rerun()
+                st.session_state['needs_rerun'] = True
         else:
             st.info("No call option suggestions available.")
 
-        
-
         if st.session_state['sell_suggestions']:
+            logger.info(f"Rendering sell_suggestions: {len(st.session_state['sell_suggestions'])} entries")
             st.write("### Suggested Options for Selling (High Premium Change)")
             sell_search_query = st.text_input("Search Sell Suggestions by Ticker", key="sell_search")
             sell_suggestions_df = pd.DataFrame(st.session_state['sell_suggestions'])
@@ -1277,12 +1363,12 @@ def main():
                     "Ticker": st.column_config.TextColumn("Ticker"),
                     "Underlying": st.column_config.NumberColumn("Underlying", format="%.2f"),
                     "Option_Type": st.column_config.TextColumn("Option Type"),
-                    "Resistance": st.column_config.NumberColumn("Resistance", format="%.2f"),  # New column
-                    "Support": st.column_config.NumberColumn("Support", format="%.2f"),  # New column
+                    "Resistance": st.column_config.NumberColumn("Resistance", format="%.2f"),
+                    "Support": st.column_config.NumberColumn("Support", format="%.2f"),
                     "Suggested_Sell_Strike": st.column_config.NumberColumn("Suggested Sell Strike", format="%.2f"),
                     "Current_Premium": st.column_config.NumberColumn("Current Premium", format="%.2f"),
                     "Previous_Premium": st.column_config.NumberColumn("Previous Premium", format="%.2f"),
-                    "Premium_Change_%": st.column_config.NumberColumn("Premium Change %", format="%.2f"),                    
+                    "Premium_Change_%": st.column_config.NumberColumn("Premium Change %", format="%.2f"),
                     "Expiry": st.column_config.TextColumn("Expiry"),
                     "Timestamp": st.column_config.TextColumn("Timestamp")
                 },
@@ -1293,9 +1379,9 @@ def main():
             if st.button("Clear Sell Suggestions"):
                 st.session_state['sell_suggestions'] = []
                 save_sell_suggestions(st.session_state['sell_suggestions'])
-                st.rerun()
+                st.session_state['needs_rerun'] = True
         else:
-            st.info("No Sell CE Option Suggestion Premium Threshold available.")
+            st.info("No sell option suggestions available.")
 
     with tabs[1]:
         st.subheader("Support & Resistance Levels for All Stocks")
