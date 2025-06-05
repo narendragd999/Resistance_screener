@@ -292,7 +292,10 @@ def load_options_data() -> pd.DataFrame:
     if os.path.exists(OPTIONS_DATA_FILE):
         try:
             df = pd.read_csv(OPTIONS_DATA_FILE)
-            required_columns = ['TICKER', 'EXPIRY', 'CALL TYPE', 'STRIKE_PRICE', 'PREVIOUS_PRICE']
+            required_columns = ['TICKER', 'EXPIRY', 'CALL TYPE', 'STRIKE_PRICE', 'PREVIOUS_PRICE', 'PREVIOUS_OI']
+            for col in required_columns:
+                if col not in df.columns:
+                    df[col] = 0.0 if col == 'PREVIOUS_OI' else df.get(col, '')
             if all(col in df.columns for col in required_columns):
                 df['CALL TYPE'] = df['CALL TYPE'].str.upper()
                 df = df[df['CALL TYPE'].isin(['CE', 'PE'])]
@@ -303,9 +306,9 @@ def load_options_data() -> pd.DataFrame:
                 return pd.DataFrame(columns=required_columns)
         except Exception as e:
             print(f"Error loading {OPTIONS_DATA_FILE}: {e}, returning empty DataFrame")
-            return pd.DataFrame(columns=['TICKER', 'EXPIRY', 'CALL TYPE', 'STRIKE_PRICE', 'PREVIOUS_PRICE'])
+            return pd.DataFrame(columns=required_columns)
     print(f"No options data file found at {OPTIONS_DATA_FILE}")
-    return pd.DataFrame(columns=['TICKER', 'EXPIRY', 'CALL TYPE', 'STRIKE_PRICE', 'PREVIOUS_PRICE'])
+    return pd.DataFrame(columns=required_columns)
 
 # Telegram Integration
 async def send_telegram_message(bot_token: str, chat_id: str, message: str):
@@ -1037,6 +1040,85 @@ def check_tickers_touched_resistance(tickers: List[str], expiry: str, options_df
     return touched_resistance
 
 # Get Option Strikes Above Resistance with Price Change
+# def get_strikes_above_resistance(tickers_touched: List[Dict], expiry: str, options_df: pd.DataFrame, fetched_data: Dict[str, Optional[Dict]] = None) -> List[Dict]:
+#     strike_data = []
+    
+#     for entry in tickers_touched:
+#         ticker = entry['Ticker']
+#         resistance = entry['Resistance']
+#         try:
+#             with st.spinner(f"Processing strikes above resistance for {ticker}..."):
+#                 data = fetched_data.get(ticker) if fetched_data else fetch_options_data(ticker, time.time())
+#                 if not data or 'records' not in data:
+#                     logger.error(f"No data for {ticker}")
+#                     continue
+                
+#                 call_df, _ = process_option_data(data, expiry)
+#                 if call_df.empty:
+#                     logger.warning(f"No call options data for {ticker}")
+#                     continue
+                
+#                 # Find the nearest strike price just above resistance
+#                 strikes = call_df['Strike'].astype(float)
+#                 above_resistance_strikes = strikes[strikes > resistance]
+#                 if above_resistance_strikes.empty:
+#                     logger.warning(f"No strikes above resistance for {ticker}")
+#                     continue
+                
+#                 nearest_strike = above_resistance_strikes.min()
+#                 option_row = call_df[call_df['Strike'] == nearest_strike]
+#                 if option_row.empty:
+#                     logger.warning(f"No option data for strike {nearest_strike} in {ticker}")
+#                     continue
+                
+#                 current_price = float(option_row.iloc[0]['Last Price'])
+                
+#                 # Filter options_df for the specific ticker, expiry, and strike
+#                 try:
+#                     options_df['EXPIRY'] = pd.to_datetime(options_df['EXPIRY'].str.title(), format='%d-%b-%Y', errors='coerce')
+#                     nse_expiry = pd.to_datetime(expiry.title(), format='%d-%b-%Y', errors='coerce')
+#                     updated_date = nse_expiry.strftime('%d-%b-25') if nse_expiry.year == 2025 else expiry
+                    
+#                     matching_option = options_df[
+#                         (options_df['TICKER'] == ticker) &
+#                         (options_df['CALL TYPE'] == 'CE') &
+#                         (options_df['STRIKE_PRICE'].astype(float) == nearest_strike)
+#                         # (options_df['EXPIRY'].dt.strftime('%d-%b-%y') == updated_date)
+#                     ]
+#                 except Exception as e:
+#                     logger.error(f"Error normalizing expiry for {ticker}: {e}")
+#                     matching_option = options_df[
+#                         (options_df['TICKER'] == ticker) &
+#                         (options_df['CALL TYPE'] == 'CE') &
+#                         (options_df['STRIKE_PRICE'].astype(float) == nearest_strike)
+#                         # (options_df['EXPIRY'].dt.strftime('%d-%b-%Y') == expiry)
+#                     ]
+                
+#                 if matching_option.empty:
+#                     logger.warning(f"No matching option in CSV for {ticker} strike {nearest_strike}")
+#                     continue
+                
+#                 previous_price = float(matching_option.iloc[0]['PREVIOUS_PRICE'])
+#                 price_change_percent = ((current_price - previous_price) / previous_price * 100) if previous_price > 0 else 0
+                
+#                 strike_data.append({
+#                     "Ticker": ticker,
+#                     "Resistance": resistance,
+#                     "Nearest_Strike_Above": nearest_strike,
+#                     "Current_Price": current_price,
+#                     "Previous_Price": previous_price,
+#                     "Price_Change_%": price_change_percent,
+#                     "Expiry": expiry,
+#                     "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+#                 })
+#                 logger.info(f"Added strike data for {ticker}: Strike={nearest_strike}, Price Change={price_change_percent:.2f}%")
+#         except Exception as e:
+#             logger.error(f"Error processing strikes for {ticker}: {e}")
+#             continue
+    
+#     return strike_data
+# Get Option Strikes Above Resistance with Price Change
+# Get Option Strikes Above Resistance with Price Change
 def get_strikes_above_resistance(tickers_touched: List[Dict], expiry: str, options_df: pd.DataFrame, fetched_data: Dict[str, Optional[Dict]] = None) -> List[Dict]:
     strike_data = []
     
@@ -1050,71 +1132,107 @@ def get_strikes_above_resistance(tickers_touched: List[Dict], expiry: str, optio
                     logger.error(f"No data for {ticker}")
                     continue
                 
-                call_df, _ = process_option_data(data, expiry)
-                if call_df.empty:
-                    logger.warning(f"No call options data for {ticker}")
+                call_df, put_df = process_option_data(data, expiry)
+                if call_df.empty or put_df.empty:
+                    logger.warning(f"No call or put options data for {ticker}")
                     continue
                 
-                # Find the nearest strike price just above resistance
+                # Find OTM strikes above resistance with highest call open interest
                 strikes = call_df['Strike'].astype(float)
-                above_resistance_strikes = strikes[strikes > resistance]
+                above_resistance_strikes = call_df[strikes > resistance][['Strike', 'OI']]
                 if above_resistance_strikes.empty:
                     logger.warning(f"No strikes above resistance for {ticker}")
                     continue
                 
-                nearest_strike = above_resistance_strikes.min()
-                option_row = call_df[call_df['Strike'] == nearest_strike]
-                if option_row.empty:
-                    logger.warning(f"No option data for strike {nearest_strike} in {ticker}")
+                # Select the strike with the highest call open interest
+                nearest_strike = above_resistance_strikes.loc[above_resistance_strikes['OI'].idxmax()]['Strike'] if above_resistance_strikes['OI'].max() > 0 else None
+                if nearest_strike is None:
+                    logger.warning(f"No valid call open interest for strikes above resistance in {ticker}")
                     continue
                 
-                current_price = float(option_row.iloc[0]['Last Price'])
+                # Get call option data for the selected strike
+                call_option_row = call_df[call_df['Strike'] == nearest_strike]
+                if call_option_row.empty:
+                    logger.warning(f"No call option data for strike {nearest_strike} in {ticker}")
+                    continue
                 
-                # Filter options_df for the specific ticker, expiry, and strike
+                call_current_price = float(call_option_row.iloc[0]['Last Price'])
+                call_current_oi = float(call_option_row.iloc[0]['OI'])
+                
+                # Get put option data for the same strike
+                put_option_row = put_df[put_df['Strike'] == nearest_strike]
+                put_current_oi = float(put_option_row.iloc[0]['OI']) if not put_option_row.empty else 0.0
+                
+                # Filter options_df for the specific ticker, expiry, and strike for both CE and PE
                 try:
                     options_df['EXPIRY'] = pd.to_datetime(options_df['EXPIRY'].str.title(), format='%d-%b-%Y', errors='coerce')
                     nse_expiry = pd.to_datetime(expiry.title(), format='%d-%b-%Y', errors='coerce')
                     updated_date = nse_expiry.strftime('%d-%b-25') if nse_expiry.year == 2025 else expiry
                     
-                    matching_option = options_df[
+                    # Call option match
+                    call_matching_option = options_df[
                         (options_df['TICKER'] == ticker) &
                         (options_df['CALL TYPE'] == 'CE') &
                         (options_df['STRIKE_PRICE'].astype(float) == nearest_strike)
                         # (options_df['EXPIRY'].dt.strftime('%d-%b-%y') == updated_date)
                     ]
+                    
+                    # Put option match
+                    put_matching_option = options_df[
+                        (options_df['TICKER'] == ticker) &
+                        (options_df['CALL TYPE'] == 'PE') &
+                        (options_df['STRIKE_PRICE'].astype(float) == nearest_strike)
+                        # (options_df['EXPIRY'].dt.strftime('%d-%b-%y') == updated_date)
+                    ]
                 except Exception as e:
                     logger.error(f"Error normalizing expiry for {ticker}: {e}")
-                    matching_option = options_df[
+                    call_matching_option = options_df[
                         (options_df['TICKER'] == ticker) &
                         (options_df['CALL TYPE'] == 'CE') &
                         (options_df['STRIKE_PRICE'].astype(float) == nearest_strike)
                         # (options_df['EXPIRY'].dt.strftime('%d-%b-%Y') == expiry)
                     ]
+                    put_matching_option = options_df[
+                        (options_df['TICKER'] == ticker) &
+                        (options_df['CALL TYPE'] == 'PE') &
+                        (options_df['STRIKE_PRICE'].astype(float) == nearest_strike)
+                        # (options_df['EXPIRY'].dt.strftime('%d-%b-%Y') == expiry)
+                    ]
                 
-                if matching_option.empty:
-                    logger.warning(f"No matching option in CSV for {ticker} strike {nearest_strike}")
+                # Process call option data
+                if call_matching_option.empty:
+                    logger.warning(f"No matching call option in CSV for {ticker} strike {nearest_strike}")
                     continue
                 
-                previous_price = float(matching_option.iloc[0]['PREVIOUS_PRICE'])
-                price_change_percent = ((current_price - previous_price) / previous_price * 100) if previous_price > 0 else 0
+                call_previous_price = float(call_matching_option.iloc[0]['PREVIOUS_PRICE'])
+                call_previous_oi = float(call_matching_option.iloc[0].get('PREVIOUS_OI', 0.0))
+                call_price_change_percent = ((call_current_price - call_previous_price) / call_previous_price * 100) if call_previous_price > 0 else 0.0
+                call_oi_change_percent = ((call_current_oi - call_previous_oi) / call_previous_oi * 100) if call_previous_oi > 0 else 0.0
+                
+                # Process put option data
+                put_previous_oi = float(put_matching_option.iloc[0].get('PREVIOUS_OI', 0.0)) if not put_matching_option.empty else 0.0
+                put_oi_change_percent = ((put_current_oi - put_previous_oi) / put_previous_oi * 100) if put_previous_oi > 0 else 0.0
                 
                 strike_data.append({
                     "Ticker": ticker,
                     "Resistance": resistance,
                     "Nearest_Strike_Above": nearest_strike,
-                    "Current_Price": current_price,
-                    "Previous_Price": previous_price,
-                    "Price_Change_%": price_change_percent,
+                    "Current_Price": call_current_price,
+                    "Previous_Price": call_previous_price,
+                    "Price_Change_%": call_price_change_percent,
+                    "Call_OI": call_current_oi,
+                    "Call_OI_Change_%": call_oi_change_percent,
+                    "Put_OI": put_current_oi,
+                    "Put_OI_Change_%": put_oi_change_percent,
                     "Expiry": expiry,
                     "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                 })
-                logger.info(f"Added strike data for {ticker}: Strike={nearest_strike}, Price Change={price_change_percent:.2f}%")
+                logger.info(f"Added strike data for {ticker}: Strike={nearest_strike}, Call_OI={call_current_oi}, Call_OI_Change={call_oi_change_percent:.2f}%, Put_OI={put_current_oi}, Put_OI_Change={put_oi_change_percent:.2f}%")
         except Exception as e:
             logger.error(f"Error processing strikes for {ticker}: {e}")
             continue
     
     return strike_data
-
 
 # Main Application
 def main():
@@ -1606,6 +1724,10 @@ def main():
                     "Current_Price": st.column_config.NumberColumn("Current Price", format="%.2f"),
                     "Previous_Price": st.column_config.NumberColumn("Previous Price", format="%.2f"),
                     "Price_Change_%": st.column_config.NumberColumn("Price Change %", format="%.2f"),
+                    "Call_OI": st.column_config.NumberColumn("Call OI", format="%.0f"),
+                    "Call_OI_Change_%": st.column_config.NumberColumn("Call OI Change %", format="%.2f"),
+                    "Put_OI": st.column_config.NumberColumn("Put OI", format="%.0f"),
+                    "Put_OI_Change_%": st.column_config.NumberColumn("Put OI Change %", format="%.2f"),
                     "Expiry": st.column_config.TextColumn("Expiry"),
                     "Timestamp": st.column_config.TextColumn("Timestamp")
                 },
