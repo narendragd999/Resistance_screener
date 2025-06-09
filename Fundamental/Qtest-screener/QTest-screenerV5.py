@@ -77,6 +77,8 @@ def parse_table(table):
     for tr in table.find('tbody').find_all('tr'):
         cells = [td.text.strip() for td in tr.find_all('td')]
         if cells and len(cells) == len(headers):
+            # Ensure the first cell (index) is a string
+            cells[0] = str(cells[0]) if cells[0] else ""
             rows.append(cells)
     df = pd.DataFrame(rows, columns=headers) if rows else None
     print(f"Parsed table columns: {df.columns.tolist() if df is not None else 'None'}")
@@ -135,9 +137,12 @@ def find_row(data, row_name, threshold=0.8):
     possible_names = [row_name, row_name.replace(" ", ""), "Consolidated " + row_name, row_name + " (Consolidated)"]
     for name in possible_names:
         for index in data.index:
-            if name.lower() in index.lower():
+            # Convert index to string and handle NaN/float values
+            index_str = str(index).lower() if pd.notna(index) else ""
+            if name.lower() in index_str:
                 return index
-    matches = difflib.get_close_matches(row_name.lower(), [idx.lower() for idx in data.index], n=1, cutoff=threshold)
+    # Use difflib for fuzzy matching, ensuring index is converted to string
+    matches = difflib.get_close_matches(row_name.lower(), [str(idx).lower() for idx in data.index if pd.notna(idx)], n=1, cutoff=threshold)
     return matches[0] if matches else None
 
 # Function to clean numeric data
@@ -152,6 +157,16 @@ def adjust_non_finance(data, is_finance):
         actual_income_row = find_row(data, "Actual Income") or net_profit_row
         return (clean_numeric(data.loc[net_profit_row].iloc[1:]) if net_profit_row else None,
                 clean_numeric(data.loc[actual_income_row].iloc[1:]) if actual_income_row else None)
+
+    # Ensure index is string-based
+    data = data.copy()  # Avoid modifying original DataFrame
+    if '' in data.columns:
+        data = data.set_index('')
+        # Convert index to string to avoid float/NaN issues
+        data.index = data.index.astype(str)
+    else:
+        print(f"Warning: No '' column in data, columns: {data.columns.tolist()}")
+        return None, None
 
     net_profit_row = find_row(data, "Net Profit") or find_row(data, "Profit after tax")
     actual_income_row = find_row(data, "Actual Income") or net_profit_row
@@ -425,7 +440,11 @@ def check_highest_historical(data, is_quarterly, is_finance):
             'Raw Actual Income (Raw) Ascending': 'N/A'
         }
     
+    data = data.copy()  # Avoid modifying original DataFrame
     data = data.set_index('')
+    # Convert index to string to avoid float/NaN issues
+    data.index = data.index.astype(str)
+    
     adjusted_net_profit, adjusted_actual_income = adjust_non_finance(data, is_finance)
     raw_net_profit = clean_numeric(data.loc[find_row(data, "Net Profit") or find_row(data, "Profit after tax")].iloc[1:]) if find_row(data, "Net Profit") or find_row(data, "Profit after tax") else None
     raw_actual_income = clean_numeric(data.loc[find_row(data, "Actual Income") or find_row(data, "Net Profit") or find_row(data, "Profit after tax")].iloc[1:]) if find_row(data, "Actual Income") or find_row(data, "Net Profit") or find_row(data, "Profit after tax") else None
