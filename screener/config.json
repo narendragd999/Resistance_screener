@@ -1,0 +1,15 @@
+{
+  "lookback_days": 60,
+  "min_gain_percent": 15.0,
+  "min_green_candles": 2,
+  "price_proximity_percent": 0.5,
+  "ce_above_historical_high": true,
+  "ce_history_days": 60,
+  "auto_scan_enabled": true,
+  "auto_scan_interval_min": 15,
+  "market_hours_only": true,
+  "telegram_bot_token": "7826437102:AAFdVAv7b0go3wOcPLNMZMVAfRM8O2SX3xQ",
+  "telegram_chat_id": "542581131",
+  "surge_filter_percent": 1.0,
+  "strike_drop_alert": true
+}
