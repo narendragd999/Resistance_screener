@@ -15,11 +15,13 @@ THESIS
    >= `min_breakdown_volume_ratio` x 20-day average  -> momentum loss.
 4. Today's close must be >= `min_drop_percent` below previous low
    (filters trivial tick-below-low noise like -0.18%).
-5. The close must be below the 9-EMA at the time of initial breakdown
-   detection — a ONE-TIME gate confirming trend weakening. Once this
-   signal is created (EMA breach confirmed), any subsequent day where
-   price rallies back into proximity of the surge high is valid without
-   re-checking the EMA — the trend damage is already established.
+5. The EMA breach is a ONE-TIME trend-weakness gate — but it does NOT
+   have to happen on the same candle as the breakdown. The screener
+   looks back up to `surge_recency_days` sessions to find a valid
+   breakdown candle (close below prev low + volume), then checks if
+   the 9-EMA was breached on THAT candle or any candle after it up
+   to today. Once the signal is saved, the EMA gate is skipped on all
+   future re-scans — trend damage is already confirmed.
 6. The SURGE HIGH (peak of the entire surge window) is the true
    resistance ceiling — this is where original momentum exhausted.
    Even after breakdown + partial recovery, this level rejects price
@@ -575,92 +577,158 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "",
         if live_price > highs[-1]:
             highs[-1] = live_price
 
-    # Key reference values
-    # "yesterday" = the candle immediately before the breakdown candle
-    today_close     = float(closes[-1])
-    yesterday_high  = float(highs[-2])    # RESISTANCE CEILING
-    yesterday_low   = float(lows[-2])
-    yesterday_close = float(closes[-2])
+    # ── EMA values computed upfront — used across multiple conditions ─────────
+    ema_period  = int(cfg.get("ema_period", 9))
+    ema_enabled = cfg.get("ema_filter_enabled", True)
+    ema_values  = compute_ema(closes, ema_period)
 
-    # ── CONDITION 1: Breakdown candle closes below previous low ────────────
-    if today_close >= yesterday_low:
-        if job_id:
-            job_log(job_id,
-                f"{ticker} no breakdown: close Rs{today_close:.2f} >= prev_low Rs{yesterday_low:.2f}",
-                "fail")
-        return None
+    # ── CONDITIONS 1-4: Scan backwards for breakdown candle ───────────────────
+    # The breakdown candle and the EMA breach do NOT have to occur on the same
+    # day. We look back up to `surge_recency_days` candles to find a candle
+    # that:
+    #   (a) closed below the prior candle's low by >= min_drop_percent    [C1+C2]
+    #   (b) had volume >= min_breakdown_volume_ratio x 20d avg            [C3]
+    # Once a valid breakdown candle is found, we check whether EMA was
+    # breached on THAT candle OR on any candle between it and today.       [C4]
+    #
+    # Example — CDSL 21-22 Apr 2026:
+    #   21 Apr: closes below prev low + high volume  ← breakdown candle
+    #   22 Apr: closes below 9-EMA                  ← EMA breach (next day)
+    #   Today:  price rallies back → signal fires    ← correctly caught
+    #
+    # Once a signal is saved (ema_already_breached=True), the EMA gate is
+    # skipped entirely on future re-scans — trend damage is already confirmed.
 
-    drop_pct = (yesterday_low - today_close) / yesterday_low * 100
-
-    # ── CONDITION 2: Drop must be meaningful (not just a noise tick) ────────
-    min_drop = cfg.get("min_drop_percent", 0.5)
-    if drop_pct < min_drop:
-        if job_id:
-            job_log(job_id,
-                f"{ticker} drop too small: {drop_pct:.2f}% < min {min_drop}%",
-                "fail")
-        return None
-
-    # ── CONDITION 3: Breakdown volume >= ratio x 20-day average ────────────
+    min_drop      = cfg.get("min_drop_percent", 0.5)
     min_vol_ratio = cfg.get("min_breakdown_volume_ratio", 1.2)
-    breakdown_vol = float(vols[-1]) if vols[-1] > 0 else 0.0
+    lookback_bd   = int(cfg.get("surge_recency_days", 5))  # how far back to search
 
-    # 20 completed candles before the breakdown candle
-    vol_window   = vols[-21:-1]          # indices -21 to -2 inclusive
-    avg_vol_20d  = float(vol_window.mean()) if len(vol_window) > 0 else 0.0
-    volume_ratio = (breakdown_vol / avg_vol_20d) if avg_vol_20d > 0 else 0.0
+    breakdown_idx    = None   # index of the confirmed breakdown candle
+    today_close      = float(closes[-1])
+    yesterday_high   = None
+    yesterday_low    = None
+    yesterday_close  = None
+    drop_pct         = None
+    breakdown_vol    = None
+    avg_vol_20d      = None
+    volume_ratio     = None
+    ema_at_detection = None
+    below_ema        = False
 
-    if volume_ratio < min_vol_ratio:
+    # Search from most recent candle backwards (index -1 = today, -2 = yesterday …)
+    for offset in range(1, min(lookback_bd + 2, len(closes))):
+        bd_idx    = len(closes) - offset          # candidate breakdown candle
+        prev_idx  = bd_idx - 1                    # candle before it
+
+        if prev_idx < 1:
+            break
+
+        bd_close  = float(closes[bd_idx])
+        prev_low  = float(lows[prev_idx])
+        prev_high = float(highs[prev_idx])
+        prev_close= float(closes[prev_idx])
+
+        # C1: must close below prior candle's low
+        if bd_close >= prev_low:
+            continue
+
+        # C2: drop must be meaningful
+        _drop = (prev_low - bd_close) / prev_low * 100
+        if _drop < min_drop:
+            continue
+
+        # C3: volume check
+        _bd_vol      = float(vols[bd_idx]) if vols[bd_idx] > 0 else 0.0
+        _vol_window  = vols[max(0, bd_idx - 20):bd_idx]
+        _avg_vol     = float(_vol_window.mean()) if len(_vol_window) > 0 else 0.0
+        _vol_ratio   = (_bd_vol / _avg_vol) if _avg_vol > 0 else 0.0
+
+        if _vol_ratio < min_vol_ratio:
+            continue
+
+        # C4: EMA must have been breached on the breakdown candle itself OR
+        #     on any candle from the breakdown day up to and including today.
+        #     Also bypass entirely if this ticker already has a saved signal
+        #     with confirmed EMA breach (ema_already_breached=True).
+        _ema_breached = False
+        _ema_at       = None
+        if not ema_enabled or ema_already_breached:
+            _ema_breached = True
+            _ema_at       = float(ema_values[-1])
+            if ema_already_breached and job_id:
+                job_log(job_id,
+                    f"{ticker} EMA gate skipped (breach confirmed at detection); "
+                    f"current close Rs{today_close:.2f} vs EMA{ema_period} "
+                    f"Rs{_ema_at:.2f}",
+                    "info")
+        else:
+            # Check breakdown candle and every candle after it up to today
+            for chk in range(bd_idx, len(closes)):
+                if closes[chk] < ema_values[chk]:
+                    _ema_breached = True
+                    _ema_at       = float(ema_values[chk])
+                    if job_id:
+                        ema_breach_date = dates[chk].strftime("%Y-%m-%d")
+                        job_log(job_id,
+                            f"{ticker} EMA{ema_period} breached on {ema_breach_date} "
+                            f"(close Rs{closes[chk]:.2f} < EMA Rs{_ema_at:.2f})",
+                            "info")
+                    break
+
+        if not _ema_breached:
+            if job_id:
+                job_log(job_id,
+                    f"{ticker} breakdown found on {dates[bd_idx].strftime('%Y-%m-%d')} "
+                    f"but no EMA{ema_period} breach from that day to today -- skip",
+                    "fail")
+            continue   # try an older breakdown candle
+
+        # ── Valid breakdown found ─────────────────────────────────────────────
+        breakdown_idx    = bd_idx
+        yesterday_high   = prev_high
+        yesterday_low    = prev_low
+        yesterday_close  = prev_close
+        drop_pct         = _drop
+        breakdown_vol    = _bd_vol
+        avg_vol_20d      = _avg_vol
+        volume_ratio     = _vol_ratio
+        ema_at_detection = _ema_at
+        below_ema        = bool(closes[bd_idx] < ema_values[bd_idx])
+
+        if job_id:
+            bd_date = dates[bd_idx].strftime("%Y-%m-%d")
+            job_log(job_id,
+                f"{ticker} breakdown candle: {bd_date}  "
+                f"close Rs{closes[bd_idx]:.2f}  prev_low Rs{prev_low:.2f}  "
+                f"drop={drop_pct:.2f}%  vol={volume_ratio:.2f}x",
+                "info")
+        break   # use the most recent valid breakdown
+
+    if breakdown_idx is None:
         if job_id:
             job_log(job_id,
-                f"{ticker} low breakdown volume: {volume_ratio:.2f}x avg "
-                f"(need >={min_vol_ratio}x)",
+                f"{ticker} no valid breakdown candle in last {lookback_bd} sessions",
                 "fail")
         return None
-
-    # ── CONDITION 4: Close must be below EMA — ONE-TIME trend-weakness gate ──
-    # This check applies at the moment of initial breakdown detection only.
-    # Once a signal is recorded (EMA breach confirmed), the trend is already
-    # damaged. On any subsequent scan day where price retests the surge high,
-    # this gate is NOT re-applied — proximity alone is sufficient to trigger
-    # the sell alert. Re-checking EMA on retest days would incorrectly filter
-    # valid setups where price briefly bounced above EMA during the recovery.
-    ema_period       = int(cfg.get("ema_period", 9))
-    ema_enabled      = cfg.get("ema_filter_enabled", True)
-    ema_values       = compute_ema(closes, ema_period)
-    ema_at_detection = float(ema_values[-1])
-    below_ema        = today_close < ema_at_detection
-
-    if ema_enabled and not below_ema and not ema_already_breached:
-        if job_id:
-            job_log(job_id,
-                f"{ticker} close Rs{today_close:.2f} >= EMA{ema_period} "
-                f"Rs{ema_at_detection:.2f} -- trend intact, skip",
-                "fail")
-        return None
-
-    if ema_already_breached and not below_ema and job_id:
-        job_log(job_id,
-            f"{ticker} EMA gate skipped (breach confirmed at detection); "
-            f"current close Rs{today_close:.2f} vs EMA{ema_period} Rs{ema_at_detection:.2f}",
-            "info")
 
     # ── CONDITION 5: Continuous surge ending recently ──────────────────────
     min_gain     = cfg["min_gain_percent"]
     min_green    = cfg["min_green_candles"]
     recency_days = int(cfg.get("surge_recency_days", 5))
 
-    # Operate on completed candles only (exclude the breakdown candle itself)
-    scan_closes = closes[:-1]
-    scan_opens  = opens[:-1]
-    scan_lows   = lows[:-1]
-    scan_dates  = dates[:-1]
+    # Operate on candles BEFORE the breakdown candle (exclude breakdown onward).
+    # breakdown_idx points to the breakdown candle; surge must end before it.
+    scan_closes = closes[:breakdown_idx]
+    scan_opens  = opens[:breakdown_idx]
+    scan_lows   = lows[:breakdown_idx]
+    scan_highs  = highs[:breakdown_idx]   # pre-breakdown highs only (excludes live-price injection)
+    scan_dates  = dates[:breakdown_idx]
     n           = len(scan_closes)
 
     if n < min_green + 2:
         return None
 
-    # Surge end must be within recency_days sessions of the breakdown candle
+    # Surge end must be within recency_days sessions BEFORE the breakdown candle
     min_end_idx  = n - recency_days
     window_min   = max(min_green + 1, 3)
 
@@ -712,7 +780,7 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "",
     # The surge window's highest point is the true resistance level where
     # price exhausted momentum. Even after breakdown + recovery, this level
     # will likely reject price again (as seen in DIXON 20 May 2025 example).
-    surge_window_highs = highs[surge_start_idx:surge_end_idx + 1]
+    surge_window_highs = scan_highs[surge_start_idx:surge_end_idx + 1]   # ✅ uses pre-breakdown slice — excludes live-price injection on today's candle
     surge_high         = float(np.max(surge_window_highs))
 
     if job_id:
