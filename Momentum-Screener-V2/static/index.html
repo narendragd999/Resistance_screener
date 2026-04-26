@@ -534,6 +534,15 @@ td.amber { color:var(--amber); font-family:var(--font-mono); }
 .sell-zone-box .szlabel { color:var(--amber); font-weight:600; margin-bottom:4px; font-size:10px; text-transform:uppercase; letter-spacing:0.1em; }
 .sell-zone-box .szrange { font-family:var(--font-mono); color:var(--text0); font-size:12px; }
 
+/* Gate status pills */
+.gate-pill {
+  display:inline-block; font-size:10px; font-family:var(--font-mono);
+  font-weight:600; padding:2px 7px; border-radius:10px;
+  letter-spacing:0.03em; white-space:nowrap;
+}
+.gate-ok   { background:rgba(0,200,130,0.15); color:#00c882; border:1px solid rgba(0,200,130,0.3); }
+.gate-wait { background:rgba(255,179,0,0.12);  color:var(--amber); border:1px solid rgba(255,179,0,0.25); }
+
 /* ── REMARK BOX (modal) ───────────────────────── */
 .remark-box {
   margin:4px 0 8px; padding:9px 12px;
@@ -891,6 +900,11 @@ td.amber { color:var(--amber); font-family:var(--font-mono); }
     SMA Screener
     <span class="nav-ext-badge">↗</span>
   </a>
+  <a class="nav-ext-link" href="/backtest" target="_blank" rel="noopener">
+    <span class="nav-ext-icon">📈</span>
+    Backtest
+    <span class="nav-ext-badge">↗</span>
+  </a>
 </nav>
 
 <!-- ─── MAIN ────────────────────────────────────── -->
@@ -935,6 +949,7 @@ td.amber { color:var(--amber); font-family:var(--font-mono); }
               <th data-col="Suggested_Strike">Strike <span class="sort-arrow">↕</span></th>
               <th data-col="CE_LTP">CE LTP <span class="sort-arrow">↕</span></th>
               <th data-col="Remark">CE Signal <span class="sort-arrow">↕</span></th>
+              <th>Gate 2</th>
               <th data-col="Expiry">Expiry <span class="sort-arrow">↕</span></th>
               <th>Scanned</th>
               <th></th>
@@ -968,8 +983,9 @@ td.amber { color:var(--amber); font-family:var(--font-mono); }
               <th>Alert Time</th>
               <th>Ticker</th>
               <th>Current Price</th>
-              <th>10d High</th>
+              <th>Surge High</th>
               <th>Dist from High</th>
+              <th>G2 Date</th>
               <th>CE LTP (init)</th>
               <th>CE Signal</th>
               <th>Surge%</th>
@@ -1301,7 +1317,7 @@ function renderSignals() {
   document.getElementById('signals-count').textContent = `${sigs.length} stocks`;
 
   if (!sigs.length) {
-    tbody.innerHTML = `<tr><td colspan="12">
+    tbody.innerHTML = `<tr><td colspan="13">
       <div class="empty-state">
         <div class="es-icon">📉</div>
         <div class="es-title">No signals yet</div>
@@ -1320,7 +1336,11 @@ function renderSignals() {
   });
 
   tbody.innerHTML = sigs.map(s => {
-    const scanned = s.Scanned_At ? s.Scanned_At.split(' ')[1] : '—';
+    const scanned  = s.Scanned_At ? s.Scanned_At.split(' ')[1] : '—';
+    const g2ok     = s.Sell_Zone_EMA_Confirmed;
+    const g2pill   = g2ok
+      ? `<span class="gate-pill gate-ok" title="EMA breach confirmed ${s.Sell_Zone_EMA_Confirm_Date||''}">G2 ✅</span>`
+      : `<span class="gate-pill gate-wait" title="Waiting: price must close below EMA with volume">G2 ⏳</span>`;
     return `<tr data-ticker="${s.Ticker}">
       <td class="ticker">${s.Ticker}</td>
       <td class="mono">₹${fmt(s.Today_Close)}</td>
@@ -1331,6 +1351,7 @@ function renderSignals() {
       <td class="amber mono">₹${s.Suggested_Strike?.toFixed(0)} CE</td>
       <td class="teal mono">₹${fmt(s.CE_LTP)}</td>
       <td>${remarkPill(s)}</td>
+      <td>${g2pill}</td>
       <td class="mono" style="color:var(--text2);font-size:10px">${s.Expiry||'—'}</td>
       <td class="mono" style="color:var(--text3);font-size:10px">${scanned}</td>
       <td class="row-actions">
@@ -1387,28 +1408,27 @@ function renderAlerts() {
   document.getElementById('alerts-count').textContent = `${State.alerts.length} hits`;
 
   if (!State.alerts.length) {
-    tbody.innerHTML = `<tr><td colspan="9">
+    tbody.innerHTML = `<tr><td colspan="10">
       <div class="empty-state">
         <div class="es-icon">🔔</div>
         <div class="es-title">No sell zone alerts yet</div>
-        <div>Alerts fire when price enters the sell zone below the N-day high</div>
+        <div>Alerts fire only after Gate 2 (EMA+volume) is confirmed and price re-enters sell zone</div>
       </div></td></tr>`;
     return;
   }
 
   tbody.innerHTML = [...State.alerts].reverse().map(a => {
     const alertTime  = a.Alert_Time ? a.Alert_Time.split(' ')[1] : '—';
-    const highVal    = a.Ten_Day_High ?? a.Suggested_Strike;
+    const highVal    = a.Surge_High ?? a.Resistance_High ?? a.Yesterday_High ?? a.Suggested_Strike;
     const distVal    = a.Distance_From_High_Pct ?? a.Distance_From_Strike_Pct;
-    const highLabel  = a.Ten_Day_High
-      ? `₹${fmt(a.Ten_Day_High)}`
-      : `₹${a.Suggested_Strike?.toFixed(0)} CE ⁽¹⁾`;
+    const g2date     = a.Sell_Zone_EMA_Confirm_Date || '—';
     return `<tr>
       <td class="mono" style="color:var(--text2);font-size:10px">${alertTime}</td>
       <td class="ticker">${a.Ticker}</td>
       <td class="teal mono">₹${fmt(a.Current_Price)}</td>
-      <td class="amber mono">${highLabel}</td>
+      <td class="amber mono">₹${fmt(highVal)}</td>
       <td class="mono" style="color:var(--text1)">${fmt(distVal)}%</td>
+      <td class="mono" style="color:var(--teal);font-size:10px">${g2date}</td>
       <td class="mono">₹${fmt(a.CE_LTP)}</td>
       <td>${remarkPill(a)}</td>
       <td class="green mono">+${fmt(a.Surge_Gain_Pct)}%</td>
@@ -1583,26 +1603,30 @@ async function openDetail(ticker, event) {
   const prox       = State.config.price_proximity_percent ?? 2.0;
   const emaPer     = State.config.ema_period ?? 9;
   const minVolR    = State.config.min_breakdown_volume_ratio ?? 1.2;
-  // Resistance ceiling = yesterday's high (candle before breakdown)
-  const resistance = sig.Yesterday_High || sig.Ten_Day_High || sig.Suggested_Strike;
+  // True resistance = surge peak, fallback to yesterday_high
+  const resistance = sig.Surge_High || sig.Yesterday_High || sig.Ten_Day_High || sig.Suggested_Strike;
   const szFloor    = resistance ? resistance * (1 - prox / 100) : null;
   const volColor   = (sig.Volume_Ratio >= minVolR) ? 'green' : 'amber';
   const emaColor   = sig.Below_EMA ? 'green' : 'amber';
+  const g2ok       = sig.Sell_Zone_EMA_Confirmed;
+  const g2date     = sig.Sell_Zone_EMA_Confirm_Date || '—';
 
   statsEl.innerHTML = `
     <div class="stat-sep"></div>
     <div class="section-title" style="margin-bottom:8px">Price Action</div>
     ${statRow('Today Close',     `₹${fmt(sig.Today_Close)}`,     'teal')}
-    ${statRow('Yesterday High',  `₹${fmt(sig.Yesterday_High)}`,  'amber')}
+    ${statRow('Surge High (Resistance)', `₹${fmt(sig.Surge_High)}`, 'amber')}
+    ${statRow('Yesterday High',  `₹${fmt(sig.Yesterday_High)}`,  '')}
     ${statRow('Yesterday Close', `₹${fmt(sig.Yesterday_Close)}`, '')}
     ${statRow('Yesterday Low',   `₹${fmt(sig.Yesterday_Low)}`,   '')}
     ${statRow('Drop vs Prev Low',`-${fmt(sig.Drop_Pct)}%`,       'red')}
+    ${statRow('Breakdown Date',  sig.Breakdown_Date || '—',      '')}
     <div class="stat-sep"></div>
     <div class="section-title" style="margin-bottom:8px">Breakdown Confirmation</div>
     ${statRow('Breakdown Volume', (sig.Breakdown_Volume||0).toLocaleString(), '')}
     ${statRow('20d Avg Volume',   (sig.Avg_Volume_20d||0).toLocaleString(),   '')}
     ${statRow('Volume Ratio',     `${fmt(sig.Volume_Ratio)}x`,                volColor)}
-    ${statRow('EMA'+emaPer+' on Breakdown', `₹${fmt(sig.EMA_On_Breakdown)}`, '')}
+    ${statRow('EMA'+emaPer+' at Breakdown', sig.EMA_At_Detection ? `₹${fmt(sig.EMA_At_Detection)}` : '—', '')}
     ${statRow('Close Below EMA',  sig.Below_EMA ? '✓ Yes' : '✗ No',          emaColor)}
     <div class="stat-sep"></div>
     <div class="section-title" style="margin-bottom:8px">Surge</div>
@@ -1619,13 +1643,30 @@ async function openDetail(ticker, event) {
     ${statRow('CE 30d High', sig.CE_30d_High ?? 'N/A',                  '')}
     ${remarkBox(sig)}
     ${statRow('CE OI', (sig.CE_OI||0).toLocaleString(), '')}
-    <div class="sell-zone-box">
-      <div class="szlabel">🎯 Sell Zone — Within ${prox}% of Resistance</div>
-      ${resistance
+    <div class="sell-zone-box" style="${g2ok ? '' : 'opacity:0.55'}">
+      <div class="szlabel">🔐 Sell Zone — 3 Sequential Gates</div>
+      <div style="font-size:11px;margin:6px 0 4px">
+        <span style="color:var(--green)">Gate 1 ✅</span>
+        <span style="color:var(--text2);margin-left:6px">Momentum break (close below prev low + surge ≥${State.config.min_gain_percent ?? 15}%)</span>
+      </div>
+      <div style="font-size:11px;margin:4px 0">
+        <span style="color:${g2ok ? 'var(--green)' : 'var(--amber)'}">${g2ok ? 'Gate 2 ✅' : 'Gate 2 ⏳'}</span>
+        <span style="color:var(--text2);margin-left:6px">${g2ok
+          ? `EMA${emaPer} breach + volume confirmed on ${g2date}`
+          : `Waiting: close below EMA${emaPer} with volume after breakdown`
+        }</span>
+      </div>
+      <div style="font-size:11px;margin:4px 0 8px">
+        <span style="color:${g2ok ? 'var(--text1)' : 'var(--text3)'}">Gate 3 ${g2ok ? '🟡' : '🔒'}</span>
+        <span style="color:var(--text2);margin-left:6px">${g2ok
+          ? `Price rallies within ${prox}% of Surge High`
+          : 'Locked until Gate 2 confirmed'
+        }</span>
+      </div>
+      ${resistance && g2ok
         ? `<div class="szrange">₹${fmt(szFloor)} – ₹${fmt(resistance)}</div>
-           <div style="font-size:10px;color:var(--text2);margin-top:3px">Resistance (prev-day high): ₹${fmt(resistance)}</div>`
-        : `<div class="szrange" style="color:var(--text2)">—</div>
-           <div style="font-size:10px;color:var(--text2);margin-top:3px">Rescan to compute resistance</div>`
+           <div style="font-size:10px;color:var(--text2);margin-top:3px">Sell zone: within ${prox}% of Surge High ₹${fmt(resistance)}</div>`
+        : `<div class="szrange" style="color:var(--text2)">${g2ok ? '—' : 'Gate 2 not yet confirmed'}</div>`
       }
     </div>
   `;

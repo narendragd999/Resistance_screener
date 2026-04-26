@@ -54,6 +54,9 @@ from pydantic import BaseModel
 from option_charts_router import router as oc_router
 from sma_router import router as sma_router
 
+# ADD THIS:
+from backtest import router as bt_router
+
 BASE_DIR = Path(__file__).parent
 
 # ─────────────────────────────────────────────────────────────
@@ -553,8 +556,7 @@ def check_surge_continuity(
 # ─────────────────────────────────────────────────────────────
 #  SCREENING -- STEP 1
 # ─────────────────────────────────────────────────────────────
-def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "",
-                          ema_already_breached: bool = False) -> Optional[Dict]:
+def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[Dict]:
     hist = get_price_history(ticker, cfg["lookback_days"])
     if hist is None or len(hist) < cfg["min_green_candles"] + 5:
         return None
@@ -592,12 +594,12 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "",
     # breached on THAT candle OR on any candle between it and today.       [C4]
     #
     # Example — CDSL 21-22 Apr 2026:
-    #   21 Apr: closes below prev low + high volume  ← breakdown candle
-    #   22 Apr: closes below 9-EMA                  ← EMA breach (next day)
-    #   Today:  price rallies back → signal fires    ← correctly caught
+    #   21 Apr: closes below prev low + high volume  ← breakdown candle (Gate 1)
+    #   22 Apr: closes below 9-EMA with volume       ← Gate 2 confirmed separately
+    #   Today:  price rallies back → sell zone fires  ← Gate 3 proximity
     #
-    # Once a signal is saved (ema_already_breached=True), the EMA gate is
-    # skipped entirely on future re-scans — trend damage is already confirmed.
+    # Gate 2 (EMA+volume after breakdown) is tracked per-signal by
+    # update_sell_zone_gates() and is NOT required at signal creation time.
 
     min_drop      = cfg.get("min_drop_percent", 0.5)
     min_vol_ratio = cfg.get("min_breakdown_volume_ratio", 1.2)
@@ -646,42 +648,9 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "",
         if _vol_ratio < min_vol_ratio:
             continue
 
-        # C4: EMA must have been breached on the breakdown candle itself OR
-        #     on any candle from the breakdown day up to and including today.
-        #     Also bypass entirely if this ticker already has a saved signal
-        #     with confirmed EMA breach (ema_already_breached=True).
-        _ema_breached = False
-        _ema_at       = None
-        if not ema_enabled or ema_already_breached:
-            _ema_breached = True
-            _ema_at       = float(ema_values[-1])
-            if ema_already_breached and job_id:
-                job_log(job_id,
-                    f"{ticker} EMA gate skipped (breach confirmed at detection); "
-                    f"current close Rs{today_close:.2f} vs EMA{ema_period} "
-                    f"Rs{_ema_at:.2f}",
-                    "info")
-        else:
-            # Check breakdown candle and every candle after it up to today
-            for chk in range(bd_idx, len(closes)):
-                if closes[chk] < ema_values[chk]:
-                    _ema_breached = True
-                    _ema_at       = float(ema_values[chk])
-                    if job_id:
-                        ema_breach_date = dates[chk].strftime("%Y-%m-%d")
-                        job_log(job_id,
-                            f"{ticker} EMA{ema_period} breached on {ema_breach_date} "
-                            f"(close Rs{closes[chk]:.2f} < EMA Rs{_ema_at:.2f})",
-                            "info")
-                    break
-
-        if not _ema_breached:
-            if job_id:
-                job_log(job_id,
-                    f"{ticker} breakdown found on {dates[bd_idx].strftime('%Y-%m-%d')} "
-                    f"but no EMA{ema_period} breach from that day to today -- skip",
-                    "fail")
-            continue   # try an older breakdown candle
+        # EMA value at breakdown for display/reference (Gate 2 EMA+volume check
+        # is handled separately by update_sell_zone_gates after signal creation).
+        _ema_at = float(ema_values[bd_idx])
 
         # ── Valid breakdown found ─────────────────────────────────────────────
         breakdown_idx    = bd_idx
@@ -804,8 +773,8 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "",
         "breakdown_volume":        int(breakdown_vol),
         "avg_volume_20d":          int(avg_vol_20d),
         "volume_ratio":            round(volume_ratio, 2),
-        "ema_at_detection":        round(ema_at_detection, 2),  # EMA value when signal was first detected
-        "ema_breached_at_detection": True,                      # Always True here; gate passed
+        "ema_at_detection":        round(ema_at_detection, 2),  # EMA value at breakdown candle
+        "ema_breached_at_detection": True,                      # Legacy compat
         "below_ema":               below_ema,                   # kept for UI/legacy compat
         "surge_gain_pct":          round(best_gain, 2),
         "surge_candles":           best_greens,
@@ -813,6 +782,7 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "",
         "surge_start_date":        scan_dates[surge_start_idx].strftime("%Y-%m-%d"),
         "surge_end_date":          surge_end_date.strftime("%Y-%m-%d"),
         "days_since_surge_end":    days_since_end,
+        "breakdown_date":          dates[breakdown_idx].strftime("%Y-%m-%d"),
     }
 
 
@@ -926,13 +896,110 @@ def find_best_strike(candidate: Dict, cfg: Dict, job_id: str = "") -> Optional[D
         # Meta
         "Status":               "Momentum Lost",
         "Sell_Alert_Sent":      False,
+        # Gate 2 — EMA+volume breach after breakdown (sticky, tracked by update_sell_zone_gates)
+        "Breakdown_Date":            candidate.get("breakdown_date"),
+        "Sell_Zone_EMA_Confirmed":   False,
+        "Sell_Zone_EMA_Confirm_Date": None,
         "Scanned_At":           now_ist_str(),
     }
 
 
 # ─────────────────────────────────────────────────────────────
-#  PROXIMITY / SELL ZONE ALERTS
+#  GATE 2 — EMA + VOLUME CONFIRMATION AFTER BREAKDOWN
 #
+#  After the momentum break (Gate 1 / signal creation), price must
+#  close below the 9-EMA at least ONCE with above-average volume
+#  before the sell zone (Gate 3) can fire.
+#
+#  This is tracked per-signal as Sell_Zone_EMA_Confirmed (sticky).
+# ─────────────────────────────────────────────────────────────
+def check_ema_confirmed_after_breakdown(
+    ticker: str, breakdown_date_str: str, cfg: Dict
+) -> Tuple[bool, Optional[str]]:
+    """
+    Scan from breakdown_date forward.  Return (True, confirm_date) the first
+    candle where close < 9-EMA AND volume >= min_breakdown_volume_ratio * 20d avg.
+    """
+    ema_period    = int(cfg.get("ema_period", 9))
+    min_vol_ratio = float(cfg.get("min_breakdown_volume_ratio", 0.5))
+
+    hist = get_price_history(ticker, cfg.get("lookback_days", 45))
+    if hist is None or hist.empty:
+        return False, None
+
+    hist = hist.sort_index()
+    closes = hist["Close"].values
+    vols   = hist["Volume"].values
+    dates  = hist.index
+
+    ema_values = compute_ema(closes, ema_period)
+
+    try:
+        bd_date = datetime.strptime(breakdown_date_str, "%Y-%m-%d").date()
+    except Exception:
+        return False, None
+
+    # 20d average volume over the full window (pre-breakdown baseline)
+    avg_vol_20d = float(np.mean(vols[-20:])) if len(vols) >= 20 else float(np.mean(vols))
+    if avg_vol_20d <= 0:
+        return False, None
+
+    # Find start index (breakdown candle or first candle after it)
+    start_idx = next(
+        (i for i, d in enumerate(dates) if d.date() >= bd_date),
+        None
+    )
+    if start_idx is None:
+        return False, None
+
+    for i in range(start_idx, len(closes)):
+        if closes[i] < ema_values[i]:
+            vol_ratio = float(vols[i]) / avg_vol_20d
+            if vol_ratio >= min_vol_ratio:
+                return True, dates[i].strftime("%Y-%m-%d")
+
+    return False, None
+
+
+def update_sell_zone_gates(cfg: Dict) -> int:
+    """
+    Called every scan cycle.  For each signal where Gate 2 is not yet
+    confirmed, check if price has now closed below 9-EMA with volume.
+    Gate 2 confirmation is STICKY — once set it is never cleared.
+    Returns the count of newly confirmed signals.
+    """
+    signals = load_signals()
+    newly_confirmed = 0
+    changed = False
+
+    for sig in signals:
+        if sig.get("Sell_Zone_EMA_Confirmed"):
+            continue  # already confirmed — skip
+
+        breakdown_date = sig.get("Breakdown_Date")
+        if not breakdown_date:
+            continue
+
+        ticker = sig["Ticker"]
+        confirmed, confirm_date = check_ema_confirmed_after_breakdown(
+            ticker, breakdown_date, cfg
+        )
+        time.sleep(random.uniform(0.3, 0.6))  # throttle yfinance calls
+
+        if confirmed:
+            sig["Sell_Zone_EMA_Confirmed"]    = True
+            sig["Sell_Zone_EMA_Confirm_Date"] = confirm_date
+            newly_confirmed += 1
+            changed = True
+            print(f"[Gate2] {ticker} Gate 2 confirmed on {confirm_date}")
+
+    if changed:
+        save_signals(signals)
+
+    return newly_confirmed
+
+
+
 #  Reference: Yesterday_High = resistance ceiling defined at scan time.
 #
 #  Alert fires when:
@@ -949,15 +1016,17 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
     for sig in signals:
         ticker = sig["Ticker"]
 
-        # Use Surge_High (surge peak) as primary resistance.
-        # This is the strongest resistance level - where original momentum
-        # exhausted. Even after breakdown + recovery (DIXON 20 May example),
-        # this level will reject price again.
+        # ── GATE 2 GUARD: EMA+volume breach after breakdown must be confirmed ─
+        if not sig.get("Sell_Zone_EMA_Confirmed"):
+            time.sleep(random.uniform(0.1, 0.3))
+            continue
+
+        # Surge_High (surge peak) is the primary resistance ceiling.
         resistance = (
-            sig.get("Surge_High")           # NEW: True resistance
-            or sig.get("Yesterday_High")    # Fallback for old signals
-            or sig.get("Ten_Day_High")      # Legacy fallback
-            or sig.get("Suggested_Strike")  # Last resort
+            sig.get("Surge_High")
+            or sig.get("Yesterday_High")
+            or sig.get("Ten_Day_High")
+            or sig.get("Suggested_Strike")
         )
         if not resistance:
             time.sleep(random.uniform(0.2, 0.5))
@@ -968,7 +1037,7 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
             time.sleep(random.uniform(0.2, 0.5))
             continue
 
-        # Price broke above surge_high -> thesis invalidated (breakout confirmed)
+        # Price broke above surge_high → thesis invalidated (breakout confirmed)
         if cur_price > resistance:
             time.sleep(random.uniform(0.2, 0.5))
             continue
@@ -976,6 +1045,7 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
         dist_pct = (resistance - cur_price) / resistance * 100
 
         if dist_pct <= proximity_pct:
+            g2_date = sig.get("Sell_Zone_EMA_Confirm_Date", "?")
             hit = {
                 **sig,
                 "Current_Price":          round(cur_price, 2),
@@ -987,10 +1057,12 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
             send_telegram(
                 cfg["telegram_bot_token"],
                 cfg["telegram_chat_id"],
-                f"*SELL ZONE -- {ticker}*\n"
-                f"Price Rs{cur_price:.2f}  "
-                f"Surge High Rs{resistance:.2f}  "
-                f"Dist {dist_pct:.2f}%  (within {proximity_pct}%)\n"
+                f"*SELL ZONE — {ticker}* ✅ All 3 Gates Passed\n"
+                f"Gate 1 ✅ Momentum break (close < prev low)\n"
+                f"Gate 2 ✅ EMA breach confirmed {g2_date}\n"
+                f"Gate 3 ✅ Price Rs{cur_price:.2f} within "
+                f"{dist_pct:.2f}% of Surge High Rs{resistance:.2f} "
+                f"(limit {proximity_pct}%)\n"
                 f"Strike Rs{sig.get('Suggested_Strike','?')} CE  "
                 f"Expiry {sig.get('Expiry','?')}"
             )
@@ -998,6 +1070,8 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
         time.sleep(random.uniform(0.2, 0.5))
 
     return sell_zone_hits
+
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1029,20 +1103,9 @@ def run_screen_job(tickers: List[str], cfg: Dict, job_id: str):
 
     job_log(job_id, f"Starting scan of {total} tickers...", "info")
 
-    # Build a set of tickers already holding a confirmed signal so the EMA
-    # gate can be skipped for them — trend weakness was already established
-    # at initial detection. On a retest day, proximity to surge_high is enough.
-    existing_signals = load_signals()
-    ema_breached_tickers = {
-        s["Ticker"] for s in existing_signals
-        if s.get("EMA_Breached_At_Detection") or s.get("Below_EMA")
-    }
-
     for idx, ticker in enumerate(tickers):
         job_progress(job_id, idx, total, ticker)
-        already_breached = ticker in ema_breached_tickers
-        candidate = check_surge_and_loss(ticker, cfg, job_id,
-                                          ema_already_breached=already_breached)
+        candidate = check_surge_and_loss(ticker, cfg, job_id)
         if candidate is None:
             time.sleep(random.uniform(0.1, 0.3))
             continue
@@ -1055,6 +1118,11 @@ def run_screen_job(tickers: List[str], cfg: Dict, job_id: str):
 
         signals.append(signal)
         time.sleep(random.uniform(2.0, 4.0))
+
+    # ── Update Gate 2 state for all signals (including newly found ones) ──
+    gate2_new = update_sell_zone_gates(cfg)
+    if gate2_new:
+        job_log(job_id, f"Gate 2 newly confirmed for {gate2_new} signal(s)", "info")
 
     # Prune stale then merge
     existing, pruned = prune_stale_signals(load_signals(), cfg)
@@ -1069,7 +1137,11 @@ def run_screen_job(tickers: List[str], cfg: Dict, job_id: str):
             seen.add(s["Ticker"])
             added += 1
         else:
-            # Refresh existing signal with latest scan data
+            # Refresh signal but PRESERVE Gate 2 sticky state
+            old = next((ex for ex in existing if ex["Ticker"] == s["Ticker"]), None)
+            if old:
+                s["Sell_Zone_EMA_Confirmed"]    = old.get("Sell_Zone_EMA_Confirmed", False)
+                s["Sell_Zone_EMA_Confirm_Date"] = old.get("Sell_Zone_EMA_Confirm_Date")
             existing = [s if ex["Ticker"] == s["Ticker"] else ex for ex in existing]
 
     save_signals(existing)
@@ -1109,6 +1181,8 @@ def start_scheduler(cfg: Dict):
             return
         jid = create_job()
         run_screen_job(load_tickers(), c, jid)
+        # Gate 2: check EMA+volume confirmation for all signals
+        update_sell_zone_gates(c)
         all_sigs = load_signals()
         if all_sigs:
             hits = check_proximity_alerts(all_sigs, c)
@@ -1152,8 +1226,15 @@ async def option_charts_page():
 async def sma_screener_page():
     return FileResponse(BASE_DIR / "static" / "sma-screener.html")
 
+@app.get("/backtest", include_in_schema=False)
+async def backtest_page():
+    return FileResponse(BASE_DIR / "static" / "backtest.html")
+
 app.include_router(oc_router)
 app.include_router(sma_router)
+
+app.include_router(bt_router)   # ADD THIS
+
 
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -1245,6 +1326,43 @@ async def clear_signals():
     _wj(PROXIMITY_FILE, [])
     return {"ok": True}
 
+@app.get("/api/signals/gate-status")
+async def get_gate_status():
+    """Returns per-ticker gate status (Gates 1/2/3) for dashboard display."""
+    sigs      = load_signals()
+    cfg       = load_config()
+    prox_pct  = cfg.get("price_proximity_percent", 8.0)
+    result    = []
+    for sig in sigs:
+        ticker     = sig["Ticker"]
+        resistance = (
+            sig.get("Surge_High")
+            or sig.get("Yesterday_High")
+            or sig.get("Suggested_Strike")
+        )
+        cur_price  = None
+        dist_pct   = None
+        gate3      = False
+        try:
+            cur_price = get_current_price(ticker)
+            if cur_price and resistance and cur_price <= resistance:
+                dist_pct = round((resistance - cur_price) / resistance * 100, 2)
+                gate3 = dist_pct <= prox_pct
+        except Exception:
+            pass
+        result.append({
+            "ticker":                    ticker,
+            "gate1":                     True,  # Signal exists = Gate 1 passed
+            "gate2":                     bool(sig.get("Sell_Zone_EMA_Confirmed")),
+            "gate2_date":                sig.get("Sell_Zone_EMA_Confirm_Date"),
+            "gate3":                     gate3,
+            "current_price":             cur_price,
+            "resistance":                resistance,
+            "distance_pct":              dist_pct,
+            "breakdown_date":            sig.get("Breakdown_Date"),
+        })
+    return result
+
 @app.delete("/api/signals/{ticker}")
 async def remove_signal(ticker: str):
     sigs = [s for s in load_signals() if s["Ticker"] != ticker.upper()]
@@ -1259,8 +1377,11 @@ async def get_proximity():
 async def check_proximity():
     sigs = load_signals()
     if not sigs:
-        return {"hits": 0, "alerts": []}
+        return {"hits": 0, "alerts": [], "gate2_confirmed": 0}
     cfg  = load_config()
+    # Gate 2: update EMA+volume confirmation before checking proximity
+    gate2_new = await asyncio.to_thread(update_sell_zone_gates, cfg)
+    sigs = load_signals()  # reload after gate2 update
     hits = await asyncio.to_thread(check_proximity_alerts, sigs, cfg)
     if hits:
         prox   = load_proximity()
@@ -1276,7 +1397,7 @@ async def check_proximity():
             prox.extend(new_hits)
             save_proximity(prox[-200:])
         hits = new_hits
-    return {"hits": len(hits), "alerts": hits}
+    return {"hits": len(hits), "alerts": hits, "gate2_confirmed": gate2_new}
 
 @app.get("/api/scan-log")
 async def get_scan_log():
