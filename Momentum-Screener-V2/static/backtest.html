@@ -148,6 +148,15 @@
   }
   [data-tip]:hover::after { opacity: 1; }
 
+  /* ── Cache badge ── */
+  .cache-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+    letter-spacing: .03em;
+  }
+  .cache-badge.hit  { background: #1a2535; color: #58a6ff; border: 1px solid #1f6feb; }
+  .cache-badge.miss { background: #1f2a1f; color: var(--green); border: 1px solid #238636; }
+
   /* ── JSON export button ── */
   #export-btn { display: none; }
 
@@ -167,7 +176,8 @@
     <h1>NSE Strategy Backtester</h1>
     <small>Momentum Loss CE Sell — 3-Gate Walk-Forward Simulation</small>
   </div>
-  <div style="margin-left:auto;display:flex;gap:8px;">
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+    <span id="cache-status"></span>
     <button id="export-btn" class="btn secondary" style="width:auto;padding:7px 14px;font-size:12px;"
             onclick="exportJSON()">⬇ Export JSON</button>
   </div>
@@ -184,9 +194,9 @@
       <label>Years of History</label>
       <select id="years-select">
         <option value="1">1 Year</option>
-        <option value="2" selected>2 Years</option>
+        <option value="2">2 Years</option>
         <option value="3">3 Years</option>
-        <option value="5">5 Years</option>
+        <option value="5" selected>5 Years</option>
       </select>
     </div>
 
@@ -237,6 +247,10 @@
     </div>
 
     <div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px;">
+        <input type="checkbox" id="force-refresh" style="width:auto;accent-color:var(--accent);">
+        <span style="font-size:12px;color:var(--muted);">Force fresh fetch (skip cache)</span>
+      </label>
       <button class="btn" id="run-btn" onclick="runBacktest()">▶ Run Backtest</button>
       <div id="progress-box">
         <span class="spinner"></span>
@@ -293,15 +307,19 @@ async function runBacktest() {
 
   const years  = parseInt(document.getElementById('years-select').value);
   const config = getConfig();
+  const force  = document.getElementById('force-refresh').checked;
 
   setRunning(true);
-  setProgress(`Fetching ${years}yr data for ${tickers.join(', ')}…`);
+  setCacheStatus('');
+  setProgress(force
+    ? `Running fresh backtest for ${tickers.join(', ')}…`
+    : `Checking cache for ${tickers.join(', ')}…`);
 
   try {
     const resp = await fetch('/api/backtest/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tickers, years, config }),
+      body: JSON.stringify({ tickers, years, config, force }),
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ error: resp.statusText }));
@@ -309,6 +327,12 @@ async function runBacktest() {
     }
     const data = await resp.json();
     lastResult = data;
+    // Show cache hit/miss badge
+    if (data.from_cache) {
+      setCacheStatus(`<span class="cache-badge hit">⚡ From Cache · ${data.cached_at || ''}</span>`);
+    } else {
+      setCacheStatus(`<span class="cache-badge miss">✦ Fresh · Saved to cache</span>`);
+    }
     renderResults(data);
   } catch (e) {
     showError(e.message);
@@ -324,6 +348,11 @@ function setRunning(running) {
 
 function setProgress(msg) {
   document.getElementById('progress-msg').textContent = msg;
+}
+
+function setCacheStatus(html) {
+  const el = document.getElementById('cache-status');
+  if (el) el.innerHTML = html;
 }
 
 function showError(msg) {

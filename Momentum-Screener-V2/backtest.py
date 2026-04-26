@@ -28,6 +28,7 @@ As FastAPI router, mount in main.py:
 """
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -70,6 +71,85 @@ DEFAULT_CONFIG = {
     "price_proximity_percent":    1.0,
     "sell_zone_lookback_days":    10,
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  DISK CACHE
+#  Results are keyed by MD5( sorted_tickers + years + full_config ).
+#  Cache lives in ./backtest_cache/<hash>.json beside this file.
+#  A cached entry is reused unless the caller passes force=True.
+# ─────────────────────────────────────────────────────────────────────────────
+CACHE_DIR = Path(__file__).parent / "backtest_cache"
+
+
+def _cache_key(tickers: List[str], years: int, cfg: Dict) -> str:
+    """Stable MD5 key for a (tickers, years, config) combination."""
+    payload = json.dumps(
+        {
+            "tickers": sorted(t.upper() for t in tickers),
+            "years":   years,
+            "config":  {k: cfg[k] for k in sorted(cfg)},
+        },
+        sort_keys=True,
+    )
+    return hashlib.md5(payload.encode()).hexdigest()
+
+
+def _cache_load(key: str) -> Optional[Dict]:
+    """Return cached result dict or None if not found."""
+    path = CACHE_DIR / f"{key}.json"
+    if path.exists():
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            pass   # corrupt file — treat as cache miss
+    return None
+
+
+def _cache_save(key: str, data: Dict) -> None:
+    """Persist result dict to disk under the given key."""
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        path = CACHE_DIR / f"{key}.json"
+        with open(path, "w") as f:
+            json.dump(data, f, separators=(",", ":"))
+        print(f"[cache] saved → {path.name}")
+    except Exception as e:
+        print(f"[cache] save failed: {e}", file=sys.stderr)
+
+
+def _cache_list() -> List[Dict]:
+    """Return metadata for every cached entry (for the /cache endpoint)."""
+    if not CACHE_DIR.exists():
+        return []
+    entries = []
+    for p in sorted(CACHE_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            with open(p) as f:
+                d = json.load(f)
+            agg = d.get("aggregate", {})
+            entries.append({
+                "key":       p.stem,
+                "tickers":   agg.get("tickers", []),
+                "years":     d.get("years_tested"),
+                "trades":    agg.get("total_trades", 0),
+                "accuracy":  agg.get("accuracy_pct", 0),
+                "cached_at": d.get("cached_at", ""),
+                "size_kb":   round(p.stat().st_size / 1024, 1),
+            })
+        except Exception:
+            pass
+    return entries
+
+
+def _cache_delete(key: str) -> bool:
+    """Delete a single cache entry. Returns True if deleted."""
+    path = CACHE_DIR / f"{key}.json"
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  OPTION MATHS
@@ -635,14 +715,30 @@ if _has_fastapi:
         tickers:  List[str]
         years:    int        = 2
         config:   Dict       = {}
+        force:    bool       = False   # True → bypass cache, always run fresh
 
     router = APIRouter(prefix="/api/backtest", tags=["backtest"])
 
     @router.post("/run")
     async def run_backtest(req: BacktestRequest):
         cfg = {**DEFAULT_CONFIG, **req.config}
+        key = _cache_key(req.tickers, req.years, cfg)
+
+        # ── Cache hit ────────────────────────────────────────────────────────
+        if not req.force:
+            cached = _cache_load(key)
+            if cached is not None:
+                cached["from_cache"] = True
+                print(f"[cache] HIT  {key[:10]}…  tickers={req.tickers}")
+                return JSONResponse(content=cached)
+
+        # ── Cache miss → run full backtest ───────────────────────────────────
+        print(f"[cache] MISS {key[:10]}…  tickers={req.tickers}  force={req.force}")
         try:
             result = backtest_multiple(req.tickers, cfg, years=req.years, verbose=False)
+            result["from_cache"] = False
+            result["cached_at"]  = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
+            _cache_save(key, result)
             return JSONResponse(content=result)
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
@@ -650,6 +746,27 @@ if _has_fastapi:
     @router.get("/config")
     async def backtest_config():
         return DEFAULT_CONFIG
+
+    @router.get("/cache")
+    async def list_cache():
+        """List all cached backtest results with metadata."""
+        return JSONResponse(content={"entries": _cache_list()})
+
+    @router.delete("/cache/{key}")
+    async def delete_cache_entry(key: str):
+        """Delete a single cache entry by its MD5 key."""
+        deleted = _cache_delete(key)
+        return JSONResponse(content={"deleted": deleted, "key": key})
+
+    @router.delete("/cache")
+    async def clear_all_cache():
+        """Wipe the entire cache directory."""
+        count = 0
+        if CACHE_DIR.exists():
+            for p in CACHE_DIR.glob("*.json"):
+                p.unlink()
+                count += 1
+        return JSONResponse(content={"cleared": count})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
