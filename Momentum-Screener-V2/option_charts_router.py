@@ -17,9 +17,10 @@ router = APIRouter()
 #  NSE SESSION (isolated from main.py's session)
 # ─────────────────────────────────────────────────────────────
 _oc_session: Optional[requests.Session] = None
-_oc_lock = threading.Lock()
+_oc_lock    = threading.Lock()
+_oc_warmed  = False          # True once the session has visited NSE warm-up pages
 
-NSE_OC_URL = "https://www.nseindia.com/api/historicalOR/foCPV"
+NSE_OC_URL      = "https://www.nseindia.com/api/historicalOR/foCPV"
 
 INSTRUMENT_TYPES = ["OPTSTK", "OPTIDX", "FUTIDX", "FUTSTK", "FUTIVX"]
 OPTION_TYPES     = ["CE", "PE"]
@@ -37,10 +38,10 @@ def _get_oc_session() -> requests.Session:
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
             ),
-            "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate",
-            "Connection":      "keep-alive",
+            "Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language":           "en-US,en;q=0.9",
+            "Accept-Encoding":           "gzip, deflate",
+            "Connection":                "keep-alive",
             "Upgrade-Insecure-Requests": "1",
         })
         _oc_session = s
@@ -48,12 +49,17 @@ def _get_oc_session() -> requests.Session:
 
 
 def _reset_oc_session():
-    global _oc_session
+    global _oc_session, _oc_warmed
     with _oc_lock:
         _oc_session = None
+        _oc_warmed  = False
 
 
 def _warm_up(session: requests.Session) -> bool:
+    """Visit NSE landing pages so the session gets cookies. Skipped if already warmed."""
+    global _oc_warmed
+    if _oc_warmed:
+        return True
     warm_pages = [
         "https://www.nseindia.com/",
         "https://www.nseindia.com/market-data/equity-derivatives-watch",
@@ -64,11 +70,12 @@ def _warm_up(session: requests.Session) -> bool:
             time.sleep(1.5)
         except Exception:
             return False
+    _oc_warmed = True
     return True
 
 
 # ─────────────────────────────────────────────────────────────
-#  CORE FETCH (blocking — run via asyncio.to_thread)
+#  CORE FETCH — OHLC DATA (blocking — run via asyncio.to_thread)
 # ─────────────────────────────────────────────────────────────
 def _do_fetch(
     from_dt: datetime, to_dt: datetime,
@@ -156,12 +163,10 @@ def _do_fetch(
         df.sort_values("date", inplace=True)
         df["date"] = df["date"].dt.strftime("%Y-%m-%d")
 
-    # Round numeric cols
     for col in ["open", "high", "low", "close", "ltp", "underlying"]:
         if col in df.columns:
             df[col] = df[col].round(2)
 
-    # ── Sanitize: replace ALL NaN / Inf / -Inf with None so JSON serialises cleanly
     import math
     def _safe(v):
         if v is None:
@@ -176,6 +181,104 @@ def _do_fetch(
     records = df.to_dict(orient="records")
     clean   = [{k: _safe(v) for k, v in row.items()} for row in records]
     return clean
+
+
+# ─────────────────────────────────────────────────────────────
+#  STRIKES FETCH — using historicalOR endpoint (same as OHLC)
+# ─────────────────────────────────────────────────────────────
+
+def _do_fetch_strikes(
+    symbol: str,
+    instrument_type: str,
+    expiry_dt: datetime,
+    option_type: str,
+) -> list[int]:
+    """
+    Fetch available strike prices by calling historicalOR without strikePrice param.
+    
+    This returns all strikes for the given symbol+expiry+optionType in one call.
+    Works for both historical and current contracts. Automatically handles:
+    - Corporate actions (splits, dividends) — strikes reflect adjusted values
+    - All expiry dates (past, present, future)
+    - No ZIP downloads, no option chain parsing — single API call
+    
+    Date range strategy:
+    - For future expiries: use last 7 days (will get recent data or empty)
+    - For past expiries: use expiry date ± 3 days window
+    """
+    session = _get_oc_session()
+    _warm_up(session)
+    
+    # Determine date range for the query
+    today = datetime.now().date()
+    if expiry_dt.date() >= today:
+        # Future/current expiry: check last 7 days for recent data
+        to_dt = datetime.now()
+        from_dt = to_dt - timedelta(days=7)
+    else:
+        # Past expiry: narrow window around expiry date
+        to_dt = expiry_dt
+        from_dt = expiry_dt - timedelta(days=3)
+    
+    params = {
+        "from":           from_dt.strftime("%d-%m-%Y"),
+        "to":             to_dt.strftime("%d-%m-%Y"),
+        "instrumentType": instrument_type,
+        "symbol":         symbol,
+        "year":           str(expiry_dt.year),
+        "expiryDate":     expiry_dt.strftime("%d-%b-%Y").upper(),
+        "optionType":     option_type,
+        # NO strikePrice param — this returns all strikes
+    }
+    
+    api_hdrs = {
+        "Accept":           "application/json, text/plain, */*",
+        "Referer":          "https://www.nseindia.com/market-data/equity-derivatives-watch",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    
+    for attempt in range(2):
+        try:
+            r = session.get(NSE_OC_URL, params=params, headers=api_hdrs, timeout=15)
+            
+            if r.status_code == 401:
+                _warm_up(session)
+                time.sleep(2)
+                continue
+                
+            if r.status_code == 403:
+                # Rate limited — don't reset session, just bail
+                return []
+                
+            if r.status_code != 200:
+                return []
+            
+            data = r.json()
+            if not data or "data" not in data or not data["data"]:
+                return []
+            
+            # Extract unique strikes from FH_STRIKE_PRICE
+            strikes = set()
+            for row in data["data"]:
+                strike_val = row.get("FH_STRIKE_PRICE")
+                if strike_val is not None:
+                    try:
+                        s = int(float(strike_val))
+                        if s > 0:
+                            strikes.add(s)
+                    except (ValueError, TypeError):
+                        pass
+            
+            return sorted(strikes)
+            
+        except requests.RequestException:
+            if attempt == 1:
+                return []
+            time.sleep(2)
+        except Exception:
+            return []
+    
+    return []
 
 
 # ─────────────────────────────────────────────────────────────
@@ -213,9 +316,57 @@ async def oc_meta():
     }
 
 
+@router.get("/api/option-charts/strikes")
+async def oc_strikes(
+    symbol:          str,
+    instrument_type: str = "OPTSTK",
+    expiry_date:     str = "",   # DD-MM-YYYY
+    option_type:     str = "CE",
+):
+    """
+    Return available strike prices for a symbol + expiry using the NSE
+    historicalOR endpoint (same API used for OHLC data).
+
+    - Works for both historical and current/future expiries
+    - Automatically handles corporate actions (splits, dividends)
+    - Single API call — no ZIP downloads, no bhavcopy parsing
+    - Futures instrument types always return an empty list (no strikes)
+    
+    Returns empty list if:
+    - No data available for the date range
+    - Symbol doesn't exist in F&O
+    - Expiry date is invalid
+    - Rate limited by NSE (HTTP 403)
+    """
+    if not symbol or not expiry_date:
+        return {"strikes": [], "source": "missing_params", "count": 0}
+
+    # Futures have no strike prices
+    if instrument_type.upper().startswith("FUT"):
+        return {"strikes": [], "source": "futures_no_strikes", "count": 0}
+
+    try:
+        expiry_dt = datetime.strptime(expiry_date, "%d-%m-%Y")
+    except ValueError:
+        raise HTTPException(400, "Invalid expiry_date — use DD-MM-YYYY")
+
+    try:
+        strikes = await asyncio.to_thread(
+            _do_fetch_strikes,
+            symbol.strip().upper(),
+            instrument_type.upper(),
+            expiry_dt,
+            option_type.upper(),
+        )
+    except Exception:
+        strikes = []
+
+    source = "historicalOR" if strikes else "not_found"
+    return {"strikes": strikes, "source": source, "count": len(strikes)}
+
+
 @router.post("/api/option-charts/fetch")
 async def oc_fetch(req: OcFetchRequest):
-    # ── parse dates
     fmt = "%d-%m-%Y"
     try:
         from_dt   = datetime.strptime(req.from_date,   fmt)

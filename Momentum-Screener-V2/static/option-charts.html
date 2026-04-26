@@ -237,6 +237,26 @@ td.red{color:var(--red)}
 
 /* ── DOWNLOAD BTN ── */
 .download-bar{padding:0 24px 20px;display:flex;gap:10px;align-items:center}
+
+/* ── STRIKE COMBO ── */
+.strike-combo{display:flex;flex-direction:column;gap:4px}
+#inp-strike-sel,#inp-strike-num{width:100%}
+.strike-badge{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:9px;font-family:var(--font-mono);letter-spacing:.06em;
+  padding:2px 8px;border-radius:10px;width:fit-content;
+  transition:all .2s;
+}
+.strike-badge.sb-loading{color:var(--amber);border:1px solid rgba(255,123,41,.3);background:var(--amber-glow)}
+.strike-badge.sb-found{color:var(--teal);border:1px solid rgba(0,212,177,.3);background:var(--teal-glow)}
+.strike-badge.sb-empty{color:var(--text2);border:1px solid var(--border);background:transparent}
+.strike-badge.sb-hidden{display:none}
+.strike-manual-link{
+  font-size:9px;color:var(--text2);cursor:pointer;font-family:var(--font-mono);
+  text-decoration:underline;letter-spacing:.04em;
+  background:none;border:none;padding:0;
+}
+.strike-manual-link:hover{color:var(--teal)}
 </style>
 </head>
 <body>
@@ -284,7 +304,14 @@ td.red{color:var(--red)}
 
     <div class="field">
       <label>Strike Price *</label>
-      <input type="number" id="inp-strike" placeholder="e.g. 1700" min="1" step="50"/>
+      <div class="strike-combo">
+        <select id="inp-strike-sel" style="display:none"></select>
+        <input type="number" id="inp-strike-num" placeholder="e.g. 1700" min="1" step="1"/>
+        <div style="display:flex;align-items:center;gap:8px;min-height:16px">
+          <span class="strike-badge sb-hidden" id="strike-badge"></span>
+          <button class="strike-manual-link" id="strike-manual-btn" style="display:none" type="button"></button>
+        </div>
+      </div>
     </div>
 
     <div class="field">
@@ -444,7 +471,7 @@ async function fetchData() {
   const symbol       = document.getElementById('inp-symbol').value;
   const instrument   = document.getElementById('inp-instrument').value;
   const optType      = document.getElementById('inp-option-type').value;
-  const strikeRaw    = document.getElementById('inp-strike').value;
+  const strikeRaw    = getStrikeValue();
 
   // Read dates from Flatpickr (already in DD-MM-YYYY format via dateFormat)
   const expiry = fpExpiry?.input?.value?.trim() || '';
@@ -452,7 +479,7 @@ async function fetchData() {
   const to     = fpTo?.input?.value?.trim()     || '';
 
   if (!symbol)                              { toast('warn','Select a symbol'); return; }
-  if (!strikeRaw || parseInt(strikeRaw)<=0) { toast('warn','Enter a valid strike price'); return; }
+  if (!strikeRaw || parseInt(strikeRaw)<=0) { toast('warn','Select or enter a valid strike price'); return; }
   if (!expiry)                              { toast('warn','Pick an expiry date'); return; }
   if (!from || !to)                         { toast('warn','Pick from and to dates'); return; }
 
@@ -494,7 +521,7 @@ function showEmpty() {
 }
 function clearResults() {
   showEmpty();
-  document.getElementById('inp-strike').value = '';
+  resetStrikeCombo();
 }
 
 // ═══════════════════════════════════════
@@ -686,6 +713,7 @@ function initDatePickers() {
     ...FP_CONFIG,
     onChange(dates, dateStr) {
       if (activeRange !== 'Custom') applyRange();
+      scheduleStrikesFetch();   // re-fetch available strikes for new expiry
     },
   });
 
@@ -705,6 +733,166 @@ function initDatePickers() {
 }
 
 // ═══════════════════════════════════════
+//  STRIKE AUTO-POPULATE
+// ═══════════════════════════════════════
+
+/** Tracks current state of the strike combo widget */
+let strikeMode     = 'manual';  // 'manual' | 'select'
+let lastStrikeReq  = null;      // fingerprint to debounce duplicate calls
+let strikeDebounce = null;
+
+const elSel    = () => document.getElementById('inp-strike-sel');
+const elNum    = () => document.getElementById('inp-strike-num');
+const elBadge  = () => document.getElementById('strike-badge');
+const elManBtn = () => document.getElementById('strike-manual-btn');
+
+/** Read whichever input is currently active */
+function getStrikeValue() {
+  if (strikeMode === 'select') {
+    const v = elSel().value;
+    return v === '__manual__' ? elNum().value : v;
+  }
+  return elNum().value;
+}
+
+function resetStrikeCombo() {
+  clearTimeout(strikeDebounce);
+  lastStrikeReq = null;
+  strikeMode = 'manual';
+  elSel().style.display = 'none';
+  elSel().innerHTML = '';
+  elNum().style.display = '';
+  elNum().value = '';
+  _setBadge('hidden', '');
+  elManBtn().style.display = 'none';
+}
+
+function _setBadge(cls, text) {
+  const b = elBadge();
+  b.className = 'strike-badge';
+  if (cls === 'hidden') { b.classList.add('sb-hidden'); b.textContent = ''; return; }
+  b.classList.add('sb-' + cls);
+  b.textContent = text;
+}
+
+function _setManualBtn(show, label) {
+  const btn = elManBtn();
+  if (!show) { btn.style.display = 'none'; return; }
+  btn.style.display = '';
+  btn.textContent = label || '';
+}
+
+/** Switch combo to SELECT mode and populate with strikes */
+function _applyStrikes(strikes) {
+  strikeMode = 'select';
+
+  const sel = elSel();
+  sel.innerHTML =
+    '<option value="">Select strike…</option>' +
+    strikes.map(function(s) {
+      return '<option value="' + s + '">&#8377;' + s.toLocaleString('en-IN') + '</option>';
+    }).join('') +
+    '<option value="__manual__" style="color:var(--text2)">&#9998; Enter manually\u2026</option>';
+
+  sel.style.display = '';
+  elNum().style.display = 'none';
+  elNum().value = '';
+
+  _setBadge('found', '\u2713 ' + strikes.length + ' strikes loaded');
+  _setManualBtn(false);
+
+  sel.onchange = function() {
+    if (sel.value === '__manual__') {
+      strikeMode = 'manual';
+      sel.style.display = 'none';
+      elNum().style.display = '';
+      elNum().value = '';
+      elNum().focus();
+      _setBadge('empty', 'Manual entry');
+      _setManualBtn(true, '\u2190 Back to list');
+    }
+  };
+
+  elManBtn().onclick = function() {
+    if (strikeMode !== 'select') {
+      strikeMode = 'select';
+      sel.style.display = '';
+      elNum().style.display = 'none';
+      elNum().value = '';
+      _setBadge('found', '\u2713 ' + strikes.length + ' strikes loaded');
+      _setManualBtn(false);
+    }
+  };
+}
+
+/** Switch combo to MANUAL mode with a status hint */
+function _applyNoStrikes(reason) {
+  strikeMode = 'manual';
+  elSel().style.display = 'none';
+  elNum().style.display = '';
+  _setBadge('empty', reason);
+  _setManualBtn(false);
+}
+
+/** Main entry: call /api/option-charts/strikes when filters change */
+async function triggerStrikesFetch() {
+  const symbol     = (document.getElementById('inp-symbol').value || '').trim();
+  const instrument = document.getElementById('inp-instrument').value;
+  const optType    = document.getElementById('inp-option-type').value;
+  const expiry     = (fpExpiry && fpExpiry.input && fpExpiry.input.value) ? fpExpiry.input.value.trim() : '';
+
+  if (!symbol || !expiry) {
+    _setBadge('hidden', '');
+    _setManualBtn(false);
+    return;
+  }
+
+  const req = symbol + '|' + instrument + '|' + expiry + '|' + optType;
+  if (req === lastStrikeReq) return;
+  lastStrikeReq = req;
+
+  if (instrument.startsWith('FUT')) {
+    _applyNoStrikes('N/A for futures');
+    return;
+  }
+
+  _setBadge('loading', '\u29d7 Loading strikes\u2026');
+  _setManualBtn(false);
+
+  if (strikeMode !== 'select') {
+    elNum().style.display = '';
+  }
+
+  try {
+    const params = new URLSearchParams({
+      symbol:          symbol,
+      instrument_type: instrument,
+      expiry_date:     expiry,
+      option_type:     optType,
+    });
+    const res = await API.get('/api/option-charts/strikes?' + params.toString());
+
+    if (req !== lastStrikeReq) return;  // stale response
+
+    if (res.strikes && res.strikes.length > 0) {
+      _applyStrikes(res.strikes);
+    } else {
+      _applyNoStrikes('No strikes found \u2014 enter manually');
+    }
+  } catch(e) {
+    if (req !== lastStrikeReq) return;
+    _applyNoStrikes('Could not load \u2014 enter manually');
+  }
+}
+
+/** Debounced wrapper — avoids hammering the API on rapid changes */
+function scheduleStrikesFetch() {
+  lastStrikeReq = null;
+  clearTimeout(strikeDebounce);
+  strikeDebounce = setTimeout(triggerStrikesFetch, 400);
+}
+
+// ═══════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════
 async function init() {
@@ -716,6 +904,16 @@ async function init() {
   const from30 = new Date(); from30.setDate(today.getDate() - 30);
   fpTo.setDate(today, true);
   fpFrom.setDate(from30, true);
+
+  // ── Auto-populate strikes on filter changes ──────────────────────────
+  // Expiry change already triggers via flatpickr onChange; we also need
+  // symbol / instrument / option-type changes.
+  document.getElementById('inp-symbol').addEventListener('change', scheduleStrikesFetch);
+  document.getElementById('inp-instrument').addEventListener('change', function() {
+    resetStrikeCombo();
+    scheduleStrikesFetch();
+  });
+  document.getElementById('inp-option-type').addEventListener('change', scheduleStrikesFetch);
 }
 
 document.addEventListener('DOMContentLoaded', init);
