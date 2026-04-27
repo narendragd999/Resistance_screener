@@ -70,6 +70,12 @@ DEFAULT_CONFIG = {
     "ema_period":                 9,
     "price_proximity_percent":    1.0,
     "sell_zone_lookback_days":    10,
+    # Expiry control ─────────────────────────────────────────────────────────
+    # "auto"    → current month; roll to next if days_to_expiry < min_days_to_expiry
+    # "current" → always current month (even if very close)
+    # "next"    → always next month expiry
+    "expiry_mode":          "auto",
+    "min_days_to_expiry":   5,       # roll threshold (auto mode only)
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -417,8 +423,8 @@ def check_gate3(
 
     pulled_back = False   # True once close has dropped below floor after Gate 2
 
-    # Start from g2_idx + 1 — the Gate 2 candle itself is never a valid entry.
-    # Using elif below also prevents Phase 1 and Phase 2 firing on the same candle.
+    # Start from g2_idx+1: Gate 2 candle itself is never a valid entry.
+    # elif prevents Phase 1 + Phase 2 firing on the same candle.
     for i in range(g2_idx + 1, len(closes)):
         close = float(closes[i])
         high  = float(highs[i])
@@ -431,7 +437,7 @@ def check_gate3(
         elif not pulled_back and close < floor:
             pulled_back = True
 
-        # Phase 2: retest — HIGH re-enters the sell zone AFTER a confirmed pullback
+        # Phase 2: retest — HIGH re-enters the sell zone AFTER confirmed pullback
         elif pulled_back and high >= floor:
             return i
 
@@ -459,13 +465,23 @@ def evaluate_trade(
     # --- Strike ---
     strike = nearest_otm_strike(surge_high)
 
-    # --- Time to expiry ---
-    expiry_date = nse_monthly_expiry(entry_date.year, entry_date.month)
-    # If expiry is within 5 calendar days, roll to next month
-    if (expiry_date - entry_date).days <= 5:
-        next_month = entry_date.month + 1 if entry_date.month < 12 else 1
-        next_year  = entry_date.year + (1 if entry_date.month == 12 else 0)
-        expiry_date = nse_monthly_expiry(next_year, next_month)
+    # --- Time to expiry (respects expiry_mode config) ---
+    expiry_mode   = str(cfg.get("expiry_mode", "auto")).lower()
+    min_days_roll = int(cfg.get("min_days_to_expiry", 5))
+
+    def _next_expiry(d: date) -> date:
+        nm = d.month + 1 if d.month < 12 else 1
+        ny = d.year  + (1 if d.month == 12 else 0)
+        return nse_monthly_expiry(ny, nm)
+
+    if expiry_mode == "next":
+        expiry_date = _next_expiry(entry_date)
+    elif expiry_mode == "current":
+        expiry_date = nse_monthly_expiry(entry_date.year, entry_date.month)
+    else:   # "auto" (default)
+        expiry_date = nse_monthly_expiry(entry_date.year, entry_date.month)
+        if (expiry_date - entry_date).days <= min_days_roll:
+            expiry_date = _next_expiry(entry_date)
 
     T_years = max(0.001, (expiry_date - entry_date).days / 365.0)
 
@@ -517,6 +533,7 @@ def evaluate_trade(
         "iv_sigma":         round(sigma * 100, 1),    # %
         "T_days":           (expiry_date - entry_date).days,
         # Outcome
+        "expiry_mode":      expiry_mode,
         "result":           result,
         "pnl_per_unit":     round(pnl, 2),
         "return_pct":       round(pnl / entry_ce_premium * 100, 1) if entry_ce_premium > 0 else 0,
@@ -776,6 +793,36 @@ if _has_fastapi:
                 p.unlink()
                 count += 1
         return JSONResponse(content={"cleared": count})
+
+    @router.get("/candles")
+    async def get_candles(ticker: str, from_date: str, to_date: str):
+        """
+        Return OHLCV candles for ticker between from_date and to_date (inclusive).
+        Used by the frontend to render per-trade candlestick charts.
+        """
+        try:
+            from_d = date.fromisoformat(from_date)
+            to_d   = date.fromisoformat(to_date)
+            years_needed = max(1, math.ceil((to_d - from_d).days / 300) + 1)
+            df = fetch_history(ticker, years=years_needed + 1)
+            if df is None or df.empty:
+                return JSONResponse(status_code=404, content={"error": f"No data for {ticker}"})
+            candles = []
+            for dt, row in df.iterrows():
+                d = dt.date()
+                if d < from_d or d > to_d:
+                    continue
+                candles.append({
+                    "date":   str(d),
+                    "open":   round(float(row["Open"]),   2),
+                    "high":   round(float(row["High"]),   2),
+                    "low":    round(float(row["Low"]),    2),
+                    "close":  round(float(row["Close"]),  2),
+                    "volume": int(row["Volume"]),
+                })
+            return JSONResponse(content={"ticker": ticker, "candles": candles})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
