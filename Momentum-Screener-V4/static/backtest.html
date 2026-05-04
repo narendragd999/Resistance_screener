@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NSE Strategy Backtester — Momentum Loss CE Sell</title>
+<style>
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --surface2: #21262d;
+    --border:   #30363d;
+    --accent:   #f0883e;
+    --green:    #3fb950;
+    --red:      #f85149;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --win-bg:   #1a2e1a;
+    --loss-bg:  #2e1a1a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+  a { color: var(--accent); text-decoration: none; }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header small { color: var(--muted); font-size: 12px; }
+
+  .layout { display: flex; height: calc(100vh - 57px); }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 320px; min-width: 280px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px 16px;
+    display: flex; flex-direction: column; gap: 18px;
+  }
+  .sidebar h2 { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .05em; text-transform: uppercase; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; margin-top: 10px; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 7px 10px; border-radius: 6px;
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); font-size: 13px;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn {
+    display: block; width: 100%; padding: 10px;
+    background: var(--accent); color: #000; border: none;
+    border-radius: 6px; font-weight: 700; font-size: 14px;
+    cursor: pointer; margin-top: 8px; letter-spacing: .02em;
+    transition: opacity .15s;
+  }
+  .btn:hover { opacity: .85; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn.secondary { background: var(--surface2); color: var(--text); }
+
+  /* ── Progress ── */
+  #progress-box {
+    display: none;
+    background: var(--surface2); border-radius: 8px;
+    padding: 12px; text-align: center; font-size: 13px;
+  }
+  .spinner {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-right: 8px; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Main content ── */
+  .main { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+
+  /* ── Aggregate cards ── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 14px;
+  }
+  .card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+  .card .val { font-size: 26px; font-weight: 700; }
+  .card .val.green { color: var(--green); }
+  .card .val.red   { color: var(--red); }
+  .card .val.acc   { color: var(--accent); }
+
+  /* ── Accuracy bar ── */
+  .acc-bar-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .acc-bar-wrap h3 { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+  .acc-bar { height: 12px; background: var(--red); border-radius: 6px; overflow: hidden; }
+  .acc-fill { height: 100%; background: var(--green); border-radius: 6px; transition: width 0.6s ease; }
+  .acc-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  /* ── Per-ticker sections ── */
+  .ticker-section {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  .ticker-header {
+    padding: 14px 16px; background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none;
+  }
+  .ticker-header h3 { font-size: 15px; font-weight: 700; }
+  .ticker-stats { display: flex; gap: 16px; font-size: 12px; }
+  .badge { padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .badge.win  { background: var(--win-bg);  color: var(--green); }
+  .badge.loss { background: var(--loss-bg); color: var(--red); }
+  .ticker-body {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 420px;   /* ~12 rows; user can scroll inside the table */
+  }
+
+  /* ── Trade table ── */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { background: var(--surface2); color: var(--muted); padding: 8px 10px; text-align: left;
+       font-weight: 600; position: sticky; top: 0; z-index: 2; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  tr.win  td:first-child { border-left: 3px solid var(--green); }
+  tr.loss td:first-child { border-left: 3px solid var(--red); }
+  tr:hover td { background: var(--surface2); }
+  .tag-win  { color: var(--green); font-weight: 700; }
+  .tag-loss { color: var(--red);   font-weight: 700; }
+
+  /* ── Empty/error states ── */
+  .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty svg { opacity: .2; margin-bottom: 16px; }
+  .error-box { background: #2e1a1a; border: 1px solid var(--red); border-radius: 8px; padding: 12px 16px; color: var(--red); }
+
+  /* ── Tooltip ── */
+  [data-tip] { position: relative; cursor: help; }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute; bottom: 125%; left: 50%; transform: translateX(-50%);
+    background: #1c2128; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; white-space: nowrap;
+    font-size: 11px; pointer-events: none; opacity: 0; transition: opacity .15s;
+    z-index: 99;
+  }
+  [data-tip]:hover::after { opacity: 1; }
+
+  /* ── Cache badge ── */
+  .cache-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+    letter-spacing: .03em;
+  }
+  .cache-badge.hit  { background: #1a2535; color: #58a6ff; border: 1px solid #1f6feb; }
+  .cache-badge.miss { background: #1f2a1f; color: var(--green); border: 1px solid #238636; }
+
+  /* ── JSON export button ── */
+  #export-btn { display: none; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Chart Modal ── */
+  #chart-modal {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,.72); backdrop-filter: blur(4px);
+    align-items: center; justify-content: center;
+  }
+  #chart-modal.open { display: flex; }
+  #chart-panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; width: min(980px, 96vw);
+    max-height: 92vh; overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 24px 64px rgba(0,0,0,.6);
+  }
+  #chart-topbar {
+    padding: 14px 18px; background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    flex-shrink: 0;
+  }
+  #chart-topbar h2 { font-size: 15px; font-weight: 700; }
+  #chart-topbar .meta { font-size: 12px; color: var(--muted); }
+  #chart-close {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 4px 12px;
+    cursor: pointer; font-size: 16px; line-height: 1;
+  }
+  #chart-close:hover { border-color: var(--accent); }
+  #chart-wrap { padding: 16px; overflow: auto; flex: 1; }
+  canvas#trade-canvas { display: block; border-radius: 8px; }
+  #chart-legend {
+    display: flex; flex-wrap: wrap; gap: 12px 20px;
+    padding: 10px 18px 16px; font-size: 11px; color: var(--muted);
+    border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .leg { display: flex; align-items: center; gap: 5px; }
+  .leg-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  #chart-loading {
+    padding: 60px; text-align: center; color: var(--muted); font-size: 13px;
+  }
+  /* clickable trade rows */
+  tbody tr { cursor: pointer; }
+  tbody tr:hover td { background: #1e2a3a !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+  </svg>
+  <div>
+    <h1>NSE Strategy Backtester</h1>
+    <small>Momentum Loss CE Sell — 3-Gate Walk-Forward Simulation</small>
+  </div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+    <span id="cache-status"></span>
+    <button id="export-btn" class="btn secondary" style="width:auto;padding:7px 14px;font-size:12px;"
+            onclick="exportJSON()">⬇ Export JSON</button>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- ─── Sidebar ─── -->
+  <div class="sidebar">
+    <div>
+      <h2>Tickers</h2>
+      <label>NSE Symbols (comma or space separated)</label>
+      <input type="text" id="tickers-input" placeholder="RELIANCE TCS HDFCBANK INFY"
+             value="RELIANCE">
+      <label>Years of History</label>
+      <select id="years-select">
+        <option value="1">1 Year</option>
+        <option value="2">2 Years</option>
+        <option value="3">3 Years</option>
+        <option value="5" selected>5 Years</option>
+        <option value="6">6 Years</option>
+        <option value="7">7 Years</option>
+        <option value="8">8 Years</option>
+        <option value="9">9 Years</option>
+        <option value="10">10 Years</option>
+      </select>
+    </div>
+
+    <div>
+      <h2>Gate 1 — Surge + Breakdown</h2>
+      <div class="row2">
+        <div>
+          <label data-tip="Minimum surge gain %">Min Surge %</label>
+          <input type="number" id="min-gain" value="18" min="5" max="200" step="1">
+        </div>
+        <div>
+          <label data-tip="Minimum green candles in surge">Min Green</label>
+          <input type="number" id="min-green" value="2" min="1" max="20" step="1">
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <label data-tip="Surge must end within N days">Recency Days</label>
+          <input type="number" id="recency" value="45" min="5" max="120" step="1">
+        </div>
+        <div>
+          <label data-tip="Min close % below prev low">Min Drop %</label>
+          <input type="number" id="min-drop" value="0.1" min="0.01" max="5" step="0.05">
+        </div>
+      </div>
+      <label data-tip="Breakdown volume / 20d avg">Min Vol Ratio</label>
+      <input type="number" id="vol-ratio" value="0.5" min="0.1" max="5" step="0.1">
+    </div>
+
+    <div>
+      <h2>Gate 2 — EMA Confirmation</h2>
+      <div class="row2">
+        <div>
+          <label>EMA Period</label>
+          <input type="number" id="ema-period" value="9" min="3" max="50" step="1">
+        </div>
+        <div>
+          <label data-tip="Same vol ratio as breakdown">Gate2 Vol Ratio</label>
+          <input type="number" id="g2-vol" value="0.5" min="0.1" max="5" step="0.1">
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <h2>Gate 3 — Sell Zone</h2>
+      <label data-tip="Price within X% below surge high triggers sell">Proximity %</label>
+      <input type="number" id="prox-pct" value="1.0" min="0.1" max="10" step="0.1">
+    </div>
+
+    <div>
+      <h2>Expiry Selection</h2>
+      <label data-tip="Which monthly expiry to use for CE pricing and settlement">Expiry Mode</label>
+      <select id="expiry-mode" onchange="toggleRollDays()">
+        <option value="auto" selected>Auto — roll if &lt; N days left</option>
+        <option value="current">Always Current Month</option>
+        <option value="next">Always Next Month</option>
+      </select>
+      <div id="roll-days-wrap">
+        <label data-tip="If days to current expiry &lt; this, use next month instead">Roll Threshold (days)</label>
+        <input type="number" id="roll-days" value="5" min="1" max="20" step="1">
+      </div>
+    </div>
+
+    <div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px;">
+        <input type="checkbox" id="force-refresh" style="width:auto;accent-color:var(--accent);">
+        <span style="font-size:12px;color:var(--muted);">Force fresh fetch (skip cache)</span>
+      </label>
+      <button class="btn" id="run-btn" onclick="runBacktest()">▶ Run Backtest</button>
+      <div id="progress-box">
+        <span class="spinner"></span>
+        <span id="progress-msg">Fetching historical data…</span>
+      </div>
+    </div>
+
+    <div id="info-box" style="display:none;font-size:11px;color:var(--muted);line-height:1.7;">
+      <strong style="color:var(--text)">How it works</strong><br>
+      <b>Gate 1</b>: Surge ≥ min% → breakdown candle (close &lt; prev_low + volume)<br>
+      <b>Gate 2</b>: Close below 9-EMA with above-avg volume (sticky)<br>
+      <b>Gate 3</b>: Price re-tests surge high within proximity% → Sell OTM CE<br>
+      <b>Exit</b>: Hold to monthly expiry (last Thursday). WIN = CE worthless.
+      <br><br>
+      Option pricing via <b>Black-Scholes</b> using 30-day historical vol.
+    </div>
+    <button class="btn secondary" onclick="toggleInfo()" style="font-size:12px;padding:6px;">ℹ How It Works</button>
+  </div>
+
+  <!-- ─── Main ─── -->
+  <div class="main" id="main-content">
+    <div class="empty" id="empty-state">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
+      </svg>
+      <p style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px;">No Results Yet</p>
+      <p>Configure parameters and click <strong>Run Backtest</strong> to simulate the strategy over historical data.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+let lastResult = null;
+
+function getConfig() {
+  return {
+    min_gain_percent:           parseFloat(document.getElementById('min-gain').value),
+    min_green_candles:          parseInt(document.getElementById('min-green').value),
+    surge_recency_days:         parseInt(document.getElementById('recency').value),
+    min_drop_percent:           parseFloat(document.getElementById('min-drop').value),
+    min_breakdown_volume_ratio: parseFloat(document.getElementById('vol-ratio').value),
+    ema_period:                 parseInt(document.getElementById('ema-period').value),
+    price_proximity_percent:    parseFloat(document.getElementById('prox-pct').value),
+    expiry_mode:                document.getElementById('expiry-mode').value,
+    min_days_to_expiry:         parseInt(document.getElementById('roll-days').value),
+  };
+}
+
+function parseTickers(raw) {
+  return raw.trim().split(/[\s,]+/).map(t => t.toUpperCase()).filter(Boolean);
+}
+
+function toggleRollDays() {
+  const mode = document.getElementById('expiry-mode').value;
+  document.getElementById('roll-days-wrap').style.display = mode === 'auto' ? '' : 'none';
+}
+
+async function runBacktest() {
+  const tickers = parseTickers(document.getElementById('tickers-input').value);
+  if (!tickers.length) { alert('Enter at least one ticker.'); return; }
+
+  const years  = parseInt(document.getElementById('years-select').value);
+  const config = getConfig();
+  const force  = document.getElementById('force-refresh').checked;
+
+  setRunning(true);
+  setCacheStatus('');
+  setProgress(force
+    ? `Running fresh backtest for ${tickers.join(', ')}…`
+    : `Checking cache for ${tickers.join(', ')}…`);
+
+  try {
+    const resp = await fetch('/api/backtest/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickers, years, config, force }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(err.error || resp.statusText);
+    }
+    const data = await resp.json();
+    lastResult = data;
+    // Show cache hit/miss badge
+    if (data.from_cache) {
+      setCacheStatus(`<span class="cache-badge hit">⚡ From Cache · ${data.cached_at || ''}</span>`);
+    } else {
+      setCacheStatus(`<span class="cache-badge miss">✦ Fresh · Saved to cache</span>`);
+    }
+    renderResults(data);
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    setRunning(false);
+  }
+}
+
+function setRunning(running) {
+  document.getElementById('run-btn').disabled = running;
+  document.getElementById('progress-box').style.display = running ? 'block' : 'none';
+}
+
+function setProgress(msg) {
+  document.getElementById('progress-msg').textContent = msg;
+}
+
+function setCacheStatus(html) {
+  const el = document.getElementById('cache-status');
+  if (el) el.innerHTML = html;
+}
+
+function showError(msg) {
+  document.getElementById('empty-state') && (document.getElementById('empty-state').remove());
+  document.getElementById('main-content').innerHTML =
+    `<div class="error-box">⚠ Error: ${msg}</div>`;
+}
+
+function toggleInfo() {
+  const b = document.getElementById('info-box');
+  b.style.display = b.style.display === 'none' ? 'block' : 'none';
+}
+
+function exportJSON() {
+  if (!lastResult) return;
+  const blob = new Blob([JSON.stringify(lastResult, null, 2)], { type: 'application/json' });
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(blob),
+    download: `backtest_${Date.now()}.json`
+  });
+  a.click();
+}
+
+// ── Rendering ────────────────────────────────────────────────────────────────
+function renderResults(data) {
+  const agg = data.aggregate || {};
+  const per = data.per_ticker || [];
+
+  document.getElementById('export-btn').style.display = 'block';
+  document.getElementById('empty-state') && (document.getElementById('empty-state').remove());
+
+  const acc = agg.accuracy_pct || 0;
+  const pnlColor = agg.total_pnl >= 0 ? 'green' : 'red';
+
+  let html = `
+  <div class="cards">
+    <div class="card">
+      <div class="label">Accuracy</div>
+      <div class="val acc">${acc.toFixed(1)}%</div>
+    </div>
+    <div class="card">
+      <div class="label">Total Trades</div>
+      <div class="val">${agg.total_trades || 0}</div>
+    </div>
+    <div class="card">
+      <div class="label">Wins</div>
+      <div class="val green">${agg.wins || 0}</div>
+    </div>
+    <div class="card">
+      <div class="label">Losses</div>
+      <div class="val red">${agg.losses || 0}</div>
+    </div>
+    <div class="card">
+      <div class="label">Avg P&amp;L / Unit</div>
+      <div class="val ${pnlColor}">₹${(agg.avg_pnl || 0).toFixed(2)}</div>
+    </div>
+    <div class="card">
+      <div class="label">Total P&amp;L</div>
+      <div class="val ${pnlColor}">₹${(agg.total_pnl || 0).toFixed(0)}</div>
+    </div>
+  </div>
+
+  <div class="acc-bar-wrap">
+    <h3>WIN / LOSS Distribution — ${acc.toFixed(1)}% Accuracy</h3>
+    <div class="acc-bar">
+      <div class="acc-fill" style="width:${acc}%"></div>
+    </div>
+    <div class="acc-labels">
+      <span style="color:var(--green)">✅ ${agg.wins||0} Wins</span>
+      <span style="color:var(--red)">❌ ${agg.losses||0} Losses</span>
+    </div>
+  </div>`;
+
+  for (const tkr of per) {
+    html += renderTicker(tkr);
+  }
+
+  document.getElementById('main-content').innerHTML = html;
+}
+
+function renderTicker(tkr) {
+  const s    = tkr.summary || {};
+  const err  = tkr.error;
+  const acc  = s.accuracy_pct || 0;
+
+  if (err) {
+    return `<div class="ticker-section">
+      <div class="ticker-header"><h3>${tkr.ticker}</h3><span class="badge loss">Error</span></div>
+      <div style="padding:16px;color:var(--red);">${err}</div>
+    </div>`;
+  }
+
+  if (!tkr.trades || !tkr.trades.length) {
+    return `<div class="ticker-section">
+      <div class="ticker-header"><h3>${tkr.ticker}</h3><span class="badge" style="background:var(--surface);color:var(--muted)">0 Trades</span></div>
+      <div style="padding:16px;color:var(--muted);">No 3-gate signals found in the test period (${tkr.data_from} → ${tkr.data_to}).</div>
+    </div>`;
+  }
+
+  const rows = tkr.trades.map((t,i) => {
+    const isWin = t.result === 'WIN';
+    const tradeJson = encodeURIComponent(JSON.stringify(t));
+    return `<tr class="${isWin ? 'win' : 'loss'}" onclick="openTradeChart(decodeURIComponent('${tradeJson}'))" title="Click to view chart">
+      <td>${t.gate1_date}</td>
+      <td>${t.gate2_date}</td>
+      <td>${t.gate3_date}</td>
+      <td>₹${t.surge_high}</td>
+      <td>₹${t.strike}</td>
+      <td>₹${t.entry_price}</td>
+      <td>₹${t.entry_ce_premium}</td>
+      <td style="white-space:nowrap">
+        ${t.expiry_date}
+        <span style="font-size:10px;padding:1px 5px;border-radius:8px;margin-left:4px;background:${
+          t.expiry_mode==='next' ? '#1a2535' : t.expiry_mode==='current' ? '#1f2a1f' : '#2a2520'
+        };color:${
+          t.expiry_mode==='next' ? '#58a6ff' : t.expiry_mode==='current' ? 'var(--green)' : 'var(--accent)'
+        }">${t.expiry_mode||'auto'}</span>
+      </td>
+      <td>${t.T_days}d</td>
+      <td>${t.iv_sigma}%</td>
+      <td>₹${t.expiry_close}</td>
+      <td class="${isWin ? 'tag-win' : 'tag-loss'}">${t.result}</td>
+      <td style="color:${t.pnl_per_unit >= 0 ? 'var(--green)' : 'var(--red)'}">₹${t.pnl_per_unit}</td>
+      <td style="color:${t.return_pct >= 0 ? 'var(--green)' : 'var(--red)'};">${t.return_pct}%</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="ticker-section">
+    <div class="ticker-header" onclick="toggleSection(this)">
+      <h3>${tkr.ticker}
+        <small style="font-weight:400;color:var(--muted);font-size:12px;">
+          ${tkr.data_from} → ${tkr.data_to}
+        </small>
+      </h3>
+      <div class="ticker-stats">
+        <span><span class="badge win">${s.wins||0} WIN</span></span>
+        <span><span class="badge loss">${s.losses||0} LOSS</span></span>
+        <span style="color:var(--accent);font-weight:700;">${acc.toFixed(1)}%</span>
+        <span style="color:var(--muted);">Avg CE ₹${(s.avg_premium||0).toFixed(1)}</span>
+        <span>▾</span>
+      </div>
+    </div>
+    <div class="ticker-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Gate 1 Date</th>
+            <th>Gate 2 Date</th>
+            <th>Gate 3 (Entry)</th>
+            <th>Surge High</th>
+            <th>Strike</th>
+            <th>Entry Price</th>
+            <th>CE Premium</th>
+            <th>Expiry Date</th>
+            <th>Days to Exp</th>
+            <th>HV (σ)</th>
+            <th>Expiry Close</th>
+            <th>Result</th>
+            <th>P&amp;L/Unit</th>
+            <th>Return%</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function toggleSection(header) {
+  const body = header.nextElementSibling;
+  body.style.display = body.style.display === 'none' ? '' : 'none';
+}
+
+// ── Chart Modal ──────────────────────────────────────────────────────────────
+function openTradeChart(tradeJson) {
+  const t = JSON.parse(tradeJson);
+  document.getElementById('chart-modal').classList.add('open');
+  document.getElementById('chart-title').textContent =
+    `${t.ticker}  —  Gate 3 Entry ${t.gate3_date}  (${t.result})`;
+  document.getElementById('chart-meta').textContent =
+    `Surge High ₹${t.surge_high}  |  Strike ₹${t.strike}  |  CE Premium ₹${t.entry_ce_premium}  |  Expiry ${t.expiry_date}`;
+  document.getElementById('chart-loading').style.display = 'block';
+  document.getElementById('trade-canvas').style.display  = 'none';
+
+  // fetch ~30 days before gate1 through expiry + 5 days
+  const from = offsetDate(t.gate1_date, -30);
+  const to   = offsetDate(t.expiry_date,  5);
+  fetch(`/api/backtest/candles?ticker=${t.ticker}&from_date=${from}&to_date=${to}`)
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById('chart-loading').style.display = 'none';
+      if (d.error || !d.candles || !d.candles.length) {
+        document.getElementById('chart-loading').textContent = '⚠ ' + (d.error || 'No data');
+        document.getElementById('chart-loading').style.display = 'block';
+        return;
+      }
+      drawChart(d.candles, t);
+    })
+    .catch(e => {
+      document.getElementById('chart-loading').textContent = '⚠ ' + e.message;
+      document.getElementById('chart-loading').style.display = 'block';
+    });
+}
+
+function closeModal() {
+  document.getElementById('chart-modal').classList.remove('open');
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+function offsetDate(dateStr, days) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function drawChart(candles, t) {
+  const canvas = document.getElementById('trade-canvas');
+  const wrap   = document.getElementById('chart-wrap');
+  const dpr    = window.devicePixelRatio || 1;
+
+  // sizing
+  const W = Math.min(wrap.clientWidth - 32, 940);
+  const H = 480;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.display = 'block';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+
+  // layout
+  const PAD_L = 72, PAD_R = 16, PAD_T = 28, PAD_B = 60;
+  const CHART_H_FRAC = 0.72;  // price area = 72% of plot height
+  const plotW = W - PAD_L - PAD_R;
+  const plotH = H - PAD_T - PAD_B;
+  const priceH = plotH * CHART_H_FRAC;
+  const volH   = plotH * (1 - CHART_H_FRAC) - 8;
+  const volY0  = PAD_T + priceH + 8;
+
+  // price range
+  const highs  = candles.map(c => c.high);
+  const lows   = candles.map(c => c.low);
+  const vols   = candles.map(c => c.volume);
+  let pMin = Math.min(...lows)  * 0.993;
+  let pMax = Math.max(...highs) * 1.007;
+  // ensure surge_high and strike are in view
+  pMin = Math.min(pMin, t.strike * 0.993);
+  pMax = Math.max(pMax, t.surge_high * 1.007);
+  const pRange = pMax - pMin;
+  const maxVol = Math.max(...vols);
+
+  const n = candles.length;
+  const candleW  = Math.max(2, Math.min(14, Math.floor(plotW / n) - 1));
+  const candleGap = Math.floor(plotW / n);
+
+  // helpers
+  const px = i => PAD_L + i * candleGap + candleGap / 2;
+  const py = p => PAD_T + priceH - ((p - pMin) / pRange) * priceH;
+
+  // ── background ──
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, W, H);
+
+  // ── grid lines ──
+  const TICKS = 6;
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= TICKS; i++) {
+    const y = PAD_T + (priceH / TICKS) * i;
+    ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(W - PAD_R, y); ctx.stroke();
+  }
+
+  // ── price axis labels ──
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '10px Segoe UI, system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= TICKS; i++) {
+    const p = pMax - (pRange / TICKS) * i;
+    const y = PAD_T + (priceH / TICKS) * i;
+    ctx.fillText('₹' + p.toFixed(0), PAD_L - 4, y + 3);
+  }
+
+  // ── surge_high horizontal line ──
+  drawHLine(ctx, py(t.surge_high), PAD_L, W - PAD_R, '#f0883e', [6,4],
+            '↑ Surge High ₹' + t.surge_high, W - PAD_R - 2, 'right');
+
+  // ── strike horizontal line ──
+  drawHLine(ctx, py(t.strike), PAD_L, W - PAD_R, '#f85149', [4,4],
+            '▶ Strike ₹' + t.strike, PAD_L + 4, 'left');
+
+  // ── gate vertical markers ──
+  const markers = [
+    { date: t.gate1_date,  label: 'G1',     color: '#58a6ff' },
+    { date: t.gate2_date,  label: 'G2',     color: '#d2a8ff' },
+    { date: t.gate3_date,  label: 'G3 Entry', color: '#3fb950' },
+    { date: t.expiry_date, label: 'Expiry', color: '#f85149' },
+  ];
+  const dateIndex = {};
+  candles.forEach((c, i) => { dateIndex[c.date] = i; });
+
+  markers.forEach(m => {
+    const idx = dateIndex[m.date];
+    if (idx === undefined) return;
+    const x = px(idx);
+    ctx.save();
+    ctx.strokeStyle = m.color;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, PAD_T);
+    ctx.lineTo(x, PAD_T + priceH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // label at top
+    ctx.fillStyle = m.color;
+    ctx.font = 'bold 10px Segoe UI, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(m.label, x, PAD_T - 6);
+  });
+
+  // ── entry price dot ──
+  const g3idx = dateIndex[t.gate3_date];
+  if (g3idx !== undefined) {
+    ctx.fillStyle = '#3fb950';
+    ctx.beginPath();
+    ctx.arc(px(g3idx), py(t.entry_price), 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── candlesticks ──
+  candles.forEach((c, i) => {
+    const x   = px(i);
+    const isUp = c.close >= c.open;
+    const col  = isUp ? '#3fb950' : '#f85149';
+    const yHi  = py(c.high);
+    const yLo  = py(c.low);
+    const yO   = py(c.open);
+    const yC   = py(c.close);
+
+    // wick
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, yHi);
+    ctx.lineTo(x, yLo);
+    ctx.stroke();
+
+    // body
+    const bodyTop = Math.min(yO, yC);
+    const bodyH   = Math.max(1, Math.abs(yC - yO));
+    ctx.fillStyle = col;
+    ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
+  });
+
+  // ── volume bars ──
+  candles.forEach((c, i) => {
+    const x   = px(i);
+    const isUp = c.close >= c.open;
+    const barH = (c.volume / maxVol) * volH;
+    ctx.fillStyle = isUp ? 'rgba(63,185,80,.45)' : 'rgba(248,81,73,.45)';
+    ctx.fillRect(x - candleW / 2, volY0 + volH - barH, candleW, barH);
+  });
+
+  // ── x-axis date labels ──
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '10px Segoe UI, system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  const labelEvery = Math.ceil(n / 12);
+  candles.forEach((c, i) => {
+    if (i % labelEvery !== 0) return;
+    const x = px(i);
+    // short date: e.g. "26 Jul"
+    const d = new Date(c.date);
+    const lbl = d.getDate() + ' ' + d.toLocaleString('en-IN',{month:'short'});
+    ctx.save();
+    ctx.translate(x, H - PAD_B + 14);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillText(lbl, 0, 0);
+    ctx.restore();
+  });
+
+  // ── border around price area ──
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  ctx.strokeRect(PAD_L, PAD_T, plotW, priceH);
+}
+
+function drawHLine(ctx, y, x0, x1, color, dash, label, labelX, align) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = color;
+  ctx.font = '10px Segoe UI, system-ui, sans-serif';
+  ctx.textAlign = align;
+  ctx.fillText(label, labelX, y - 3);
+  ctx.restore();
+}
+
+</script>
+
+<!-- ─── Chart Modal ─── -->
+<div id="chart-modal" onclick="if(event.target===this)closeModal()">
+  <div id="chart-panel">
+    <div id="chart-topbar">
+      <div>
+        <h2 id="chart-title">Trade Chart</h2>
+        <div class="meta" id="chart-meta"></div>
+      </div>
+      <button id="chart-close" onclick="closeModal()">✕</button>
+    </div>
+    <div id="chart-wrap">
+      <div id="chart-loading"><span class="spinner"></span> Loading candle data…</div>
+      <canvas id="trade-canvas" style="display:none"></canvas>
+    </div>
+    <div id="chart-legend">
+      <span class="leg"><span class="leg-dot" style="background:#3fb950"></span>Bullish candle</span>
+      <span class="leg"><span class="leg-dot" style="background:#f85149"></span>Bearish candle</span>
+      <span class="leg"><span class="leg-dot" style="background:#f0883e;border-radius:0;height:2px;width:18px"></span>Surge High</span>
+      <span class="leg"><span class="leg-dot" style="background:#f85149;border-radius:0;height:2px;width:18px"></span>Strike</span>
+      <span class="leg"><span class="leg-dot" style="background:#58a6ff;border-radius:0;height:2px;width:2px"></span>G1 / G2 / G3 / Expiry markers</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>
