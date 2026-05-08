@@ -460,5 +460,11 @@
     "tickers_scanned": 201,
     "signals_found": 31,
     "nse_calls": 76
+  },
+  {
+    "time": "2026-05-02 12:26:07",
+    "tickers_scanned": 201,
+    "signals_found": 44,
+    "nse_calls": 104
   }
 ]

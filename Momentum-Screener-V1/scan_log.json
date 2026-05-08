@@ -148,5 +148,77 @@
     "tickers_scanned": 201,
     "signals_found": 8,
     "nse_calls": 18
+  },
+  {
+    "time": "2026-04-22 08:28:52",
+    "tickers_scanned": 201,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:30:19",
+    "tickers_scanned": 1,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:30:54",
+    "tickers_scanned": 1,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:31:25",
+    "tickers_scanned": 1,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:31:59",
+    "tickers_scanned": 1,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:32:30",
+    "tickers_scanned": 1,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:33:53",
+    "tickers_scanned": 1,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:33:57",
+    "tickers_scanned": 1,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:34:08",
+    "tickers_scanned": 1,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:34:22",
+    "tickers_scanned": 1,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:37:19",
+    "tickers_scanned": 4,
+    "signals_found": 0,
+    "nse_calls": 0
+  },
+  {
+    "time": "2026-04-22 08:38:08",
+    "tickers_scanned": 4,
+    "signals_found": 2,
+    "nse_calls": 4
   }
 ]
