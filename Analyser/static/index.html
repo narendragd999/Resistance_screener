@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>9 EMA Trading Analyzer — NSE Confluence Screener</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg:      #060c18;
+  --bg2:     #0b1525;
+  --bg3:     #0f1d33;
+  --bg4:     #142240;
+  --border:  #1c2e50;
+  --accent:  #0ea5e9;
+  --accent2: #6366f1;
+  --green:   #22c55e;
+  --red:     #ef4444;
+  --yellow:  #f59e0b;
+  --orange:  #f97316;
+  --text:    #e2e8f0;
+  --muted:   #64748b;
+  --card:    #0d1a2e;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;min-height:100vh;}
+
+.header{background:linear-gradient(135deg,#0b1525,#091220);border-bottom:1px solid var(--border);
+  padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:58px;
+  position:sticky;top:0;z-index:100;box-shadow:0 2px 24px rgba(0,0,0,.6);}
+.logo{display:flex;align-items:center;gap:10px;}
+.logo-icon{width:34px;height:34px;background:linear-gradient(135deg,#0ea5e9,#6366f1);border-radius:8px;
+  display:flex;align-items:center;justify-content:center;font-size:17px;}
+.logo-text{font-size:17px;font-weight:800;background:linear-gradient(90deg,#0ea5e9,#6366f1);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.logo-sub{font-size:10px;color:var(--muted);margin-top:1px;}
+
+.market-bar{background:var(--bg2);border-bottom:1px solid var(--border);
+  padding:7px 24px;display:flex;align-items:center;gap:20px;font-size:12px;overflow-x:auto;white-space:nowrap;}
+.mkt-item{display:flex;align-items:center;gap:5px;}
+.mkt-label{color:var(--muted);font-size:11px;}
+.mkt-val{font-weight:700;font-size:13px;}
+.badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;}
+.badge-green{background:rgba(34,197,94,.15);color:var(--green);}
+.badge-red{background:rgba(239,68,68,.15);color:var(--red);}
+.badge-yellow{background:rgba(245,158,11,.15);color:var(--yellow);}
+.badge-blue{background:rgba(14,165,233,.15);color:var(--accent);}
+.up{color:var(--green);} .dn{color:var(--red);}
+.sep{color:var(--border);margin:0 4px;}
+
+.nav{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:2px;}
+.nav-btn{padding:11px 18px;cursor:pointer;border:none;background:none;
+  color:var(--muted);font-size:13px;font-weight:600;border-bottom:2px solid transparent;transition:all .2s;}
+.nav-btn.active{color:var(--accent);border-bottom-color:var(--accent);}
+.nav-btn:hover:not(.active){color:var(--text);}
+
+.page{display:none;padding:24px;}
+.page.active{display:block;}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;}
+.card-title{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:14px;}
+
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;}
+.metric{background:var(--bg3);border-radius:8px;padding:11px 13px;border:1px solid rgba(30,46,80,.5);}
+.metric-label{font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px;}
+.metric-value{font-size:19px;font-weight:800;}
+.metric-sub{font-size:10px;color:var(--muted);margin-top:2px;}
+
+.btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;
+  font-size:12px;font-weight:700;transition:all .2s;display:inline-flex;align-items:center;gap:6px;}
+.btn-primary{background:linear-gradient(135deg,#0284c7,#0ea5e9);color:#fff;box-shadow:0 2px 8px rgba(14,165,233,.25);}
+.btn-primary:hover{background:linear-gradient(135deg,#0369a1,#0284c7);}
+.btn-success{background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;}
+.btn-success:hover{background:linear-gradient(135deg,#15803d,#16a34a);}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent);background:rgba(14,165,233,.06);}
+.btn-sm{padding:5px 11px;font-size:11px;}
+.btn:disabled{opacity:.45;cursor:not-allowed;}
+
+select,input[type=text],input[type=number],input[type=password]{
+  background:var(--bg3);border:1px solid var(--border);color:var(--text);
+  padding:7px 11px;border-radius:8px;font-size:12px;outline:none;transition:border-color .2s;}
+select:focus,input:focus{border-color:var(--accent);}
+
+.spinner{display:inline-block;width:15px;height:15px;border:2px solid rgba(14,165,233,.25);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+.stock-table{width:100%;border-collapse:collapse;}
+.stock-table th{padding:9px 12px;text-align:left;color:var(--muted);font-size:10px;
+  text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);white-space:nowrap;}
+.stock-table td{padding:10px 12px;border-bottom:1px solid rgba(28,46,80,.5);vertical-align:middle;}
+.stock-table tr:hover td{background:rgba(14,165,233,.03);}
+.stock-table tr.signal-row td{background:rgba(34,197,94,.04);}
+.symbol-cell{font-weight:800;font-size:14px;color:#fff;cursor:pointer;}
+.symbol-cell:hover{color:var(--accent);}
+
+.chk{width:18px;height:18px;border-radius:4px;display:flex;align-items:center;
+  justify-content:center;font-size:9px;font-weight:800;}
+.chk-yes{background:rgba(34,197,94,.15);color:var(--green);}
+.chk-no{background:rgba(239,68,68,.08);color:rgba(239,68,68,.4);}
+
+.conf-list{display:flex;flex-direction:column;gap:8px;}
+.conf-item{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-radius:8px;}
+.conf-item.met{background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.18);}
+.conf-item.not-met{background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.12);}
+.conf-icon{font-size:14px;width:22px;flex-shrink:0;margin-top:1px;}
+.conf-label{font-weight:700;font-size:12px;}
+.conf-value{font-size:11px;color:var(--muted);margin-top:2px;}
+
+.setup-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+.setup-item{background:var(--bg3);border-radius:8px;padding:12px;}
+.setup-label{font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px;}
+.setup-value{font-size:18px;font-weight:800;}
+.entry-val{color:var(--accent);} .sl-val{color:var(--red);}
+.t1-val{color:var(--green);} .t2-val{color:#86efac;}
+
+.chart-wrap{position:relative;}
+canvas{max-height:280px;}
+
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:20px;}
+.stat-card{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px 14px;}
+.stat-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
+.stat-value{font-size:20px;font-weight:800;margin-top:4px;}
+.stat-sub{font-size:10px;color:var(--muted);margin-top:2px;}
+
+.trades-table{width:100%;border-collapse:collapse;font-size:12px;}
+.trades-table th{padding:8px 10px;text-align:left;color:var(--muted);font-size:10px;
+  text-transform:uppercase;border-bottom:1px solid var(--border);}
+.trades-table td{padding:8px 10px;border-bottom:1px solid rgba(28,46,80,.3);}
+.trades-table tr.win-row td{background:rgba(34,197,94,.025);}
+.trades-table tr.loss-row td{background:rgba(239,68,68,.025);}
+
+.settings-section{max-width:560px;}
+.form-group{margin-bottom:14px;}
+.form-label{display:block;margin-bottom:5px;font-size:12px;font-weight:700;color:var(--text);}
+.form-input{width:100%;}
+.form-hint{font-size:11px;color:var(--muted);margin-top:3px;}
+
+.toast{position:fixed;bottom:24px;right:24px;padding:11px 18px;border-radius:10px;
+  font-size:12px;font-weight:700;z-index:9999;animation:slideIn .3s ease;box-shadow:0 8px 24px rgba(0,0,0,.5);}
+.toast-success{background:#14532d;border:1px solid var(--green);color:#86efac;}
+.toast-error{background:#7f1d1d;border:1px solid var(--red);color:#fca5a5;}
+.toast-info{background:#1e3a5f;border:1px solid var(--accent);color:#bae6fd;}
+@keyframes slideIn{from{transform:translateY(16px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+
+.filter-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.tag{padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;background:var(--bg3);
+  border:1px solid var(--border);cursor:pointer;transition:all .15s;}
+.tag.active{background:rgba(14,165,233,.12);border-color:var(--accent);color:var(--accent);}
+.search-input{padding:6px 11px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);
+  color:var(--text);font-size:12px;outline:none;width:170px;}
+.search-input:focus{border-color:var(--accent);}
+
+.empty{text-align:center;padding:60px 20px;color:var(--muted);}
+.empty-icon{font-size:46px;margin-bottom:12px;}
+.section-heading{font-size:16px;font-weight:800;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+
+.tg-step{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);}
+.tg-num{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;margin-top:2px;}
+.tg-title{font-weight:700;font-size:13px;margin-bottom:3px;}
+.tg-desc{color:var(--muted);font-size:11px;line-height:1.6;}
+.code-inline{background:var(--bg3);padding:1px 6px;border-radius:4px;font-family:monospace;color:var(--accent);font-size:11px;}
+
+.no-trades-banner{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);
+  border-radius:12px;padding:28px 24px;text-align:center;}
+
+@media(max-width:768px){
+  .header{padding:0 12px;}
+  .market-bar{padding:7px 12px;}
+  .page{padding:12px;}
+  .stat-grid{grid-template-columns:repeat(2,1fr);}
+  .metric-grid{grid-template-columns:repeat(2,1fr);}
+  .setup-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">📈</div>
+    <div>
+      <div class="logo-text">9 EMA Analyzer</div>
+      <div class="logo-sub">NSE Confluence Screener · 13-Condition Strategy</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span id="tg-indicator" style="font-size:11px;color:var(--muted);">⚫ Telegram off</span>
+    <button class="btn btn-outline btn-sm" onclick="refreshMarket()">🔄 Refresh</button>
+  </div>
+</div>
+
+<div class="market-bar" id="market-bar">
+  <div class="mkt-item"><span class="mkt-label">NIFTY 50</span></div>
+  <span style="color:var(--muted);">Loading market…</span>
+</div>
+
+<div class="nav">
+  <button class="nav-btn active" onclick="showTab('screener',this)">🔍 Screener</button>
+  <button class="nav-btn" onclick="showTab('analyzer',this)">📊 Analyzer</button>
+  <button class="nav-btn" onclick="showTab('backtest',this)">🧪 Backtester</button>
+  <button class="nav-btn" onclick="showTab('settings',this)">⚙️ Settings</button>
+</div>
+
+<!-- SCREENER -->
+<div class="page active" id="page-screener">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+    <div>
+      <div class="section-heading">📡 Stock Screener</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:-10px;">13-condition confluence · 5 core + 5 of 8 bonus required</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <select id="screen-watchlist" onchange="toggleCustomInput(this.value)" style="height:34px;">
+        <option value="all">All Stocks (~80)</option>
+        <option value="nifty50">Nifty 50 Only</option>
+        <option value="custom">Custom List</option>
+      </select>
+      <button class="btn btn-primary" id="screen-btn" onclick="runScreener()">
+        <span id="screen-btn-text">▶ Run Screener</span>
+      </button>
+      <button class="btn btn-success btn-sm" id="tg-screen-btn" onclick="runScreenerWithTelegram()" style="display:none;">📲 Run + Alert</button>
+    </div>
+  </div>
+  <div id="custom-input" style="display:none;margin-bottom:12px;">
+    <input type="text" id="custom-symbols" placeholder="e.g. RELIANCE, TCS, INFY" style="width:100%;max-width:480px;"/>
+    <div class="form-hint">NSE symbols separated by commas</div>
+  </div>
+  <div class="filter-bar" id="filter-bar" style="display:none;">
+    <span style="color:var(--muted);font-size:11px;font-weight:700;">FILTER:</span>
+    <span class="tag active" onclick="filterResults('all',this)">All</span>
+    <span class="tag" onclick="filterResults('signal',this)">✅ Full Signal</span>
+    <span class="tag" onclick="filterResults('near',this)">⚡ Near Miss</span>
+    <input class="search-input" id="stock-search" oninput="searchStocks(this.value)" placeholder="🔍 Search symbol…"/>
+    <span id="result-count" style="color:var(--muted);font-size:11px;margin-left:auto;"></span>
+  </div>
+  <div id="screener-results">
+    <div class="empty">
+      <div class="empty-icon">📡</div>
+      <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">Ready to scan</div>
+      <div>Click <strong>Run Screener</strong> to find 9 EMA confluence setups</div>
+    </div>
+  </div>
+</div>
+
+<!-- ANALYZER -->
+<div class="page" id="page-analyzer">
+  <div class="section-heading">📊 Stock Analyzer</div>
+  <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
+    <input type="text" id="analyze-symbol" placeholder="NSE symbol e.g. RELIANCE"
+      style="width:260px;" oninput="this.value=this.value.toUpperCase()"/>
+    <button class="btn btn-primary" onclick="analyzeStock()">Analyze</button>
+    <button class="btn btn-outline btn-sm" id="send-alert-btn" onclick="sendAlert()" style="display:none;">📲 Send Alert</button>
+  </div>
+  <div id="analyzer-results">
+    <div class="empty">
+      <div class="empty-icon">🔎</div>
+      <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;">Enter a symbol</div>
+      <div>Full 13-condition confluence, trade setup, and charts</div>
+    </div>
+  </div>
+</div>
+
+<!-- BACKTESTER -->
+<div class="page" id="page-backtest">
+  <div class="section-heading">🧪 Strategy Backtester</div>
+  <div class="card" style="max-width:740px;">
+    <div class="card-title">Backtest Parameters</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:13px;">
+      <div>
+        <label class="form-label">NSE Symbol</label>
+        <input type="text" id="bt-symbol" value="RELIANCE" style="width:100%;" oninput="this.value=this.value.toUpperCase()"/>
+      </div>
+      <div>
+        <label class="form-label">Period</label>
+        <select id="bt-period" style="width:100%;">
+          <option value="1y">1 Year</option>
+          <option value="2y" selected>2 Years</option>
+          <option value="3y">3 Years</option>
+          <option value="5y">5 Years</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Stop Loss %</label>
+        <input type="number" id="bt-sl" value="2" min="0.5" max="10" step="0.5" style="width:100%;"/>
+      </div>
+      <div>
+        <label class="form-label">Target 1 %</label>
+        <input type="number" id="bt-t1" value="5" min="1" max="30" step="0.5" style="width:100%;"/>
+      </div>
+      <div>
+        <label class="form-label">Target 2 %</label>
+        <input type="number" id="bt-t2" value="10" min="2" max="50" step="0.5" style="width:100%;"/>
+      </div>
+      <div>
+        <label class="form-label">RSI Min</label>
+        <input type="number" id="bt-rsi-min" value="55" min="30" max="70" step="1" style="width:100%;"/>
+      </div>
+      <div>
+        <label class="form-label">RSI Max</label>
+        <input type="number" id="bt-rsi-max" value="70" min="50" max="85" step="1" style="width:100%;"/>
+      </div>
+      <div>
+        <label class="form-label">Min Volume</label>
+        <input type="number" id="bt-vol" value="1000000" min="100000" step="100000" style="width:100%;"/>
+      </div>
+      <div>
+        <label class="form-label">Bonus Required <span style="font-weight:400;color:var(--muted);">(of 8)</span></label>
+        <input type="number" id="bt-bonus" value="3" min="0" max="8" step="1" style="width:100%;"
+          title="Lower = more trades generated. 0 = only core conditions."/>
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="runBacktest()">
+        <span id="bt-btn-text">▶ Run Backtest</span>
+      </button>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+        <input type="checkbox" id="bt-partial" checked style="accent-color:var(--accent);width:13px;height:13px;"/>
+        Partial exit at T1, trail to T2
+      </label>
+      <span style="font-size:11px;color:var(--muted);">💡 Lower Bonus Required if getting 0 trades</span>
+    </div>
+  </div>
+  <div id="backtest-results"></div>
+</div>
+
+<!-- SETTINGS -->
+<div class="page" id="page-settings">
+  <div class="section-heading">⚙️ Settings</div>
+  <div class="settings-section">
+    <div class="card">
+      <div class="card-title">📲 Telegram Alerts</div>
+      <div style="margin-bottom:16px;color:var(--muted);font-size:12px;line-height:1.6;">
+        Receive live screener alerts when stocks meet confluence conditions.
+      </div>
+      <div style="border:1px solid var(--border);border-radius:10px;padding:4px 0;margin-bottom:18px;">
+        <div class="tg-step">
+          <div class="tg-num">1</div>
+          <div><div class="tg-title">Create a Bot</div>
+          <div class="tg-desc">Message <span class="code-inline">@BotFather</span> → send <span class="code-inline">/newbot</span> → copy the token</div></div>
+        </div>
+        <div class="tg-step">
+          <div class="tg-num">2</div>
+          <div><div class="tg-title">Get Chat ID</div>
+          <div class="tg-desc">Start your bot → open <span class="code-inline">https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</span> → find <span class="code-inline">chat.id</span></div></div>
+        </div>
+        <div class="tg-step" style="border:none;">
+          <div class="tg-num">3</div>
+          <div><div class="tg-title">Paste and connect</div>
+          <div class="tg-desc">A test message confirms the connection</div></div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Bot Token</label>
+        <input type="password" id="tg-token" class="form-input" placeholder="123456789:ABCDEabcde…"/>
+        <div class="form-hint">From @BotFather — keep this private</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Chat ID</label>
+        <input type="text" id="tg-chat" class="form-input" placeholder="-100123456789 or 123456789"/>
+        <div class="form-hint">Personal or group ID (groups are negative)</div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-primary" onclick="saveTelegram()">Connect</button>
+        <button class="btn btn-outline" id="tg-test-btn" onclick="testTelegram()" style="display:none;">Send Test</button>
+      </div>
+      <div id="tg-status" style="margin-top:10px;font-size:12px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📋 13-Condition Strategy Overview</div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.7;">
+        <p style="margin-bottom:10px;"><strong style="color:var(--text);">CORE — All 5 must pass:</strong></p>
+        <div class="conf-list" style="margin-bottom:14px;">
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Price above 9 EMA (daily uptrend)</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">RSI 55–70 (strong, not overbought)</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Volume &gt; 1M (liquidity check)</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Quality 9 EMA bounce (green candle + low-vol touch + fresh support)</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Nifty not in breakdown (macro alignment)</div></div></div>
+        </div>
+        <p style="margin-bottom:10px;"><strong style="color:var(--text);">BONUS — 5 of 8 required (configurable):</strong></p>
+        <div class="conf-list">
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">MACD histogram positive &amp; rising</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Volume spike ≥ 1.5× 20-day avg</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Within 15% of 52-week high</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Outperforming Nifty50 (20-day RS)</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Weekly EMA9 aligned (higher TF)</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Sector index above its EMA9</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Bollinger Band squeeze</div></div></div>
+          <div class="conf-item met"><span class="conf-icon">✅</span><div><div class="conf-label">Fresh EMA support (≤ 3 touches in 20 days)</div></div></div>
+        </div>
+        <div style="margin-top:14px;padding:10px 14px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.15);border-radius:8px;color:rgba(248,113,113,.9);font-size:11px;">
+          ⚠️ Educational/research use only. Not SEBI registered investment advice.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let allResults = [];
+let currentFilter = 'all';
+let chartInstances = {};
+let telegramConfigured = false;
+
+// Safe value helpers — prevent +undefined% bugs
+const safeNum  = (v, dec=2, fb=0) => { const n=parseFloat(v); return isNaN(n)?fb:+n.toFixed(dec); };
+const safeInt  = (v, fb=0)        => { const n=parseInt(v);   return isNaN(n)?fb:n; };
+const safeFmt  = (v, dec=2, fb='—') => { const n=parseFloat(v); return isNaN(n)?fb:n.toFixed(dec); };
+
+function showTab(tab,btn){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('page-'+tab).classList.add('active');
+  btn.classList.add('active');
+}
+function toggleCustomInput(val){
+  document.getElementById('custom-input').style.display=val==='custom'?'':'none';
+}
+
+// MARKET BAR
+async function refreshMarket(){
+  try{ const r=await fetch(API+'/api/market'); renderMarketBar(await r.json()); }
+  catch(e){ console.error(e); }
+}
+function renderMarketBar(d){
+  if(!d) return;
+  const bar=document.getElementById('market-bar');
+  const cls={bullish:'badge-green',neutral:'badge-blue',weak:'badge-yellow',breakdown:'badge-red',unknown:'badge-blue'}[d.status]||'badge-blue';
+  const chg=parseFloat(d.day_change_pct)||0;
+  const wchg=parseFloat(d.week_change_pct)||0;
+  bar.innerHTML=`
+    <div class="mkt-item"><span class="mkt-label">NIFTY 50</span></div>
+    <div class="mkt-item">
+      <span class="mkt-val">${d.current?Number(d.current).toLocaleString('en-IN'):'—'}</span>
+      <span class="${chg>=0?'up':'dn'}" style="font-weight:700;">${chg>=0?'+':''}${chg.toFixed(2)}%</span>
+    </div>
+    <span class="sep">|</span>
+    <div class="mkt-item"><span class="mkt-label">Week</span><span class="${wchg>=0?'up':'dn'}">${wchg>=0?'+':''}${wchg.toFixed(2)}%</span></div>
+    <span class="sep">|</span>
+    <div class="mkt-item"><span class="mkt-label">RSI</span><span class="mkt-val">${d.rsi||'—'}</span></div>
+    <span class="sep">|</span>
+    <div class="mkt-item"><span class="mkt-label">EMA20</span><span class="mkt-val">${d.ema20?Number(d.ema20).toLocaleString('en-IN'):'—'}</span></div>
+    <span class="sep">|</span>
+    <div class="mkt-item"><span class="mkt-label">Status</span><span class="badge ${cls}">${(d.status||'unknown').toUpperCase()}</span></div>`;
+}
+
+// SCREENER
+async function runScreener(withTelegram=false){
+  const watchlist=document.getElementById('screen-watchlist').value;
+  const btn=document.getElementById('screen-btn');
+  const btnText=document.getElementById('screen-btn-text');
+  btn.disabled=true; btnText.innerHTML='<span class="spinner"></span> Scanning…';
+
+  let symbols=null;
+  if(watchlist==='nifty50'){ const r=await fetch(API+'/api/stocks'); symbols=(await r.json()).nifty50; }
+  else if(watchlist==='custom'){
+    symbols=document.getElementById('custom-symbols').value.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
+    if(!symbols.length){ toast('Enter at least one symbol','error'); btn.disabled=false; btnText.innerHTML='▶ Run Screener'; return; }
+  }
+
+  document.getElementById('screener-results').innerHTML=`
+    <div class="card"><div style="text-align:center;padding:34px;color:var(--muted);">
+      <span class="spinner" style="width:28px;height:28px;border-width:3px;"></span>
+      <div style="margin-top:14px;">Scanning ${symbols?symbols.length:'~80'} stocks…</div>
+      <div style="margin-top:6px;font-size:11px;">May take 30–60 seconds</div>
+    </div></div>`;
+
+  try{
+    const payload={send_telegram:withTelegram};
+    if(symbols) payload.symbols=symbols;
+    const r=await fetch(API+'/api/screen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const d=await r.json();
+    allResults=d.results||[];
+    renderScreenerResults(d);
+    if(d.market) renderMarketBar(d.market);
+  }catch(e){
+    document.getElementById('screener-results').innerHTML=`<div class="card"><div class="empty"><div class="empty-icon">⚠️</div><div>Error: ${e.message}</div></div></div>`;
+  }finally{ btn.disabled=false; btnText.innerHTML='▶ Run Screener'; }
+}
+function runScreenerWithTelegram(){ runScreener(true); }
+
+function renderScreenerResults(d){
+  const results=d.results||[];
+  const signals=safeInt(d.signals_found);
+  const near=safeInt(d.near_miss);
+  document.getElementById('filter-bar').style.display='flex';
+  if(!results.length){
+    document.getElementById('screener-results').innerHTML=`<div class="empty"><div class="empty-icon">🔍</div><div>No data fetched</div></div>`;
+    return;
+  }
+  const summary=`
+    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+      <div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:10px 18px;display:flex;gap:10px;align-items:center;">
+        <span style="font-size:22px;font-weight:800;color:var(--green);">${signals}</span>
+        <div><div style="font-size:11px;color:var(--green);font-weight:700;">FULL SIGNALS</div><div style="font-size:10px;color:var(--muted);">All conditions met</div></div>
+      </div>
+      <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:10px 18px;display:flex;gap:10px;align-items:center;">
+        <span style="font-size:22px;font-weight:800;color:var(--yellow);">${near}</span>
+        <div><div style="font-size:11px;color:var(--yellow);font-weight:700;">NEAR MISS</div><div style="font-size:10px;color:var(--muted);">Score ≥ 4</div></div>
+      </div>
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 18px;display:flex;gap:10px;align-items:center;">
+        <span style="font-size:22px;font-weight:800;color:var(--muted);">${results.length}</span>
+        <div><div style="font-size:11px;color:var(--muted);font-weight:700;">SCREENED</div><div style="font-size:10px;color:var(--muted);">Total stocks</div></div>
+      </div>
+    </div>`;
+  document.getElementById('screener-results').innerHTML=summary+`
+    <div class="card" style="padding:0;overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table class="stock-table">
+          <thead><tr>
+            <th>Symbol</th><th>Price</th><th>Change</th><th>9 EMA</th>
+            <th>RSI</th><th>Volume</th><th>Score</th><th>Core (5)</th><th>Setup</th><th></th>
+          </tr></thead>
+          <tbody id="results-tbody">${results.map(stockRow).join('')}</tbody>
+        </table>
+      </div>
+    </div>`;
+  updateResultCount(results.length);
+}
+
+function stockRow(r){
+  if(r.error) return `<tr><td class="symbol-cell">${r.symbol}</td><td colspan="9" style="color:var(--red);font-size:12px;">${r.error}</td></tr>`;
+  const m=r.metrics||{}, s=r.trade_setup||{}, c=r.conditions||{};
+  const chg=parseFloat(m.day_change_pct)||0;
+  const rowCls=r.all_conditions_met?'signal-row':'';
+  const vol=m.volume||0;
+  const volStr=vol>=1e7?(vol/1e7).toFixed(1)+'Cr':vol>=1e5?(vol/1e5).toFixed(1)+'L':vol.toLocaleString();
+  const coreKeys=['price_above_9ema','rsi_55_70','volume_1m','ema9_support','macro_ok'];
+  const checks=coreKeys.map(k=>`<div class="chk ${c[k]?.met?'chk-yes':'chk-no'}">${c[k]?.met?'✓':'✗'}</div>`).join('');
+  const score=safeInt(r.score), maxSc=safeInt(r.max_score,0)||13;
+  const bonus=safeInt(r.bonus_conditions_met);
+  return `<tr class="${rowCls}" data-symbol="${r.symbol}" data-score="${score}" data-signal="${r.all_conditions_met}">
+    <td>
+      <span class="symbol-cell" onclick="quickAnalyze('${r.symbol}')">${r.symbol}</span>
+      ${r.all_conditions_met?'<br><span style="font-size:9px;background:rgba(34,197,94,.2);color:var(--green);padding:1px 5px;border-radius:4px;font-weight:800;">SIGNAL</span>':''}
+    </td>
+    <td style="font-weight:700;">₹${m.close||'—'}</td>
+    <td class="${chg>=0?'up':'dn'}" style="font-weight:700;">${chg>=0?'+':''}${chg.toFixed(2)}%</td>
+    <td style="color:var(--muted);">₹${m.ema9||'—'}</td>
+    <td style="color:${m.rsi>=55&&m.rsi<=70?'var(--green)':m.rsi>70?'var(--red)':'var(--muted)'};font-weight:700;">${m.rsi||'—'}</td>
+    <td style="font-size:12px;">${volStr}</td>
+    <td>
+      <span style="font-size:14px;font-weight:800;color:${score>=10?'var(--green)':score>=7?'var(--yellow)':'var(--muted)'};">${score}/${maxSc}</span>
+      <div style="font-size:9px;color:var(--muted);">B:${bonus}/8</div>
+    </td>
+    <td><div style="display:flex;gap:3px;">${checks}</div></td>
+    <td style="font-size:11px;white-space:nowrap;">
+      <span style="color:var(--red);">SL ₹${s.stop_loss||'—'}</span><span style="margin:0 3px;color:var(--border);">|</span>
+      <span style="color:var(--green);">T1 ₹${s.target1||'—'}</span><span style="margin:0 3px;color:var(--border);">|</span>
+      <span style="color:var(--accent);">RR 1:${s.risk_reward||'—'}</span>
+    </td>
+    <td><button class="btn btn-outline btn-sm" onclick="quickAnalyze('${r.symbol}')">→</button></td>
+  </tr>`;
+}
+
+function filterResults(mode,el){
+  document.querySelectorAll('.filter-bar .tag').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active'); currentFilter=mode; applyFilters();
+}
+function searchStocks(val){ applyFilters(val); }
+function applyFilters(search=null){
+  const s=search!==null?search:(document.getElementById('stock-search')?.value||'');
+  const rows=document.querySelectorAll('#results-tbody tr[data-symbol]');
+  let visible=0;
+  rows.forEach(row=>{
+    const sym=row.dataset.symbol||'', score=parseInt(row.dataset.score||'0'), sig=row.dataset.signal==='true';
+    let show=true;
+    if(currentFilter==='signal'&&!sig) show=false;
+    if(currentFilter==='near'&&(sig||score<4)) show=false;
+    if(s&&!sym.includes(s.toUpperCase())) show=false;
+    row.style.display=show?'':'none';
+    if(show) visible++;
+  });
+  updateResultCount(visible);
+}
+function updateResultCount(n){
+  const el=document.getElementById('result-count');
+  if(el) el.textContent=`${n} stock${n!==1?'s':''}`;
+}
+function quickAnalyze(symbol){
+  document.getElementById('analyze-symbol').value=symbol;
+  showTab('analyzer',document.querySelectorAll('.nav-btn')[1]);
+  analyzeStock();
+}
+
+// ANALYZER
+async function analyzeStock(){
+  const sym=document.getElementById('analyze-symbol').value.trim().toUpperCase();
+  if(!sym){ toast('Enter a stock symbol','error'); return; }
+  const el=document.getElementById('analyzer-results');
+  el.innerHTML=`<div class="card"><div style="text-align:center;padding:34px;color:var(--muted);">
+    <span class="spinner" style="width:26px;height:26px;border-width:3px;"></span>
+    <div style="margin-top:14px;">Analyzing ${sym}…</div>
+  </div></div>`;
+  document.getElementById('send-alert-btn').style.display='none';
+  destroyCharts();
+  try{
+    const r=await fetch(API+'/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym})});
+    const d=await r.json();
+    renderAnalysis(d,sym);
+    if(d.market) renderMarketBar(d.market);
+    if(telegramConfigured) document.getElementById('send-alert-btn').style.display='inline-flex';
+  }catch(e){
+    el.innerHTML=`<div class="card"><div class="empty"><div class="empty-icon">⚠️</div><div>Error: ${e.message}</div></div></div>`;
+  }
+}
+
+function renderAnalysis(data,sym){
+  const a=data.analysis||{}, m=a.metrics||{}, s=a.trade_setup||{}, c=a.conditions||{};
+  const cd=data.chart_data||{}, mkt=data.market||{};
+  const el=document.getElementById('analyzer-results');
+  if(a.error){ el.innerHTML=`<div class="card"><div class="empty"><div class="empty-icon">⚠️</div><div>${a.error}</div></div></div>`; return; }
+
+  const chg=parseFloat(m.day_change_pct)||0;
+  const score=safeInt(a.score), maxSc=safeInt(a.max_score)||13;
+  const bonus=safeInt(a.bonus_conditions_met), bonusReq=safeInt(a.bonus_required)||5;
+  const coreMet=a.core_conditions_met;
+
+  const signalHTML=a.all_conditions_met
+    ?`<div style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:11px 16px;color:var(--green);font-weight:800;font-size:13px;">🚀 STRONG SIGNAL — All core + ${bonus}/${bonusReq} bonus met!</div>`
+    :`<div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:11px 16px;font-size:12px;">
+        <span style="color:var(--yellow);font-weight:700;">⚡ Score: ${score}/${maxSc}</span>
+        <span style="color:var(--muted);margin-left:8px;">Core ${coreMet?'✅':'❌'} | Bonus ${bonus}/${bonusReq} needed</span>
+      </div>`;
+
+  let condHTML='';
+  const groups={core:[],momentum:[],trend:[],timing:[]};
+  Object.entries(c).forEach(([k,v])=>{ const g=v.group||'core'; groups[g]=(groups[g]||[]); groups[g].push({k,...v}); });
+  const gLabel={core:'Core (All Required)',momentum:'Momentum Bonus',trend:'Trend Bonus',timing:'Timing Bonus'};
+  ['core','momentum','trend','timing'].forEach(g=>{
+    if(!groups[g]?.length) return;
+    condHTML+=`<div style="margin:8px 0 4px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;">${gLabel[g]}</div>`;
+    groups[g].forEach(v=>{
+      condHTML+=`<div class="conf-item ${v.met?'met':'not-met'}">
+        <span class="conf-icon">${v.met?'✅':'❌'}</span>
+        <div style="flex:1;min-width:0;">
+          <div class="conf-label">${v.label}</div>
+          <div class="conf-value" style="white-space:normal;">${v.value||''}</div>
+        </div>
+      </div>`;
+    });
+  });
+
+  const vol=m.volume||0, avgVol=m.avg_volume_20d||0;
+  const fmtVol=v=>v>=1e7?(v/1e7).toFixed(1)+'Cr':v>=1e5?(v/1e5).toFixed(1)+'L':v.toLocaleString();
+
+  el.innerHTML=`
+    <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
+      <div style="font-size:24px;font-weight:900;">${sym}</div>
+      <div style="font-size:22px;font-weight:800;">₹${m.close||'—'}</div>
+      <div class="${chg>=0?'up':'dn'}" style="font-size:14px;font-weight:700;">${chg>=0?'+':''}${chg.toFixed(2)}%</div>
+      <div style="font-size:11px;color:var(--muted);">52W H: ₹${m.high52||'—'} · L: ₹${m.low52||'—'}</div>
+    </div>
+    ${signalHTML}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:16px;margin-top:16px;">
+      <div class="card">
+        <div class="card-title">Key Metrics</div>
+        <div class="metric-grid">
+          <div class="metric"><div class="metric-label">9 EMA</div><div class="metric-value">₹${m.ema9||'—'}</div><div class="metric-sub">${m.proximity_to_ema9||0}% from close</div></div>
+          <div class="metric"><div class="metric-label">21 EMA</div><div class="metric-value">₹${m.ema21||'—'}</div></div>
+          <div class="metric"><div class="metric-label">RSI (14)</div>
+            <div class="metric-value" style="color:${m.rsi>=55&&m.rsi<=70?'var(--green)':m.rsi>70?'var(--red)':'var(--text)'};">${m.rsi||'—'}</div>
+            <div class="metric-sub">${m.rsi>=55&&m.rsi<=70?'✅ In zone':m.rsi>70?'⚠️ Overbought':'⚠️ Below zone'}</div></div>
+          <div class="metric"><div class="metric-label">Volume</div>
+            <div class="metric-value" style="font-size:16px;">${fmtVol(vol)}</div>
+            <div class="metric-sub">Avg ${fmtVol(avgVol)}</div></div>
+          <div class="metric"><div class="metric-label">ATR (14)</div><div class="metric-value">₹${m.atr||'—'}</div><div class="metric-sub">${m.atr_pct||0}% of price</div></div>
+          <div class="metric"><div class="metric-label">Vol Ratio</div>
+            <div class="metric-value" style="color:${m.volume_ratio>=1.5?'var(--green)':'var(--text)'};">${safeFmt(m.volume_ratio,2,'—')}×</div>
+            <div class="metric-sub">${(m.volume_ratio||0)>=1.5?'✅ Spike':'Normal'}</div></div>
+          <div class="metric"><div class="metric-label">BB Width</div><div class="metric-value">${safeFmt(m.bb_bandwidth,2,'—')}%</div></div>
+          <div class="metric"><div class="metric-label">Rel. Strength</div>
+            <div class="metric-value" style="font-size:15px;color:${(m.relative_strength||0)>0?'var(--green)':'var(--red)'};">
+              ${(m.relative_strength||0)>=0?'+':''}${safeFmt(m.relative_strength,2,'0')}%</div>
+            <div class="metric-sub">vs Nifty 20d</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Confluence Checklist (${score}/${maxSc})</div>
+        <div class="conf-list" style="max-height:440px;overflow-y:auto;padding-right:4px;">${condHTML}</div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:0;">
+      <div class="card-title">Trade Setup — 1.5×ATR Dynamic Stop</div>
+      <div class="setup-grid">
+        <div class="setup-item"><div class="setup-label">▶ Entry</div><div class="setup-value entry-val">₹${s.entry||'—'}</div></div>
+        <div class="setup-item"><div class="setup-label">🛑 Stop Loss (1.5×ATR)</div><div class="setup-value sl-val">₹${s.stop_loss||'—'} <span style="font-size:12px;font-weight:400;color:var(--muted);">(-${s.stop_loss_pct||0}%)</span></div></div>
+        <div class="setup-item"><div class="setup-label">🎯 Target 1 (+5%)</div><div class="setup-value t1-val">₹${s.target1||'—'}</div></div>
+        <div class="setup-item"><div class="setup-label">🚀 Target 2 (+10%)</div><div class="setup-value t2-val">₹${s.target2||'—'}</div></div>
+      </div>
+      <div style="margin-top:12px;padding:10px 14px;background:var(--bg3);border-radius:8px;display:flex;gap:20px;flex-wrap:wrap;font-size:12px;">
+        <span>⚖️ <strong>RR</strong> 1:${s.risk_reward||'—'}</span>
+        <span>📉 <strong>Risk</strong> ${s.stop_loss_pct||0}%</span>
+        <span>📈 <strong>Potential</strong> +10%</span>
+        <span>📏 <strong>ATR</strong> ₹${s.atr||'—'}</span>
+      </div>
+    </div>
+    <div class="card" style="margin-top:0;">
+      <div class="card-title">Price Chart — ${sym} (3 Months)</div>
+      <div class="chart-wrap"><canvas id="price-chart"></canvas></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:0;">
+      <div class="card"><div class="card-title">RSI (14)</div><div class="chart-wrap"><canvas id="rsi-chart"></canvas></div></div>
+      <div class="card"><div class="card-title">Volume</div><div class="chart-wrap"><canvas id="vol-chart"></canvas></div></div>
+    </div>`;
+
+  if(cd.dates?.length) setTimeout(()=>renderCharts(cd,m),80);
+}
+
+function renderCharts(cd,m){
+  const dates=cd.dates||[], closes=cd.ohlcv?.close||[], ema9=cd.indicators?.ema9||[];
+  const ema21=cd.indicators?.ema21||[], rsi=cd.indicators?.rsi||[], vols=cd.ohlcv?.volume||[];
+  destroyCharts();
+  const base={responsive:true,maintainAspectRatio:true,
+    plugins:{legend:{labels:{color:'#94a3b8',font:{size:10}}},tooltip:{mode:'index',intersect:false}},
+    scales:{x:{ticks:{color:'#475569',maxTicksLimit:8,font:{size:9}},grid:{color:'#1c2e50'}},
+            y:{ticks:{color:'#475569',font:{size:9}},grid:{color:'#1c2e50'}}}};
+  chartInstances.price=new Chart(document.getElementById('price-chart'),{type:'line',data:{labels:dates,datasets:[
+    {label:'Close',data:closes,borderColor:'#e2e8f0',borderWidth:1.5,pointRadius:0,fill:false,tension:0.1},
+    {label:'9 EMA',data:ema9,borderColor:'#0ea5e9',borderWidth:2,pointRadius:0,fill:false,tension:0.1,borderDash:[5,3]},
+    {label:'21 EMA',data:ema21,borderColor:'#6366f1',borderWidth:1.5,pointRadius:0,fill:false,tension:0.1,borderDash:[7,4]},
+  ]},options:base});
+  chartInstances.rsi=new Chart(document.getElementById('rsi-chart'),{type:'line',data:{labels:dates,datasets:[
+    {label:'RSI(14)',data:rsi,borderColor:'#f59e0b',borderWidth:1.5,pointRadius:0,fill:false,tension:0.1}
+  ]},options:{...base,scales:{...base.scales,y:{...base.scales.y,min:0,max:100}}}});
+  chartInstances.vol=new Chart(document.getElementById('vol-chart'),{type:'bar',data:{labels:dates,datasets:[
+    {label:'Volume',data:vols,backgroundColor:vols.map(v=>v>1e6?'rgba(34,197,94,.45)':'rgba(100,116,139,.25)'),borderWidth:0}
+  ]},options:base});
+}
+function destroyCharts(){
+  Object.values(chartInstances).forEach(c=>{try{c?.destroy();}catch(_){}});
+  chartInstances={};
+}
+async function sendAlert(){
+  const sym=document.getElementById('analyze-symbol').value.trim().toUpperCase();
+  if(!sym) return;
+  const btn=document.getElementById('send-alert-btn');
+  btn.disabled=true; btn.textContent='⏳ Sending…';
+  try{
+    await fetch(API+'/api/alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym})});
+    toast(`Alert queued for ${sym}!`,'success');
+  }catch(e){ toast('Failed: '+e.message,'error'); }
+  finally{ btn.disabled=false; btn.innerHTML='📲 Send Alert'; }
+}
+
+// BACKTESTER
+async function runBacktest(){
+  const btnWrap=document.querySelector('[onclick="runBacktest()"]');
+  const btnText=document.getElementById('bt-btn-text');
+  btnWrap.disabled=true; btnText.innerHTML='<span class="spinner"></span> Running…';
+  const sym=document.getElementById('bt-symbol').value.trim().toUpperCase();
+  const bonus=parseInt(document.getElementById('bt-bonus').value)||3;
+  const payload={
+    symbol:sym,
+    period:document.getElementById('bt-period').value,
+    stop_loss_pct:parseFloat(document.getElementById('bt-sl').value)||2,
+    target1_pct:parseFloat(document.getElementById('bt-t1').value)||5,
+    target2_pct:parseFloat(document.getElementById('bt-t2').value)||10,
+    rsi_min:parseFloat(document.getElementById('bt-rsi-min').value)||55,
+    rsi_max:parseFloat(document.getElementById('bt-rsi-max').value)||70,
+    min_volume:parseInt(document.getElementById('bt-vol').value)||1000000,
+    partial_exit:document.getElementById('bt-partial').checked,
+    bonus_required:bonus,
+  };
+  document.getElementById('backtest-results').innerHTML=`
+    <div class="card"><div style="text-align:center;padding:34px;color:var(--muted);">
+      <span class="spinner" style="width:28px;height:28px;border-width:3px;"></span>
+      <div style="margin-top:14px;">Running backtest for ${sym} (${payload.period})…</div>
+      <div style="margin-top:6px;font-size:11px;">Bonus threshold: ${bonus}/8 conditions</div>
+    </div></div>`;
+  try{
+    const r=await fetch(API+'/api/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const d=await r.json();
+    renderBacktest(d,sym);
+  }catch(e){
+    document.getElementById('backtest-results').innerHTML=`<div class="card"><div class="empty"><div class="empty-icon">⚠️</div><div>Error: ${e.message}</div></div></div>`;
+  }finally{ btnText.innerHTML='▶ Run Backtest'; btnWrap.disabled=false; }
+}
+
+function renderBacktest(d,sym){
+  if(d.error){
+    document.getElementById('backtest-results').innerHTML=`<div class="card"><div class="empty"><div class="empty-icon">⚠️</div><div>${d.error}</div></div></div>`;
+    return;
+  }
+  // ── SAFE extraction — prevents +undefined% bug ──
+  const total   = safeInt(d.total_trades);
+  const wins    = safeInt(d.winning_trades);
+  const losses  = safeInt(d.losing_trades);
+  const winRate = safeNum(d.win_rate,1);
+  const totRet  = safeNum(d.total_return,2);
+  const avgGain = safeNum(d.avg_gain,2);
+  const avgLoss = safeNum(d.avg_loss,2);
+  const maxDD   = safeNum(d.max_drawdown,2);
+  const sharpe  = safeNum(d.sharpe_ratio,2);
+  const pf      = safeNum(d.profit_factor,2);
+  const exp     = safeNum(d.expectancy_pct,2);
+  const hold    = safeNum(d.avg_holding_days,1);
+  const best    = safeNum(d.best_trade,2);
+  const worst   = safeNum(d.worst_trade,2);
+
+  // Zero-trade: helpful guidance panel
+  if(total===0){
+    document.getElementById('backtest-results').innerHTML=`
+      <div class="no-trades-banner">
+        <div style="font-size:32px;margin-bottom:10px;">🔍</div>
+        <div style="font-size:16px;font-weight:800;color:var(--yellow);margin-bottom:8px;">No Trades Found — ${sym} (${d.period||'?'})</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.8;max-width:520px;margin:0 auto;">
+          ${d.message||'No entry conditions triggered in this period.'}<br><br>
+          <strong style="color:var(--text);">Try these fixes:</strong><br>
+          • Lower <strong>Bonus Required</strong> to 0–2 (currently ${d.params?.bonus_required||'?'})<br>
+          • Widen RSI range (e.g. 50–75)<br>
+          • Use a longer period (3Y or 5Y)<br>
+          • Use a highly liquid stock: RELIANCE, TCS, HDFCBANK<br>
+          • Reduce Min Volume threshold
+        </div>
+      </div>`;
+    return;
+  }
+
+  const wcolor=winRate>=60?'var(--green)':winRate>=45?'var(--yellow)':'var(--red)';
+  const tcolor=totRet>=0?'var(--green)':'var(--red)';
+  const pfStr=pf>=99?'∞':pf.toFixed(2);
+  const pfColor=pf>=1.5?'var(--green)':pf>=1.0?'var(--yellow)':'var(--red)';
+
+  const reasons=d.exit_reasons||{};
+  const reasonHTML=Object.entries(reasons).map(([k,v])=>
+    `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
+       <span style="color:var(--muted);font-size:12px;">${k}</span><span style="font-weight:700;font-size:12px;">${v}</span>
+     </div>`).join('');
+
+  const tradesHTML=(d.trades||[]).slice(0,50).map(t=>{
+    const pnl=parseFloat(t.pnl_pct)||0;
+    return `<tr class="${t.win?'win-row':'loss-row'}">
+      <td style="color:var(--muted);">${t.entry_date||'—'}</td>
+      <td style="color:var(--muted);">${t.exit_date||'—'}</td>
+      <td style="font-weight:700;">₹${t.entry_price||'—'}</td>
+      <td style="font-weight:700;">₹${t.exit_price||'—'}</td>
+      <td style="font-weight:800;color:${t.win?'var(--green)':'var(--red)'};">${pnl>=0?'+':''}${pnl.toFixed(2)}%</td>
+      <td style="font-size:11px;color:var(--muted);">${t.exit_reason||'—'}</td>
+      <td style="color:var(--muted);">${safeInt(t.holding_days)}d</td>
+      <td><span style="background:${t.win?'rgba(34,197,94,.15)':'rgba(239,68,68,.12)'};color:${t.win?'var(--green)':'var(--red)'};padding:2px 7px;border-radius:8px;font-size:10px;font-weight:800;">${t.win?'WIN':'LOSS'}</span></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('backtest-results').innerHTML=`
+    <div class="card">
+      <div class="card-title">📊 Backtest Results — ${sym} (${d.period})</div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-label">Total Trades</div><div class="stat-value" style="color:var(--accent);">${total}</div></div>
+        <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-value" style="color:${wcolor};">${winRate.toFixed(1)}%</div><div class="stat-sub">${wins}W / ${losses}L</div></div>
+        <div class="stat-card"><div class="stat-label">Total Return</div><div class="stat-value" style="color:${tcolor};">${totRet>=0?'+':''}${totRet.toFixed(2)}%</div></div>
+        <div class="stat-card"><div class="stat-label">Profit Factor</div><div class="stat-value" style="color:${pfColor};">${pfStr}</div></div>
+        <div class="stat-card"><div class="stat-label">Avg Gain</div><div class="stat-value" style="color:var(--green);">+${avgGain.toFixed(2)}%</div></div>
+        <div class="stat-card"><div class="stat-label">Avg Loss</div><div class="stat-value" style="color:var(--red);">${avgLoss.toFixed(2)}%</div></div>
+        <div class="stat-card"><div class="stat-label">Max Drawdown</div><div class="stat-value" style="color:var(--red);">-${maxDD.toFixed(2)}%</div></div>
+        <div class="stat-card"><div class="stat-label">Sharpe Ratio</div><div class="stat-value" style="color:${sharpe>=1?'var(--green)':sharpe>=0.5?'var(--yellow)':'var(--red)'};">${sharpe.toFixed(2)}</div></div>
+        <div class="stat-card"><div class="stat-label">Best Trade</div><div class="stat-value" style="color:var(--green);">+${best.toFixed(2)}%</div></div>
+        <div class="stat-card"><div class="stat-label">Worst Trade</div><div class="stat-value" style="color:var(--red);">${worst.toFixed(2)}%</div></div>
+        <div class="stat-card"><div class="stat-label">Avg Hold</div><div class="stat-value">${hold.toFixed(1)}d</div></div>
+        <div class="stat-card"><div class="stat-label">Expectancy</div><div class="stat-value" style="color:${exp>=0?'var(--green)':'var(--red)'};">${exp>=0?'+':''}${exp.toFixed(2)}%</div></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;">
+      <div class="card">
+        <div class="card-title">📈 Equity Curve (₹100 Base)</div>
+        <div class="chart-wrap"><canvas id="equity-chart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Exit Breakdown</div>
+        ${reasonHTML||'<div style="color:var(--muted);font-size:12px;">No data</div>'}
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);">
+          Bonus req: ${d.params?.bonus_required||'—'} &nbsp;|&nbsp; SL ATR×${d.params?.stop_loss_atr_mult||'—'}
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Trade Log (last 50)</div>
+      <div style="overflow-x:auto;">
+        <table class="trades-table">
+          <thead><tr><th>Entry</th><th>Exit</th><th>Entry ₹</th><th>Exit ₹</th><th>P&amp;L%</th><th>Reason</th><th>Days</th><th>Result</th></tr></thead>
+          <tbody>${tradesHTML}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  setTimeout(()=>{
+    const eqData=d.equity_curve||[100];
+    const eqDates=(d.equity_dates||[]).map(s=>typeof s==='string'?s.substring(0,10):String(s));
+    const profit=eqData[eqData.length-1]>=100;
+    if(chartInstances.equity){try{chartInstances.equity.destroy();}catch(_){}}
+    chartInstances.equity=new Chart(document.getElementById('equity-chart'),{type:'line',data:{
+      labels:eqDates.length?eqDates:eqData.map((_,i)=>`T${i}`),
+      datasets:[{label:'Portfolio ₹',data:eqData,
+        borderColor:profit?'#22c55e':'#ef4444',
+        backgroundColor:profit?'rgba(34,197,94,.07)':'rgba(239,68,68,.07)',
+        borderWidth:2,pointRadius:0,fill:true,tension:0.25}]
+    },options:{responsive:true,maintainAspectRatio:true,
+      plugins:{legend:{labels:{color:'#94a3b8',font:{size:10}}}},
+      scales:{x:{ticks:{color:'#475569',maxTicksLimit:8,font:{size:9}},grid:{color:'#1c2e50'}},
+              y:{ticks:{color:'#475569',font:{size:9}},grid:{color:'#1c2e50'}}}}});
+  },100);
+}
+
+// TELEGRAM
+async function saveTelegram(){
+  const token=document.getElementById('tg-token').value.trim();
+  const chat=document.getElementById('tg-chat').value.trim();
+  if(!token||!chat){toast('Enter bot token and chat ID','error');return;}
+  document.getElementById('tg-status').innerHTML='<span class="spinner"></span> Connecting…';
+  try{
+    const r=await fetch(API+'/api/telegram/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,chat_id:chat})});
+    const d=await r.json();
+    if(d.success){
+      telegramConfigured=true;
+      document.getElementById('tg-status').innerHTML=`<span style="color:var(--green);">✅ ${d.message}</span>`;
+      document.getElementById('tg-indicator').textContent='🟢 Telegram on';
+      document.getElementById('tg-indicator').style.color='var(--green)';
+      document.getElementById('tg-test-btn').style.display='inline-flex';
+      document.getElementById('tg-screen-btn').style.display='';
+      toast('Telegram connected!','success');
+    }else{
+      document.getElementById('tg-status').innerHTML=`<span style="color:var(--red);">❌ ${d.message}</span>`;
+    }
+  }catch(e){ document.getElementById('tg-status').innerHTML=`<span style="color:var(--red);">Error: ${e.message}</span>`; }
+}
+async function testTelegram(){
+  try{
+    const r=await fetch(API+'/api/telegram/test',{method:'POST'});
+    const d=await r.json();
+    toast(d.success?'✅ Test sent!':'❌ Test failed',d.success?'success':'error');
+  }catch(e){toast('Error: '+e.message,'error');}
+}
+
+function marketBadge(s){
+  const m={bullish:['badge-green','🟢 Bullish'],neutral:['badge-blue','🔵 Neutral'],weak:['badge-yellow','🟡 Weak'],breakdown:['badge-red','🔴 Breakdown'],unknown:['badge-blue','⚪ Unknown']};
+  const [c,l]=m[s]||m.unknown;
+  return `<span class="badge ${c}">${l}</span>`;
+}
+function toast(msg,type='info'){
+  const t=document.createElement('div');
+  t.className=`toast toast-${type}`; t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>{try{t.remove();}catch(_){}},3500);
+}
+
+(async()=>{
+  await refreshMarket();
+  try{
+    const r=await fetch(API+'/api/telegram/status');
+    const d=await r.json();
+    if(d.configured){
+      telegramConfigured=true;
+      document.getElementById('tg-indicator').textContent='🟢 Telegram on';
+      document.getElementById('tg-indicator').style.color='var(--green)';
+      document.getElementById('tg-test-btn').style.display='inline-flex';
+      document.getElementById('tg-screen-btn').style.display='';
+    }
+  }catch(_){}
+})();
+</script>
+</body>
+</html>
