@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NakedCall — NSE Options Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+/* ── Reset & Variables ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #080c10;
+  --bg2:       #0d1318;
+  --bg3:       #111820;
+  --border:    #1e2d3d;
+  --border2:   #243447;
+  --text:      #c8d8e8;
+  --text-dim:  #5a7a96;
+  --text-mid:  #8aabC0;
+  --accent:    #00d4aa;
+  --accent2:   #0097ff;
+  --sell:      #ff4466;
+  --watch:     #f0a800;
+  --neutral:   #3a5570;
+  --profit:    #00c97a;
+  --loss:      #ff4466;
+  --mono:      'IBM Plex Mono', monospace;
+  --sans:      'IBM Plex Sans', sans-serif;
+  --radius:    4px;
+  --glow:      0 0 12px rgba(0,212,170,.15);
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Scanline overlay ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,.06) 2px,
+    rgba(0,0,0,.06) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Layout ── */
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+}
+
+/* ── Header / Topbar ── */
+header {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  position: sticky; top: 0; z-index: 100;
+}
+.logo {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: var(--accent);
+  display: flex; align-items: center; gap: 10px;
+}
+.logo-dot {
+  width: 8px; height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity:1; box-shadow: 0 0 0 0 rgba(0,212,170,.5); }
+  50%      { opacity:.6; box-shadow: 0 0 0 6px rgba(0,212,170,0); }
+}
+.header-right {
+  display: flex; align-items: center; gap: 16px;
+}
+.status-bar {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  display: flex; align-items: center; gap: 8px;
+}
+#last-updated { color: var(--accent); }
+.btn-refresh {
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--text-mid);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all .2s;
+  letter-spacing: .5px;
+}
+.btn-refresh:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: var(--glow);
+}
+
+/* ── Control bar ── */
+.controls {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.control-group {
+  display: flex; align-items: center; gap: 8px;
+}
+.control-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+select, .seg-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  outline: none;
+  transition: border-color .2s;
+}
+select:hover, select:focus { border-color: var(--accent2); }
+select option { background: var(--bg2); }
+
+.seg-group { display: flex; }
+.seg-btn {
+  border-radius: 0;
+  border-right-width: 0;
+  transition: all .15s;
+}
+.seg-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.seg-btn:last-child  { border-radius: 0 var(--radius) var(--radius) 0; border-right-width: 1px; }
+.seg-btn.active {
+  background: var(--accent2);
+  border-color: var(--accent2);
+  color: #fff;
+}
+.seg-btn:hover:not(.active) { border-color: var(--accent2); color: var(--accent2); }
+
+/* ── Main content ── */
+.main {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 0;
+  height: calc(100vh - 104px);
+}
+
+/* ── Left sidebar ── */
+.sidebar {
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Quote card ── */
+.quote-card {
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.quote-symbol {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+  margin-bottom: 6px;
+}
+.quote-ltp {
+  font-family: var(--mono);
+  font-size: 32px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1;
+  margin-bottom: 6px;
+  transition: color .3s;
+}
+.quote-change {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+.quote-change.up   { color: var(--profit); }
+.quote-change.down { color: var(--loss); }
+.ohlc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.ohlc-item { }
+.ohlc-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+.ohlc-val {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-mid);
+}
+
+/* ── Scanner panel ── */
+.scanner-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+.scanner-panel::-webkit-scrollbar { width: 4px; }
+.scanner-panel::-webkit-scrollbar-track { background: var(--bg2); }
+.scanner-panel::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.panel-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.panel-title::after {
+  content: ''; flex: 1;
+  height: 1px; background: var(--border);
+}
+
+.scanner-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all .15s;
+  position: relative;
+  overflow: hidden;
+}
+.scanner-card::before {
+  content: '';
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px;
+}
+.scanner-card.SELL::before  { background: var(--sell); }
+.scanner-card.WATCH::before { background: var(--watch); }
+.scanner-card.NEUTRAL::before { background: var(--neutral); }
+.scanner-card:hover {
+  border-color: var(--border2);
+  transform: translateX(2px);
+}
+.sc-top {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px;
+}
+.sc-strike {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+}
+.sc-signal {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 2px;
+}
+.sc-signal.SELL  { background: rgba(255,68,102,.15); color: var(--sell); border: 1px solid rgba(255,68,102,.3); }
+.sc-signal.WATCH { background: rgba(240,168,0,.12); color: var(--watch); border: 1px solid rgba(240,168,0,.3); }
+.sc-signal.NEUTRAL { background: rgba(58,85,112,.2); color: var(--text-dim); border: 1px solid var(--border); }
+
+.sc-grid {
+  display: grid; grid-template-columns: repeat(3,1fr);
+  gap: 6px;
+}
+.sc-item { }
+.sc-item-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.sc-item-val {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* ── PnL calculator ── */
+.pl-panel {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+}
+.pl-form {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px; margin-bottom: 12px;
+}
+.pl-field label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.pl-field input {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color .2s;
+}
+.pl-field input:focus { border-color: var(--accent2); }
+.btn-calc {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all .2s;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+}
+.btn-calc:hover {
+  background: var(--accent);
+  color: var(--bg);
+  box-shadow: var(--glow);
+}
+.pl-summary {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px; margin-bottom: 10px;
+}
+.pl-stat { }
+.pl-stat-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.pl-stat-val {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.pl-stat-val.profit { color: var(--profit); }
+.pl-stat-val.loss   { color: var(--loss); }
+.pl-stat-val.neutral { color: var(--text); }
+
+/* ── Right panel: option chain ── */
+.chain-panel {
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.chain-toolbar {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 20px;
+  display: flex; align-items: center; gap: 16px;
+}
+.chain-toolbar .panel-title { margin: 0; }
+.chain-scroll {
+  flex: 1; overflow-y: auto;
+  overflow-x: auto;
+}
+.chain-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
+.chain-scroll::-webkit-scrollbar-track { background: var(--bg); }
+.chain-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+table {
+  width: 100%; border-collapse: collapse;
+  font-family: var(--mono); font-size: 12px;
+}
+thead {
+  position: sticky; top: 0; z-index: 10;
+  background: var(--bg3);
+}
+thead th {
+  padding: 10px 14px;
+  text-align: right;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  font-weight: 500;
+}
+thead th:first-child { text-align: left; }
+
+tbody tr {
+  border-bottom: 1px solid rgba(30,45,61,.5);
+  transition: background .1s;
+  cursor: pointer;
+}
+tbody tr:hover { background: var(--bg3); }
+tbody tr.atm-row {
+  background: rgba(0,151,255,.05);
+  border-bottom: 1px solid rgba(0,151,255,.15);
+}
+tbody tr.atm-row td { color: #fff; }
+
+td {
+  padding: 9px 14px;
+  text-align: right;
+  color: var(--text-mid);
+  white-space: nowrap;
+}
+td:first-child {
+  text-align: left;
+  color: #fff;
+  font-weight: 500;
+}
+td.green { color: var(--profit); }
+td.red   { color: var(--loss); }
+td.dim   { color: var(--text-dim); }
+
+.badge {
+  display: inline-block;
+  font-size: 9px; font-weight: 600;
+  letter-spacing: 1px;
+  padding: 2px 7px;
+  border-radius: 2px;
+}
+.badge.SELL    { background: rgba(255,68,102,.15); color: var(--sell); }
+.badge.WATCH   { background: rgba(240,168,0,.1);  color: var(--watch); }
+.badge.NEUTRAL { background: transparent; color: var(--text-dim); }
+
+.score-dots {
+  display: inline-flex; gap: 3px;
+}
+.dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.dot.filled { background: var(--accent2); }
+.dot.filled.sell { background: var(--sell); }
+
+/* ── Scenarios table in PnL ── */
+.scenarios {
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+.scenarios::-webkit-scrollbar { width: 3px; }
+.scenarios::-webkit-scrollbar-thumb { background: var(--border2); }
+.sc-table { width: 100%; font-family: var(--mono); font-size: 11px; }
+.sc-table th {
+  font-size: 9px; letter-spacing: 1px; color: var(--text-dim);
+  text-transform: uppercase; padding: 4px 6px; text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+.sc-table th:first-child { text-align: left; }
+.sc-table td { padding: 4px 6px; text-align: right; }
+.sc-table td:first-child { text-align: left; color: var(--text-dim); }
+.sc-table .pos { color: var(--profit); }
+.sc-table .neg { color: var(--loss); }
+
+/* ── Loading/Error states ── */
+.loader {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; flex-direction: column; gap: 12px;
+}
+.spinner {
+  width: 28px; height: 28px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loader-text {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+.error-box {
+  margin: 20px;
+  padding: 12px 16px;
+  background: rgba(255,68,102,.08);
+  border: 1px solid rgba(255,68,102,.25);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--sell);
+}
+
+/* ── Empty row ── */
+.empty-row td {
+  text-align: center !important;
+  color: var(--text-dim) !important;
+  padding: 40px !important;
+}
+
+/* ── Tab row ── */
+.tab-row {
+  display: flex; gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+.tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: all .15s;
+  margin-bottom: -1px;
+}
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-btn:hover:not(.active) { color: var(--text); }
+
+/* ── Responsive tweaks ── */
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; }
+  .sidebar { max-height: 420px; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- ── HEADER ── -->
+<header>
+  <div class="logo">
+    <span class="logo-dot"></span>
+    NAKEDCALL<span style="color:var(--text-dim);font-weight:300">.NSE</span>
+  </div>
+  <div class="header-right">
+    <div class="status-bar">
+      UPDATED <span id="last-updated">—</span>
+    </div>
+    <button class="btn-refresh" onclick="refreshAll()">↻ REFRESH</button>
+  </div>
+</header>
+
+<!-- ── CONTROL BAR ── -->
+<div class="controls">
+  <div class="control-group">
+    <span class="control-label">INDEX</span>
+    <div class="seg-group" id="sym-group">
+      <button class="seg-btn active" data-sym="NIFTY"      onclick="setSymbol(this)">NIFTY</button>
+      <button class="seg-btn"        data-sym="BANKNIFTY"  onclick="setSymbol(this)">BANK</button>
+      <button class="seg-btn"        data-sym="FINNIFTY"   onclick="setSymbol(this)">FIN</button>
+      <button class="seg-btn"        data-sym="MIDCPNIFTY" onclick="setSymbol(this)">MIDCP</button>
+    </div>
+  </div>
+  <div class="control-group">
+    <span class="control-label">EXPIRY</span>
+    <select id="expiry-select" onchange="onExpiryChange()">
+      <option value="">Loading…</option>
+    </select>
+  </div>
+  <div class="control-group">
+    <span class="control-label">Δ MAX</span>
+    <div class="seg-group" id="delta-group">
+      <button class="seg-btn" data-delta="0.10" onclick="setDelta(this)">0.10</button>
+      <button class="seg-btn active" data-delta="0.20" onclick="setDelta(this)">0.20</button>
+      <button class="seg-btn" data-delta="0.30" onclick="setDelta(this)">0.30</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── MAIN GRID ── -->
+<div class="main">
+
+  <!-- LEFT SIDEBAR -->
+  <div class="sidebar">
+
+    <!-- Quote Card -->
+    <div class="quote-card">
+      <div class="quote-symbol" id="q-symbol">NIFTY</div>
+      <div class="quote-ltp"    id="q-ltp">—</div>
+      <div class="quote-change" id="q-change">—</div>
+      <div class="ohlc-grid">
+        <div class="ohlc-item">
+          <div class="ohlc-label">Open</div>
+          <div class="ohlc-val" id="q-open">—</div>
+        </div>
+        <div class="ohlc-item">
+          <div class="ohlc-label">High</div>
+          <div class="ohlc-val" id="q-high">—</div>
+        </div>
+        <div class="ohlc-item">
+          <div class="ohlc-label">Low</div>
+          <div class="ohlc-val" id="q-low">—</div>
+        </div>
+        <div class="ohlc-item">
+          <div class="ohlc-label">Prev</div>
+          <div class="ohlc-val" id="q-close">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs: Scanner | P&L -->
+    <div class="tab-row">
+      <button class="tab-btn active" onclick="showTab('scanner', this)">SCANNER</button>
+      <button class="tab-btn"        onclick="showTab('pl', this)">P&amp;L CALC</button>
+    </div>
+
+    <!-- Scanner tab -->
+    <div id="tab-scanner" class="scanner-panel">
+      <div class="panel-title">Top Opportunities</div>
+      <div id="scanner-cards"><div class="loader"><div class="spinner"></div><div class="loader-text">Scanning…</div></div></div>
+    </div>
+
+    <!-- P&L tab -->
+    <div id="tab-pl" class="scanner-panel" style="display:none">
+      <div class="panel-title">P&amp;L Calculator</div>
+      <div class="pl-form">
+        <div class="pl-field">
+          <label>Strike (K)</label>
+          <input type="number" id="pl-strike" placeholder="24000"/>
+        </div>
+        <div class="pl-field">
+          <label>Premium</label>
+          <input type="number" id="pl-prem" placeholder="85"/>
+        </div>
+        <div class="pl-field">
+          <label>Lot Size</label>
+          <input type="number" id="pl-lot" value="25"/>
+        </div>
+        <div class="pl-field">
+          <label>Lots</label>
+          <input type="number" id="pl-lots" value="1"/>
+        </div>
+        <div class="pl-field">
+          <label>Brokerage ₹</label>
+          <input type="number" id="pl-brok" value="40"/>
+        </div>
+        <div class="pl-field">
+          <label>SL % of Prem</label>
+          <input type="number" id="pl-sl" value="100"/>
+        </div>
+      </div>
+      <button class="btn-calc" onclick="calcPL()">CALCULATE P&amp;L</button>
+      <div id="pl-summary" class="pl-summary" style="display:none"></div>
+      <div id="pl-scenarios" class="scenarios" style="display:none"></div>
+    </div>
+
+  </div><!-- /sidebar -->
+
+  <!-- RIGHT: OPTION CHAIN -->
+  <div class="chain-panel">
+    <div class="chain-toolbar">
+      <span class="panel-title" style="margin:0; flex:1">Option Chain — CE</span>
+      <span id="chain-meta" style="font-family:var(--mono);font-size:10px;color:var(--text-dim)"></span>
+    </div>
+    <div class="chain-scroll">
+      <div id="chain-loader" class="loader" style="height:200px">
+        <div class="spinner"></div>
+        <div class="loader-text">Fetching chain…</div>
+      </div>
+      <table id="chain-table" style="display:none">
+        <thead>
+          <tr>
+            <th>Strike</th>
+            <th>LTP</th>
+            <th>Theo</th>
+            <th>IV %</th>
+            <th>Delta</th>
+            <th>Theta</th>
+            <th>Vega</th>
+            <th>OI</th>
+            <th>Volume</th>
+            <th>Signal</th>
+            <th>Score</th>
+          </tr>
+        </thead>
+        <tbody id="chain-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /main -->
+</div><!-- /shell -->
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let state = {
+  symbol:   'NIFTY',
+  expiry:   '',
+  maxDelta: 0.20,
+  spot:     0,
+};
+
+// ── Init ───────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  loadExpiries().then(() => refreshAll());
+  setInterval(refreshAll, 60000); // auto-refresh every 60s
+});
+
+// ── Symbol / expiry / delta controls ──────────────────────────────────────
+function setSymbol(btn) {
+  document.querySelectorAll('#sym-group .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.symbol = btn.dataset.sym;
+  loadExpiries().then(() => refreshAll());
+}
+
+function setDelta(btn) {
+  document.querySelectorAll('#delta-group .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.maxDelta = parseFloat(btn.dataset.delta);
+  loadScanner();
+}
+
+function onExpiryChange() {
+  state.expiry = document.getElementById('expiry-select').value;
+  loadChain();
+  loadScanner();
+}
+
+function showTab(id, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-scanner').style.display = id === 'scanner' ? '' : 'none';
+  document.getElementById('tab-pl').style.display      = id === 'pl'      ? '' : 'none';
+}
+
+// ── API helpers ────────────────────────────────────────────────────────────
+async function apiFetch(url) {
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
+// ── Load expiries ─────────────────────────────────────────────────────────
+async function loadExpiries() {
+  const sel = document.getElementById('expiry-select');
+  sel.innerHTML = '<option value="">Loading…</option>';
+  try {
+    const data = await apiFetch(`/api/expiries/${state.symbol}`);
+    sel.innerHTML = data.expiries.map(e =>
+      `<option value="${e}">${formatExpiry(e)}</option>`
+    ).join('');
+    state.expiry = data.expiries[0] || '';
+    sel.value = state.expiry;
+  } catch(e) {
+    sel.innerHTML = '<option value="">Error</option>';
+    console.error('Expiries error:', e);
+  }
+}
+
+function formatExpiry(iso) {
+  // "2024-06-27" → "27 Jun 24"
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'2-digit' });
+}
+
+// ── Refresh all panels ─────────────────────────────────────────────────────
+async function refreshAll() {
+  await Promise.all([loadQuote(), loadChain(), loadScanner()]);
+  document.getElementById('last-updated').textContent = new Date().toLocaleTimeString('en-IN');
+}
+
+// ── Quote ─────────────────────────────────────────────────────────────────
+async function loadQuote() {
+  try {
+    const q = await apiFetch(`/api/quote/${state.symbol}`);
+    state.spot = q.ltp;
+    document.getElementById('q-symbol').textContent = q.symbol;
+    document.getElementById('q-ltp').textContent    = fmt2(q.ltp);
+    const chEl = document.getElementById('q-change');
+    const up   = q.change >= 0;
+    chEl.textContent  = `${up ? '+' : ''}${fmt2(q.change)}  (${up ? '+' : ''}${q.change_pct}%)`;
+    chEl.className    = `quote-change ${up ? 'up' : 'down'}`;
+    document.getElementById('q-open').textContent  = fmt2(q.open);
+    document.getElementById('q-high').textContent  = fmt2(q.high);
+    document.getElementById('q-low').textContent   = fmt2(q.low);
+    document.getElementById('q-close').textContent = fmt2(q.close);
+  } catch(e) {
+    document.getElementById('q-ltp').textContent = 'ERR';
+  }
+}
+
+// ── Option chain ──────────────────────────────────────────────────────────
+async function loadChain() {
+  if (!state.expiry) return;
+  const loader = document.getElementById('chain-loader');
+  const table  = document.getElementById('chain-table');
+  loader.style.display = 'flex'; table.style.display = 'none';
+
+  try {
+    const data = await apiFetch(`/api/option-chain/${state.symbol}/${state.expiry}`);
+    document.getElementById('chain-meta').textContent =
+      `SPOT ${fmt2(data.spot)} · T+${data.T_days}d`;
+
+    const tbody = document.getElementById('chain-body');
+    if (!data.chain.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="11">No data for this expiry</td></tr>';
+    } else {
+      const spot = data.spot;
+      tbody.innerHTML = data.chain.map(row => {
+        const atm = Math.abs(row.strike - spot) === Math.min(...data.chain.map(r => Math.abs(r.strike - spot)));
+        return `
+        <tr class="${atm ? 'atm-row' : ''}" onclick="fillPL(${row.strike}, ${row.ltp})">
+          <td>${fmt0(row.strike)}${atm ? ' <span style="color:var(--accent2);font-size:9px">ATM</span>' : ''}</td>
+          <td>${fmt2(row.ltp)}</td>
+          <td class="dim">${fmt2(row.theo)}</td>
+          <td>${row.iv.toFixed(1)}%</td>
+          <td class="${row.delta < 0.15 ? 'green' : row.delta > 0.25 ? 'red' : ''}">${row.delta.toFixed(3)}</td>
+          <td class="dim">${fmt2(row.theta)}</td>
+          <td class="dim">${fmt2(row.vega)}</td>
+          <td>${fmtOI(row.oi)}</td>
+          <td class="dim">${fmtOI(row.volume)}</td>
+          <td><span class="badge ${row.signal}">${row.signal}</span></td>
+          <td>${scoreDots(row.score, row.signal)}</td>
+        </tr>`;
+      }).join('');
+    }
+    loader.style.display = 'none';
+    table.style.display  = '';
+  } catch(e) {
+    loader.innerHTML = `<div class="error-box">⚠ ${e.message}</div>`;
+  }
+}
+
+function scoreDots(score, signal) {
+  return `<span class="score-dots">${[1,2,3,4].map(i =>
+    `<span class="dot ${i <= score ? (signal==='SELL'?'filled sell':'filled') : ''}"></span>`
+  ).join('')}</span>`;
+}
+
+// ── Scanner ───────────────────────────────────────────────────────────────
+async function loadScanner() {
+  if (!state.expiry) return;
+  const container = document.getElementById('scanner-cards');
+  container.innerHTML = '<div class="loader"><div class="spinner"></div><div class="loader-text">Scanning…</div></div>';
+
+  try {
+    const data = await apiFetch(
+      `/api/scanner?symbol=${state.symbol}&expiry=${state.expiry}&min_delta=0.05&max_delta=${state.maxDelta}`
+    );
+    if (!data.results.length) {
+      container.innerHTML = '<div style="padding:20px;font-family:var(--mono);font-size:11px;color:var(--text-dim)">No opportunities found for current delta filter.</div>';
+      return;
+    }
+    container.innerHTML = data.results.map(r => `
+      <div class="scanner-card ${r.signal}" onclick="fillPL(${r.strike}, ${r.ltp})">
+        <div class="sc-top">
+          <span class="sc-strike">${fmt0(r.strike)}</span>
+          <span class="sc-signal ${r.signal}">${r.signal}</span>
+        </div>
+        <div class="sc-grid">
+          <div class="sc-item">
+            <div class="sc-item-label">LTP</div>
+            <div class="sc-item-val">₹${fmt2(r.ltp)}</div>
+          </div>
+          <div class="sc-item">
+            <div class="sc-item-label">IV</div>
+            <div class="sc-item-val">${r.iv.toFixed(1)}%</div>
+          </div>
+          <div class="sc-item">
+            <div class="sc-item-label">Delta</div>
+            <div class="sc-item-val">${r.delta.toFixed(3)}</div>
+          </div>
+          <div class="sc-item">
+            <div class="sc-item-label">Theta</div>
+            <div class="sc-item-val">${fmt2(r.theta)}</div>
+          </div>
+          <div class="sc-item">
+            <div class="sc-item-label">Vega</div>
+            <div class="sc-item-val">${fmt2(r.vega)}</div>
+          </div>
+          <div class="sc-item">
+            <div class="sc-item-label">OI</div>
+            <div class="sc-item-val">${fmtOI(r.oi)}</div>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    container.innerHTML = `<div class="error-box">⚠ ${e.message}</div>`;
+  }
+}
+
+// ── P&L Calc ──────────────────────────────────────────────────────────────
+function fillPL(strike, premium) {
+  document.getElementById('pl-strike').value = strike;
+  document.getElementById('pl-prem').value   = premium;
+  showTab('pl', document.querySelectorAll('.tab-btn')[1]);
+}
+
+async function calcPL() {
+  const K    = document.getElementById('pl-strike').value;
+  const prem = document.getElementById('pl-prem').value;
+  const lot  = document.getElementById('pl-lot').value;
+  const lots = document.getElementById('pl-lots').value;
+  const brok = document.getElementById('pl-brok').value;
+  const sl   = document.getElementById('pl-sl').value;
+
+  if (!K || !prem) return;
+
+  try {
+    const d = await apiFetch(
+      `/api/pl?strike=${K}&premium=${prem}&lot_size=${lot}&lots=${lots}&brokerage=${brok}&sl_pct=${sl}`
+    );
+    const sumEl = document.getElementById('pl-summary');
+    sumEl.style.display = 'grid';
+    sumEl.innerHTML = `
+      <div class="pl-stat"><div class="pl-stat-label">Max Profit</div><div class="pl-stat-val profit">₹${d.max_profit.toLocaleString('en-IN')}</div></div>
+      <div class="pl-stat"><div class="pl-stat-label">Breakeven</div><div class="pl-stat-val neutral">${fmt2(d.breakeven)}</div></div>
+      <div class="pl-stat"><div class="pl-stat-label">SL Trigger</div><div class="pl-stat-val loss">${fmt2(d.sl_trigger)}</div></div>
+      <div class="pl-stat"><div class="pl-stat-label">SL Loss</div><div class="pl-stat-val loss">₹${Math.abs(d.sl_loss).toLocaleString('en-IN')}</div></div>
+    `;
+
+    const scEl = document.getElementById('pl-scenarios');
+    scEl.style.display = '';
+    scEl.innerHTML = `
+      <table class="sc-table">
+        <thead><tr><th>Move</th><th>Expiry Px</th><th>P&amp;L</th></tr></thead>
+        <tbody>${d.scenarios.map(s => `
+          <tr>
+            <td>${s.move_pct > 0 ? '+' : ''}${s.move_pct}%</td>
+            <td>${s.expiry_px.toLocaleString('en-IN')}</td>
+            <td class="${s.pnl >= 0 ? 'pos' : 'neg'}">₹${s.pnl.toLocaleString('en-IN')}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>`;
+  } catch(e) {
+    document.getElementById('pl-summary').innerHTML = `<div class="error-box" style="grid-column:span 2">⚠ ${e.message}</div>`;
+  }
+}
+
+// ── Formatters ────────────────────────────────────────────────────────────
+const fmt2  = n => (n||0).toLocaleString('en-IN', { minimumFractionDigits:2, maximumFractionDigits:2 });
+const fmt0  = n => (n||0).toLocaleString('en-IN', { maximumFractionDigits:0 });
+const fmtOI = n => {
+  if (n >= 1e7) return (n/1e7).toFixed(1) + 'Cr';
+  if (n >= 1e5) return (n/1e5).toFixed(1) + 'L';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return n;
+};
+</script>
+</body>
+</html>
