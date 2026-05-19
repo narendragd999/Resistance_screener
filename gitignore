@@ -18,6 +18,7 @@ tickers.csv
 backtest_*.json
 indexes/
 storage/
+backtest_cache/
 
 # ── Python ──
 __pycache__/
