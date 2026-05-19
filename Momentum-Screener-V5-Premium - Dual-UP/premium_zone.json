@@ -1,0 +1,32 @@
+[
+  {
+    "Ticker": "BOSCHLTD",
+    "Current_Price": 37475.0,
+    "Surge_High": 37670.0,
+    "Distance_Pct": 0.52,
+    "Vol_Surge_Ratio": 0.43,
+    "Is_Vol_Surge": false,
+    "Today_Volume": 11716,
+    "Avg_Vol_20d": 27153,
+    "Expiry": "26-May-2026",
+    "ATM_Strike": 37500.0,
+    "ATM_CE_LTP": 830.0,
+    "ATM_CE_OI": 135,
+    "OTM1_Strike": 37750.0,
+    "OTM1_CE_LTP": 707.35,
+    "OTM1_CE_OI": 35,
+    "OTM2_Strike": 38000.0,
+    "OTM2_CE_LTP": 606.8,
+    "OTM2_CE_OI": 508,
+    "OTM3_Strike": 38250.0,
+    "OTM3_CE_LTP": 0.0,
+    "OTM3_CE_OI": 70,
+    "Sell_Strike": 37750.0,
+    "Sell_CE_LTP": 700.0,
+    "Premium_Score": 356.9,
+    "Surge_Gain_Pct": 29.87,
+    "G2_Date": "2026-04-30",
+    "Breakdown_Date": "2026-04-30",
+    "Scanned_At": "2026-05-19 13:04:42"
+  }
+]
