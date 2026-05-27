@@ -1,0 +1,36 @@
+{
+  "scan": {
+    "days_to_expiry_max": 3,
+    "days_to_expiry_min": 0,
+    "otm_strikes_min": 2,
+    "otm_strikes_max": 6,
+    "min_premium": 15,
+    "premium_surge_pct": 30,
+    "volume_surge_multiplier": 2.5,
+    "min_oi": 500,
+    "scan_delay_seconds": 1.5,
+    "max_workers": 4
+  },
+  "nse": {
+    "base_url": "https://www.nseindia.com",
+    "option_chain_equity": "/api/option-chain-equities?symbol=",
+    "option_chain_index": "/api/option-chain-indices?symbol=",
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Encoding": "gzip, deflate, br",
+      "Referer": "https://www.nseindia.com/option-chain"
+    },
+    "session_init_url": "https://www.nseindia.com/option-chain",
+    "timeout": 15,
+    "max_retries": 3
+  },
+  "cache": {
+    "history_days": 5,
+    "data_dir": "data",
+    "signals_file": "signals.json",
+    "scan_log_file": "scan_log.json"
+  },
+  "indices": ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"]
+}

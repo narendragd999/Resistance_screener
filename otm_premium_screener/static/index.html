@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>OTM Premium Sell Zone Screener</title>
+<style>
+  :root {
+    --bg: #0a0d14;
+    --bg2: #111827;
+    --bg3: #1a2236;
+    --border: #1e293b;
+    --accent: #6366f1;
+    --accent2: #818cf8;
+    --green: #22c55e;
+    --red: #ef4444;
+    --orange: #f59e0b;
+    --yellow: #eab308;
+    --blue: #3b82f6;
+    --cyan: #06b6d4;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --text3: #64748b;
+    --ce: #34d399;
+    --pe: #f87171;
+    --gate-ok: #22c55e;
+    --gate-fail: #374151;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; }
+
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(90deg, #0f172a 0%, #1e1b4b 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .header-logo { font-size: 18px; font-weight: 700; color: var(--accent2); letter-spacing: 0.5px; }
+  .header-sub { font-size: 11px; color: var(--text3); }
+  .header-right { display: flex; gap: 10px; align-items: center; }
+  .badge { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 11px; color: var(--text2); }
+  .badge.live { border-color: var(--green); color: var(--green); }
+
+  /* ── Layout ── */
+  .layout { display: grid; grid-template-columns: 260px 1fr; height: calc(100vh - 55px); overflow: hidden; }
+  .sidebar { background: var(--bg2); border-right: 1px solid var(--border); overflow-y: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 14px; }
+  .main { display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Panels ── */
+  .panel { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .panel-hdr { background: var(--bg3); padding: 10px 14px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .panel-body { padding: 12px 14px; }
+
+  /* ── Controls ── */
+  label { display: block; font-size: 11px; color: var(--text3); margin-bottom: 4px; margin-top: 10px; }
+  label:first-child { margin-top: 0; }
+  input[type=number], input[type=text], select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+    padding: 6px 9px; color: var(--text); font-size: 12px; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  /* ── Buttons ── */
+  .btn { border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s; }
+  .btn-primary { background: var(--accent); color: #fff; width: 100%; padding: 10px; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-primary:disabled { background: #2d3748; color: var(--text3); cursor: not-allowed; }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+  .btn-ghost { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent2); }
+  .btn-danger { background: #7f1d1d; color: var(--red); }
+  .btn-success { background: #14532d; color: var(--green); }
+
+  /* ── Filter bar ── */
+  .filter-bar {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 10px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  }
+  .filter-group { display: flex; align-items: center; gap: 5px; }
+  .filter-group label { color: var(--text3); font-size: 11px; margin: 0; white-space: nowrap; }
+  .filter-group select, .filter-group input { width: auto; min-width: 70px; padding: 4px 6px; font-size: 11px; }
+  .filter-divider { width: 1px; height: 20px; background: var(--border); }
+
+  /* ── Stats bar ── */
+  .stats-bar { padding: 10px 16px; display: flex; gap: 20px; border-bottom: 1px solid var(--border); background: var(--bg3); }
+  .stat { text-align: center; }
+  .stat-val { font-size: 20px; font-weight: 700; color: var(--accent2); }
+  .stat-lbl { font-size: 10px; color: var(--text3); text-transform: uppercase; margin-top: 1px; }
+
+  /* ── Table ── */
+  .table-wrap { flex: 1; overflow-y: auto; padding: 12px 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead { position: sticky; top: 0; z-index: 5; }
+  th {
+    background: var(--bg3); padding: 8px 10px; text-align: left;
+    font-size: 10px; color: var(--text3); font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.8px; border-bottom: 1px solid var(--border); white-space: nowrap;
+    cursor: pointer; user-select: none;
+  }
+  th:hover { color: var(--accent2); }
+  td { padding: 8px 10px; border-bottom: 1px solid #111827; white-space: nowrap; vertical-align: middle; }
+  tr:hover td { background: rgba(99,102,241,.05); }
+  tr.highlight td { background: rgba(99,102,241,.08); }
+
+  .sym { font-weight: 700; color: var(--text); font-size: 13px; }
+  .ce-badge { background: rgba(52,211,153,.15); color: var(--ce); border: 1px solid rgba(52,211,153,.3); border-radius: 4px; padding: 2px 7px; font-size: 11px; font-weight: 700; }
+  .pe-badge { background: rgba(248,113,113,.15); color: var(--pe); border: 1px solid rgba(248,113,113,.3); border-radius: 4px; padding: 2px 7px; font-size: 11px; font-weight: 700; }
+
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+  .neutral { color: var(--text2); }
+
+  /* ── Score bar ── */
+  .score-wrap { display: flex; align-items: center; gap: 6px; }
+  .score-bar { height: 4px; border-radius: 2px; background: var(--border); width: 50px; overflow: hidden; }
+  .score-fill { height: 100%; border-radius: 2px; transition: width .3s; }
+  .score-num { font-weight: 700; font-size: 12px; }
+
+  /* ── Gates ── */
+  .gates { display: flex; gap: 3px; }
+  .gate { width: 8px; height: 8px; border-radius: 50%; }
+  .gate.ok { background: var(--gate-ok); box-shadow: 0 0 4px var(--gate-ok); }
+  .gate.fail { background: var(--gate-fail); }
+
+  /* ── DTE badge ── */
+  .dte { padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+  .dte-0 { background: rgba(239,68,68,.2); color: var(--red); }
+  .dte-1 { background: rgba(245,158,11,.2); color: var(--orange); }
+  .dte-2 { background: rgba(234,179,8,.2); color: var(--yellow); }
+  .dte-3 { background: rgba(99,102,241,.2); color: var(--accent2); }
+
+  /* ── Progress bar ── */
+  .progress-bar { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 8px; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent) 0%, var(--cyan) 100%); transition: width .3s; border-radius: 2px; }
+  .scan-status { font-size: 11px; color: var(--text3); margin-top: 4px; }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; gap: 2px; padding: 10px 16px 0; border-bottom: 1px solid var(--border); }
+  .tab { padding: 7px 16px; font-size: 12px; font-weight: 600; color: var(--text3); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; }
+  .tab:hover { color: var(--text2); }
+  .tab.active { color: var(--accent2); border-bottom-color: var(--accent); }
+
+  /* ── Log panel ── */
+  .log-list { max-height: 200px; overflow-y: auto; font-size: 11px; }
+  .log-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .log-row:last-child { border: none; }
+
+  /* ── Empty state ── */
+  .empty { padding: 60px 20px; text-align: center; color: var(--text3); }
+  .empty-icon { font-size: 48px; margin-bottom: 12px; }
+  .empty-title { font-size: 16px; font-weight: 600; color: var(--text2); }
+  .empty-sub { font-size: 12px; margin-top: 4px; }
+
+  /* ── Toast ── */
+  #toast { position: fixed; bottom: 20px; right: 20px; background: var(--bg3); border: 1px solid var(--accent); color: var(--text); padding: 10px 16px; border-radius: 8px; font-size: 12px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 999; }
+  #toast.show { opacity: 1; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <div>
+      <div class="header-logo">⚡ OTM Premium Sell Zone</div>
+      <div class="header-sub">NSE Options — 2–6 OTM · Huge Premium · Near Expiry · For Sellers</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="badge" id="hdr-scan-time">Last scan: —</div>
+    <div class="badge" id="hdr-total">0 signals</div>
+    <div class="badge live" id="hdr-status">● Ready</div>
+  </div>
+</div>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <!-- Scan Controls -->
+    <div class="panel">
+      <div class="panel-hdr">🔍 Scan Config</div>
+      <div class="panel-body">
+        <label>Days to Expiry (max)</label>
+        <input type="number" id="cfg-dte" value="3" min="0" max="7"/>
+
+        <label>OTM Strike Range</label>
+        <div class="row2">
+          <input type="number" id="cfg-otm-min" placeholder="Min (2)" value="2" min="1" max="10"/>
+          <input type="number" id="cfg-otm-max" placeholder="Max (6)" value="6" min="1" max="15"/>
+        </div>
+
+        <label>Min Premium (₹ LTP)</label>
+        <input type="number" id="cfg-min-prem" value="15" min="1"/>
+
+        <label>Premium Surge % (vs 3d avg)</label>
+        <input type="number" id="cfg-prem-surge" value="30" min="0"/>
+
+        <label>Volume Surge Multiplier</label>
+        <input type="number" id="cfg-vol-surge" value="2.5" step="0.5" min="1"/>
+
+        <label>Min Open Interest</label>
+        <input type="number" id="cfg-min-oi" value="500" min="0"/>
+
+        <div style="margin-top:14px">
+          <button class="btn btn-primary" id="btn-scan" onclick="startScan()">▶ Start Full Scan</button>
+        </div>
+        <div style="margin-top:6px">
+          <button class="btn btn-ghost btn-sm" onclick="loadSignals()" style="width:100%">⟳ Refresh Results</button>
+        </div>
+
+        <div class="progress-bar" id="progress-bar" style="display:none">
+          <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+        </div>
+        <div class="scan-status" id="scan-status"></div>
+      </div>
+    </div>
+
+    <!-- Quick Symbol Scan -->
+    <div class="panel">
+      <div class="panel-hdr">⚡ Quick Symbol</div>
+      <div class="panel-body">
+        <input type="text" id="quick-sym" placeholder="e.g. RELIANCE" style="text-transform:uppercase"/>
+        <div style="margin-top:8px">
+          <button class="btn btn-ghost btn-sm" onclick="quickScan()" style="width:100%">Scan Symbol</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scan Log -->
+    <div class="panel">
+      <div class="panel-hdr">📋 Scan Log <span id="log-count" style="font-size:10px;color:var(--text3)"></span></div>
+      <div class="panel-body" style="padding:8px 10px">
+        <div class="log-list" id="log-list">
+          <div style="color:var(--text3);font-size:11px">No scans yet</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Main content -->
+  <div class="main">
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('all')">All Signals</div>
+      <div class="tab" onclick="switchTab('ce')">CE Only</div>
+      <div class="tab" onclick="switchTab('pe')">PE Only</div>
+      <div class="tab" onclick="switchTab('confirmed')">✅ Confirmed</div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-bar">
+      <div class="stat"><div class="stat-val" id="stat-total">0</div><div class="stat-lbl">Total Signals</div></div>
+      <div class="stat"><div class="stat-val" id="stat-ce" style="color:var(--ce)">0</div><div class="stat-lbl">CE Signals</div></div>
+      <div class="stat"><div class="stat-val" id="stat-pe" style="color:var(--pe)">0</div><div class="stat-lbl">PE Signals</div></div>
+      <div class="stat"><div class="stat-val" id="stat-confirmed" style="color:var(--orange)">0</div><div class="stat-lbl">Confirmed</div></div>
+      <div class="stat"><div class="stat-val" id="stat-dte0" style="color:var(--red)">0</div><div class="stat-lbl">Exp Today</div></div>
+      <div class="stat"><div class="stat-val" id="stat-dte1" style="color:var(--orange)">0</div><div class="stat-lbl">Exp Tomorrow</div></div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filter-bar">
+      <div class="filter-group">
+        <label>Min Premium ₹</label>
+        <input type="number" id="f-min-prem" value="0" min="0" style="width:70px" onchange="applyFilters()"/>
+      </div>
+      <div class="filter-divider"></div>
+      <div class="filter-group">
+        <label>Min Surge %</label>
+        <input type="number" id="f-min-surge" value="0" min="0" style="width:70px" onchange="applyFilters()"/>
+      </div>
+      <div class="filter-divider"></div>
+      <div class="filter-group">
+        <label>Min Vol Ratio</label>
+        <input type="number" id="f-min-vol" value="0" min="0" step="0.5" style="width:70px" onchange="applyFilters()"/>
+      </div>
+      <div class="filter-divider"></div>
+      <div class="filter-group">
+        <label>Min Score</label>
+        <input type="number" id="f-min-score" value="0" min="0" max="100" style="width:60px" onchange="applyFilters()"/>
+      </div>
+      <div class="filter-divider"></div>
+      <div class="filter-group">
+        <label>Sort By</label>
+        <select id="f-sort" onchange="applyFilters()">
+          <option value="score">Score</option>
+          <option value="ltp">Premium</option>
+          <option value="premium_surge_pct">Surge %</option>
+          <option value="volume_ratio">Vol Ratio</option>
+          <option value="iv">IV</option>
+          <option value="days_to_expiry">DTE</option>
+        </select>
+      </div>
+      <div style="margin-left:auto">
+        <button class="btn btn-ghost btn-sm" onclick="exportCSV()">↓ Export CSV</button>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap">
+      <div id="table-area">
+        <div class="empty">
+          <div class="empty-icon">📡</div>
+          <div class="empty-title">No signals yet</div>
+          <div class="empty-sub">Configure params on the left and click Start Full Scan</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+let allSignals = [];
+let filteredSignals = [];
+let currentTab = 'all';
+let scanPoller = null;
+let sortDir = {};
+
+// ── Init ────────────────────────────────────────────────────────────── //
+window.onload = () => {
+  loadSignals();
+  loadScanLog();
+};
+
+// ── Scan ────────────────────────────────────────────────────────────── //
+async function startScan() {
+  const btn = document.getElementById('btn-scan');
+  btn.disabled = true;
+  btn.textContent = '⏳ Scanning...';
+
+  const body = {
+    days_to_expiry_max: parseInt(document.getElementById('cfg-dte').value) || 3,
+    min_premium: parseFloat(document.getElementById('cfg-min-prem').value) || 15,
+    otm_strikes_min: parseInt(document.getElementById('cfg-otm-min').value) || 2,
+    otm_strikes_max: parseInt(document.getElementById('cfg-otm-max').value) || 6,
+    premium_surge_pct: parseFloat(document.getElementById('cfg-prem-surge').value) || 30,
+    volume_surge_multiplier: parseFloat(document.getElementById('cfg-vol-surge').value) || 2.5,
+  };
+
+  try {
+    const r = await fetch('/api/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await r.json();
+    if (r.status === 409) { toast('⚠ Scan already running'); return; }
+    if (d.status === 'started') {
+      toast('✅ Scan started!');
+      document.getElementById('progress-bar').style.display = 'block';
+      startPoller();
+    }
+  } catch(e) {
+    toast('❌ Failed to start scan: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '▶ Start Full Scan';
+  }
+}
+
+function startPoller() {
+  if (scanPoller) clearInterval(scanPoller);
+  scanPoller = setInterval(pollProgress, 2000);
+}
+
+async function pollProgress() {
+  try {
+    const r = await fetch('/api/scan/progress');
+    const d = await r.json();
+    const total = d.total === '?' ? 100 : parseInt(d.total) || 1;
+    const done = parseInt(d.done) || 0;
+    const pct = Math.min(Math.round((done / total) * 100), 100);
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('scan-status').textContent = `[${done}/${total}] ${d.current || ''} — ${d.status}`;
+    document.getElementById('hdr-status').textContent = `⟳ ${d.status} ${pct}%`;
+
+    if (d.status === 'done' || d.status === 'error') {
+      clearInterval(scanPoller);
+      scanPoller = null;
+      document.getElementById('btn-scan').disabled = false;
+      document.getElementById('btn-scan').textContent = '▶ Start Full Scan';
+      document.getElementById('hdr-status').textContent = d.status === 'done' ? '● Done' : '● Error';
+      await loadSignals();
+      await loadScanLog();
+      toast(d.status === 'done' ? '✅ Scan complete!' : '❌ Scan error');
+    }
+  } catch(e) {}
+}
+
+async function quickScan() {
+  const sym = document.getElementById('quick-sym').value.trim().toUpperCase();
+  if (!sym) return;
+  toast(`🔍 Scanning ${sym}...`);
+  try {
+    const r = await fetch(`/api/symbol/${sym}`);
+    const d = await r.json();
+    if (!d.signals || d.signals.length === 0) {
+      toast(`No signals for ${sym}`);
+      return;
+    }
+    // Merge into allSignals (replace existing for this symbol)
+    allSignals = allSignals.filter(s => s.symbol !== sym);
+    allSignals.push(...d.signals);
+    applyFilters();
+    toast(`✅ ${sym}: ${d.count} signal(s) found`);
+  } catch(e) {
+    toast(`❌ Error: ${e.message}`);
+  }
+}
+
+// ── Load signals ─────────────────────────────────────────────────────── //
+async function loadSignals() {
+  try {
+    const r = await fetch('/api/signals?limit=500');
+    const d = await r.json();
+    allSignals = d.signals || [];
+
+    if (d.scan_time) {
+      const dt = new Date(d.scan_time);
+      document.getElementById('hdr-scan-time').textContent = 'Last scan: ' + dt.toLocaleTimeString('en-IN');
+    }
+
+    updateStats();
+    applyFilters();
+  } catch(e) {
+    console.error('loadSignals error:', e);
+  }
+}
+
+async function loadScanLog() {
+  try {
+    const r = await fetch('/api/scan/log');
+    const logs = await r.json();
+    const el = document.getElementById('log-list');
+    document.getElementById('log-count').textContent = `(${logs.length})`;
+    if (!logs.length) { el.innerHTML = '<div style="color:var(--text3);font-size:11px">No scans yet</div>'; return; }
+    el.innerHTML = logs.reverse().slice(0, 15).map(l => `
+      <div class="log-row">
+        <span style="color:var(--text3)">${new Date(l.scan_time).toLocaleString('en-IN', {dateStyle:'short',timeStyle:'short'})}</span>
+        <span style="color:var(--accent2)">${l.signals} sig</span>
+        <span style="color:var(--text3)">${l.symbols} sym</span>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────── //
+function updateStats() {
+  const ce = allSignals.filter(s => s.type === 'CE').length;
+  const pe = allSignals.filter(s => s.type === 'PE').length;
+  const confirmed = allSignals.filter(s => s.gates?.premium_surge && s.gates?.volume_surge).length;
+  const dte0 = allSignals.filter(s => s.days_to_expiry === 0).length;
+  const dte1 = allSignals.filter(s => s.days_to_expiry === 1).length;
+
+  document.getElementById('stat-total').textContent = allSignals.length;
+  document.getElementById('stat-ce').textContent = ce;
+  document.getElementById('stat-pe').textContent = pe;
+  document.getElementById('stat-confirmed').textContent = confirmed;
+  document.getElementById('stat-dte0').textContent = dte0;
+  document.getElementById('stat-dte1').textContent = dte1;
+  document.getElementById('hdr-total').textContent = allSignals.length + ' signals';
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────── //
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', ['all','ce','pe','confirmed'][i] === tab);
+  });
+  applyFilters();
+}
+
+// ── Filters ──────────────────────────────────────────────────────────── //
+function applyFilters() {
+  let sigs = [...allSignals];
+
+  // Tab filter
+  if (currentTab === 'ce') sigs = sigs.filter(s => s.type === 'CE');
+  else if (currentTab === 'pe') sigs = sigs.filter(s => s.type === 'PE');
+  else if (currentTab === 'confirmed') sigs = sigs.filter(s => s.gates?.premium_surge && s.gates?.volume_surge);
+
+  // Numeric filters
+  const minPrem = parseFloat(document.getElementById('f-min-prem').value) || 0;
+  const minSurge = parseFloat(document.getElementById('f-min-surge').value) || 0;
+  const minVol = parseFloat(document.getElementById('f-min-vol').value) || 0;
+  const minScore = parseInt(document.getElementById('f-min-score').value) || 0;
+
+  sigs = sigs.filter(s =>
+    s.ltp >= minPrem &&
+    s.premium_surge_pct >= minSurge &&
+    s.volume_ratio >= minVol &&
+    s.score >= minScore
+  );
+
+  // Sort
+  const sortBy = document.getElementById('f-sort').value;
+  const desc = sortBy !== 'days_to_expiry';
+  sigs.sort((a, b) => desc ? (b[sortBy] || 0) - (a[sortBy] || 0) : (a[sortBy] || 0) - (b[sortBy] || 0));
+
+  filteredSignals = sigs;
+  renderTable(sigs);
+}
+
+// ── Table ─────────────────────────────────────────────────────────────── //
+function renderTable(signals) {
+  const el = document.getElementById('table-area');
+  if (!signals.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">No signals match filters</div><div class="empty-sub">Try lowering filter thresholds or run a new scan</div></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Type</th>
+          <th>Strike</th>
+          <th>OTM#</th>
+          <th>Spot</th>
+          <th>LTP ₹</th>
+          <th>IV%</th>
+          <th>Surge%</th>
+          <th>Vol Ratio</th>
+          <th>Volume</th>
+          <th>OI</th>
+          <th>OI Chg</th>
+          <th>DTE</th>
+          <th>Expiry</th>
+          <th>Score</th>
+          <th>Gates</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${signals.map(s => renderRow(s)).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderRow(s) {
+  const dteCls = ['dte-0','dte-1','dte-2','dte-3'][Math.min(s.days_to_expiry,3)] || 'dte-3';
+  const scoreColor = s.score >= 70 ? '#22c55e' : s.score >= 40 ? '#f59e0b' : '#64748b';
+  const fillPct = s.score + '%';
+  const surgeColor = s.premium_surge_pct > 0 ? 'up' : s.premium_surge_pct < 0 ? 'down' : 'neutral';
+  const oiChgColor = s.oi_change > 0 ? 'up' : s.oi_change < 0 ? 'down' : 'neutral';
+  const avgPremHint = s.avg_3d_premium > 0 ? `title="3d avg ₹${s.avg_3d_premium}"` : '';
+  const avgVolHint = s.avg_3d_volume > 0 ? `title="3d avg vol ${s.avg_3d_volume}"` : '';
+
+  const gates = s.gates || {};
+  const gateIcons = [
+    {k:'premium_ok', title:'Premium ≥ min'},
+    {k:'oi_ok', title:'OI ≥ min'},
+    {k:'premium_surge', title:'Premium Surge'},
+    {k:'volume_surge', title:'Volume Surge'},
+  ].map(g => `<div class="gate ${gates[g.k] ? 'ok' : 'fail'}" title="${g.title}"></div>`).join('');
+
+  return `
+    <tr>
+      <td><span class="sym">${s.symbol}</span></td>
+      <td><span class="${s.type === 'CE' ? 'ce-badge' : 'pe-badge'}">${s.type}</span></td>
+      <td style="font-weight:600;color:var(--text)">${s.strike.toLocaleString('en-IN')}</td>
+      <td style="color:var(--text3);text-align:center">${s.otm_count || '-'}</td>
+      <td style="color:var(--text2)">${s.spot.toLocaleString('en-IN')}</td>
+      <td style="color:var(--yellow);font-weight:700" ${avgPremHint}>₹${s.ltp}</td>
+      <td style="color:var(--text2)">${s.iv > 0 ? s.iv + '%' : '—'}</td>
+      <td class="${surgeColor}" ${avgPremHint}>${s.premium_surge_pct > 0 ? '+' : ''}${s.premium_surge_pct}%</td>
+      <td style="color:${s.volume_ratio >= 2.5 ? 'var(--green)' : 'var(--text2)'}" ${avgVolHint}>${s.volume_ratio > 0 ? s.volume_ratio + 'x' : '—'}</td>
+      <td style="color:var(--text2)">${s.volume.toLocaleString('en-IN')}</td>
+      <td style="color:var(--text2)">${s.oi.toLocaleString('en-IN')}</td>
+      <td class="${oiChgColor}">${s.oi_change > 0 ? '+' : ''}${s.oi_change.toLocaleString('en-IN')}</td>
+      <td><span class="dte ${dteCls}">${s.days_to_expiry}d</span></td>
+      <td style="color:var(--text3);font-size:11px">${s.expiry}</td>
+      <td>
+        <div class="score-wrap">
+          <div class="score-bar"><div class="score-fill" style="width:${fillPct};background:${scoreColor}"></div></div>
+          <span class="score-num" style="color:${scoreColor}">${s.score}</span>
+        </div>
+      </td>
+      <td><div class="gates">${gateIcons}</div></td>
+    </tr>
+  `;
+}
+
+// ── Export ────────────────────────────────────────────────────────────── //
+function exportCSV() {
+  if (!filteredSignals.length) { toast('No signals to export'); return; }
+  const cols = ['symbol','type','strike','otm_count','spot','ltp','iv','premium_surge_pct','avg_3d_premium','volume_ratio','avg_3d_volume','volume','oi','oi_change','days_to_expiry','expiry','score'];
+  const rows = [cols.join(',')];
+  filteredSignals.forEach(s => rows.push(cols.map(c => s[c] ?? '').join(',')));
+  const blob = new Blob([rows.join('\n')], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'otm_signals_' + new Date().toISOString().slice(0,10) + '.csv'; a.click();
+  toast('✅ CSV exported');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────── //
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
