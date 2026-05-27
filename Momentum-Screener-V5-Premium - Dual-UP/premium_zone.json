@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "Ticker": "PHOENIXLTD",
+    "Current_Price": 1802.6,
+    "Surge_High": 1813.5,
+    "Distance_Pct": 0.6,
+    "Vol_Surge_Ratio": 0.11,
+    "Is_Vol_Surge": false,
+    "Today_Volume": 46864,
+    "Avg_Vol_20d": 426287,
+    "Expiry": "30-Jun-2026",
+    "ATM_Strike": 1800.0,
+    "ATM_CE_LTP": 73.2,
+    "ATM_CE_OI": 125,
+    "OTM1_Strike": 1820.0,
+    "OTM1_CE_LTP": 61.8,
+    "OTM1_CE_OI": 31,
+    "OTM2_Strike": 1840.0,
+    "OTM2_CE_LTP": 54.0,
+    "OTM2_CE_OI": 19,
+    "OTM3_Strike": 1860.0,
+    "OTM3_CE_LTP": 0.0,
+    "OTM3_CE_OI": 0,
+    "Sell_Strike": 1900.0,
+    "Sell_CE_LTP": 30.6,
+    "Premium_Score": 8.05,
+    "Surge_Gain_Pct": 19.37,
+    "G2_Date": "2026-05-18",
+    "Breakdown_Date": "2026-05-18",
+    "Scanned_At": "2026-05-26 11:35:15"
+  }
+]
