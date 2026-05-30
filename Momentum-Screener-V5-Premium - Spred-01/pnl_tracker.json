@@ -1,0 +1,42 @@
+[
+  {
+    "trade_id": "TIINDIA_3440_30-Jun-2026",
+    "ticker": "TIINDIA",
+    "strike": 3440.0,
+    "expiry": "30-Jun-2026",
+    "entry_ltp": 45.0,
+    "lots": 1,
+    "lot_size": 200,
+    "notes": "",
+    "entry_time": "2026-05-27 10:52:57",
+    "status": "open",
+    "exit_ltp": null,
+    "exit_time": null,
+    "mtm_ltp": 45.0,
+    "mtm_time": "2026-05-27 10:52:57",
+    "pnl_per_unit": 0.0,
+    "gross_pnl": 0.0,
+    "pnl_pct": 0.0,
+    "total_qty": 200
+  },
+  {
+    "trade_id": "TIINDIA_3280_30-Jun-2026",
+    "ticker": "TIINDIA",
+    "strike": 3280.0,
+    "expiry": "30-Jun-2026",
+    "entry_ltp": 45.0,
+    "lots": 1,
+    "lot_size": 200,
+    "notes": "",
+    "entry_time": "2026-05-27 10:53:15",
+    "status": "open",
+    "exit_ltp": null,
+    "exit_time": null,
+    "mtm_ltp": 90.0,
+    "mtm_time": "2026-05-27 10:53:42",
+    "pnl_per_unit": -45.0,
+    "gross_pnl": -9000.0,
+    "pnl_pct": -100.0,
+    "total_qty": 200
+  }
+]

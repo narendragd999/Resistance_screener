@@ -1456,6 +1456,246 @@ document.getElementById('btn-spread-clear').addEventListener('click', () => {
     </div>`;
 });
 
+// ═══════════════════════════════════════════
+//  FAIR PRICE (SMA) INTEGRATION
+// ═══════════════════════════════════════════
+const _fairPriceCache = {};
+
+async function loadFairPrice(symbol, idx, expiryDateStr, entryUnderlying) {
+  const bodyEl = document.getElementById(`fair-price-body-${idx}`);
+  if (!bodyEl) return;
+
+  // Check cache first
+  if (_fairPriceCache[symbol]) {
+    renderFairPrice(_fairPriceCache[symbol], idx, expiryDateStr, entryUnderlying);
+    return;
+  }
+
+  bodyEl.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;padding:12px 0;color:var(--text2);font-size:11px;font-family:var(--font-mono)">
+      <div class="spinner-sm"></div> Scraping Screener.in + fetching price history via yfinance… (15–30s)
+    </div>`;
+
+  try {
+    const res = await API.post('/api/sma/analyze', {
+      tickers: [symbol], fy_start: 2014, force_scrape: false, include_other_income: true
+    });
+    const result = res.results?.[0];
+    if (!result) {
+      const err = res.failed?.[0]?.error || 'No data returned';
+      bodyEl.innerHTML = `<div style="color:var(--red);font-size:11px;padding:8px 0">⚠ Fair price unavailable: ${err}</div>`;
+      return;
+    }
+    _fairPriceCache[symbol] = result;
+    renderFairPrice(result, idx, expiryDateStr, entryUnderlying);
+  } catch(e) {
+    bodyEl.innerHTML = `<div style="color:var(--red);font-size:11px;padding:8px 0">⚠ Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderFairPrice(r, idx, expiryDateStr, entryUnderlying) {
+  const bodyEl = document.getElementById(`fair-price-body-${idx}`);
+  if (!bodyEl) return;
+
+  const op  = r.op  || {};
+  const ttm = r.ttm || {};
+  const sal = r.sales || {};
+
+  // ── Determine the FY year that corresponds to the selected expiry ──
+  // Indian FY: Apr-Mar. e.g. May 2025 = FY2026 (Apr 2025 - Mar 2026).
+  // KEY RULE: if the matched FY is still open (annual results not published yet),
+  // fall back to the last *completed* FY. This prevents showing live/current price
+  // as "Historical Actual" for an ongoing FY.
+  let expiryFyKey   = null;
+  let expiryFyLabel = null;
+  let fyIsOpen      = false;
+
+  if (expiryDateStr) {
+    // Parse dd-mm-yyyy or yyyy-mm-dd
+    let d;
+    const parts = expiryDateStr.split('-');
+    if (parts[0].length === 4) {
+      d = new Date(expiryDateStr);
+    } else {
+      d = new Date(parts[2] + '-' + parts[1] + '-' + parts[0]);
+    }
+
+    if (!isNaN(d)) {
+      // Indian FY ends in March: Jan-Mar => FY ends this year; Apr-Dec => FY ends next year
+      const fyEndYear  = d.getMonth() <= 2 ? d.getFullYear() : d.getFullYear() + 1;
+      expiryFyLabel    = 'FY' + fyEndYear;
+
+      const histKeys   = Object.keys(op.historical || {});
+      const keyYear    = k => { const m = k.match(/\d{4}/); return m ? parseInt(m[0]) : 0; };
+      const sortedKeys = histKeys.slice().sort((a,b) => keyYear(a) - keyYear(b));
+
+      // Determine current open FY (results not yet published for full year)
+      const now          = new Date();
+      const nowFyEndYear = now.getMonth() <= 2 ? now.getFullYear() : now.getFullYear() + 1;
+
+      // Exact match for expiry FY year
+      const exactKey = histKeys.find(k => k.includes(String(fyEndYear)));
+
+      if (exactKey && fyEndYear >= nowFyEndYear) {
+        // This FY is still open — annual results not published, so "actual" is live price
+        // Use the last completed FY (fyEndYear - 1) instead
+        fyIsOpen = true;
+        const completedFyYear = fyEndYear - 1;
+        const prevKey = histKeys.find(k => k.includes(String(completedFyYear)));
+        const prevFallback = sortedKeys.filter(k => keyYear(k) < fyEndYear);
+        expiryFyKey = prevKey || (prevFallback.length ? prevFallback[prevFallback.length - 1] : exactKey);
+      } else if (exactKey) {
+        // FY is closed - use it directly
+        expiryFyKey = exactKey;
+      } else {
+        // No exact match - pick last completed FY <= fyEndYear
+        const candidates = sortedKeys.filter(k => keyYear(k) <= fyEndYear);
+        expiryFyKey = candidates.length ? candidates[candidates.length - 1] : (sortedKeys[sortedKeys.length - 1] || null);
+      }
+    }
+  }
+
+  // ── Compute fair value at entry underlying using regression coefficients ──
+  // op.series contains the regression model; intercept + coef × OP_value = fair price
+  // We use the historical entry for the matched FY if available
+  let expiryFairPrice = null;
+  let expiryHistEntry = null;
+  if (expiryFyKey && op.historical) {
+    expiryHistEntry = op.historical[expiryFyKey];
+    if (expiryHistEntry) {
+      expiryFairPrice = expiryHistEntry.fair;
+    }
+  }
+
+  // If we have entry underlying + regression coefficients, compute predicted fair at entry spot
+  let regressionFairAtEntry = null;
+  if (entryUnderlying != null && op.coef != null && op.intercept != null) {
+    // The regression is: price = intercept + coef * OP
+    // But we need OP for that year — use expiryHistEntry.profit if available
+    if (expiryHistEntry?.profit != null) {
+      regressionFairAtEntry = op.intercept + op.coef * expiryHistEntry.profit;
+    }
+  }
+
+  // ── Valuation: compare entry underlying vs expiry-time fair price ──
+  const referencePrice = entryUnderlying != null ? entryUnderlying : r.current_price;
+  const referenceFair  = regressionFairAtEntry ?? expiryFairPrice ?? op.pred_price;
+  const usingCurrent   = !expiryFyKey && !entryUnderlying;
+
+  let gainPct = null;
+  if (referencePrice != null && referenceFair != null && referenceFair !== 0) {
+    gainPct = ((referenceFair - referencePrice) / referencePrice) * 100;
+  }
+
+  const pct = gainPct ?? (op.gain_pct ?? 0);
+  const verdict    = pct > 20  ? 'OVERVALUED'
+                   : pct < -20 ? 'UNDERVALUED'
+                   : 'FAIRLY VALUED';
+  const verdictCls = pct > 20  ? 'loss'
+                   : pct < -20 ? 'profit'
+                   : 'breakeven';
+  const bearHint   = pct > 20  ? '✅ Overvalued — bearish bias supports Bear Call Spread'
+                   : pct < -20 ? '⚠️ Undervalued — underlying may rally; be cautious'
+                   : '🔶 Fairly valued — neutral, manage strikes carefully';
+  const bearHintColor = pct > 20 ? 'var(--green)' : pct < -20 ? 'var(--red)' : 'var(--amber)';
+
+  const fmtP = n => n == null ? '—' : '₹' + parseFloat(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtS = n => n == null ? '—' : (n > 0 ? '+' : '') + parseFloat(n).toFixed(2) + '%';
+
+  // Historical years for table
+  const histYears = Object.keys(op.historical || {}).sort();
+
+  // Context label for verdict banner — explain FY fallback when expiry is in an open FY
+  const contextNote = usingCurrent
+    ? '(current price vs current model)'
+    : expiryFyKey
+      ? (fyIsOpen
+          ? `(entry spot vs ${expiryFyKey} fair — using last completed FY; ${expiryFyLabel} results not yet published)`
+          : `(entry spot vs ${expiryFyKey} regression fair)`)
+      : '(entry spot vs model)';
+
+  bodyEl.innerHTML = `
+    <!-- Verdict banner -->
+    <div class="outcome-badge ${verdictCls}" style="margin:8px 0 12px;font-size:11px">
+      ${verdict} &nbsp;·&nbsp; OP Fair: ${fmtP(referenceFair)} &nbsp;·&nbsp; Upside: ${fmtS(gainPct)} &nbsp;·&nbsp; R²: ${op.r2 ?? '—'}
+    </div>
+    <div style="font-size:11px;color:${bearHintColor};margin-bottom:6px;font-family:var(--font-mono)">${bearHint}</div>
+    <div style="font-size:10px;color:var(--text2);margin-bottom:12px;font-family:var(--font-mono)">${contextNote}</div>
+
+    <!-- 3 model cards side by side -->
+    <div class="metrics-row" style="margin-bottom:12px">
+      <div class="metric-card">
+        <div class="metric-label">${entryUnderlying != null ? 'Price at Entry' : 'Current Price'}</div>
+        <div class="metric-value">${fmtP(referencePrice)}</div>
+        <div class="metric-sub">${entryUnderlying != null ? 'Underlying on entry date' : 'Live (yfinance)'}</div>
+      </div>
+      <div class="metric-card ${gainPct != null ? (gainPct > 0 ? 'profit' : gainPct < 0 ? 'loss' : '') : ''}">
+        <div class="metric-label">OP Fair Price${expiryFyKey ? ` (${expiryFyKey})` : ''}</div>
+        <div class="metric-value ${gainPct != null ? (gainPct > 0 ? 'green' : gainPct < 0 ? 'red' : 'amber') : 'amber'}">${fmtP(referenceFair)}</div>
+        <div class="metric-sub">${fmtS(gainPct)} · R²: ${op.r2 ?? '—'}</div>
+      </div>
+      ${expiryHistEntry ? `
+      <div class="metric-card">
+        <div class="metric-label">Historical Actual (${expiryFyKey})</div>
+        <div class="metric-value amber">${fmtP(expiryHistEntry.actual)}</div>
+        <div class="metric-sub">${r.profit_label||'OP'}: ₹${parseFloat(expiryHistEntry.profit||0).toLocaleString('en-IN',{maximumFractionDigits:0})} Cr</div>
+      </div>` : (r.has_ttm && ttm.pred_price != null ? `
+      <div class="metric-card ${ttm.gain_pct > 0 ? 'profit' : ttm.gain_pct < 0 ? 'loss' : ''}">
+        <div class="metric-label">TTM Fair Price</div>
+        <div class="metric-value ${ttm.gain_pct > 0 ? 'green' : ttm.gain_pct < 0 ? 'red' : 'amber'}">${fmtP(ttm.pred_price)}</div>
+        <div class="metric-sub">${fmtS(ttm.gain_pct)} · R²: ${ttm.r2 ?? '—'}</div>
+      </div>` : '')}
+      ${r.has_sales && sal.pred_price != null ? `
+      <div class="metric-card ${sal.gain_pct > 0 ? 'profit' : sal.gain_pct < 0 ? 'loss' : ''}">
+        <div class="metric-label">Sales Fair Price</div>
+        <div class="metric-value ${sal.gain_pct > 0 ? 'green' : sal.gain_pct < 0 ? 'red' : 'amber'}">${fmtP(sal.pred_price)}</div>
+        <div class="metric-sub">${fmtS(sal.gain_pct)} · R²: ${sal.r2 ?? '—'}</div>
+      </div>` : ''}
+    </div>
+
+    <!-- Historical valuation table (last 5 years) — highlight matched FY -->
+    ${histYears.length ? `
+    <div class="expander" style="margin-bottom:8px">
+      <div class="expander-header" onclick="toggleExpander(this)">
+        📅 Historical Valuation (OP Model — last ${Math.min(histYears.length,5)} years)
+        ${expiryFyKey ? `<span style="margin-left:8px;font-size:9px;color:var(--teal);font-weight:400">[${expiryFyKey} highlighted = expiry year]</span>` : ''}
+        <span class="expander-arrow">▼</span>
+      </div>
+      <div class="expander-body" style="display:none">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>FY Year</th><th>${r.profit_label||'OP'} (Cr)</th>
+              <th>Fair Price</th><th>Actual Price</th><th>vs Fair</th><th>Status</th>
+            </tr></thead>
+            <tbody>
+              ${histYears.slice(-5).map(yr => {
+                const h = op.historical[yr];
+                const mp = h.misprice_pct ?? 0;
+                const isMatch = yr === expiryFyKey;
+                const rowStyle = isMatch ? 'background:rgba(0,212,177,.06);outline:1px solid rgba(0,212,177,.25);' : '';
+                return `<tr style="${rowStyle}">
+                  <td style="font-family:var(--font-mono);font-weight:600;color:${isMatch?'var(--teal)':'inherit'}">${yr}${isMatch?' ◀':''}</td>
+                  <td style="font-family:var(--font-mono)">₹${parseFloat(h.profit||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
+                  <td style="font-family:var(--font-mono);color:var(--teal)">${fmtP(h.fair)}</td>
+                  <td style="font-family:var(--font-mono)">${fmtP(h.actual)}</td>
+                  <td class="${mp > 0 ? 'red' : 'green'}" style="font-family:var(--font-mono)">${mp > 0 ? '+' : ''}${mp}%</td>
+                  <td><span class="outcome-badge ${h.status==='Overvalued'?'loss':h.status==='Undervalued'?'profit':'breakeven'}" style="font-size:9px;padding:2px 8px">${h.status}</span></td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>` : ''}
+
+    <div style="font-size:9px;color:var(--text2);margin-top:4px;font-family:var(--font-mono)">
+      Source: Screener.in + yfinance · Model: Linear Regression (${r.years_count} FY years) · ${r.is_bank ? 'Bank/NBFC adjusted' : 'Non-finance'}
+      ${expiryFyKey ? ` · Fair price at expiry FY (${expiryFyKey})` : ' · Current fair price'}
+    </div>
+  `;
+}
+
 async function analyzeSpread() {
   const symbol      = document.getElementById('sp-symbol').value;
   const instrument  = document.getElementById('sp-instrument').value;
@@ -1497,6 +1737,18 @@ async function analyzeSpread() {
     renderSpreadResults(res, shortStrike, longStrike, lotSize, numLots);
     toast('success','Spread analysis complete',
       `${symbol} ${shortStrike}/${longStrike} CE — ${res.expiry_1?.stats?.expiry||''}`);
+    // Auto-load fair price in background for expiry 1 (and 2 if present)
+    // Pass the expiry date string and entry_underlying so fair price is computed for the right FY
+    setTimeout(() => {
+      const eu1 = res.expiry_1?.entry_underlying ?? null;
+      const ed1 = res.expiry_1?.stats?.expiry ?? expiry1;
+      loadFairPrice(symbol, 1, ed1, eu1);
+      if (res.expiry_2) {
+        const eu2 = res.expiry_2?.entry_underlying ?? null;
+        const ed2 = res.expiry_2?.stats?.expiry ?? expiry2;
+        loadFairPrice(symbol, 2, ed2, eu2);
+      }
+    }, 200);
   } catch(err) {
     document.getElementById('spread-results').innerHTML = `
       <div class="empty-state">
@@ -1642,6 +1894,21 @@ function buildExpPanel(e, symbol, shortStrike, longStrike, lotSize, numLots, idx
       <div class="stat-row"><span class="stat-label">Days Flat</span><span class="stat-val">${s.days_flat}</span></div>
       <div class="stat-row"><span class="stat-label">Win Rate (days)</span>
         <span class="stat-val ${s.days_profit/s.days_total>=0.6?'green':'amber'}">${s.days_total?Math.round(s.days_profit/s.days_total*100)+'%':'—'}</span>
+      </div>
+    </div>
+
+    <!-- ── FAIR PRICE (SMA) ── -->
+    <div class="chart-section" id="fair-price-section-${idx}" style="padding:0 24px 6px">
+      <div class="section-title" style="cursor:pointer;user-select:none" onclick="toggleExpander(this.parentElement.querySelector('.expander-header')||this)">
+        <span style="color:var(--purple)">📊</span> Fair Price Analysis
+        <span style="margin-left:auto;font-size:9px;color:var(--text2);font-weight:400;font-family:var(--font-mono)">via Screener.in regression</span>
+        <button class="btn btn-outline btn-sm" style="margin-left:10px;font-size:9px;padding:3px 10px"
+          onclick="event.stopPropagation();loadFairPrice('${symbol}',${idx},'${e.stats?.expiry||''}',${e.entry_underlying != null ? e.entry_underlying : 'null'})">🔄 Load</button>
+      </div>
+      <div id="fair-price-body-${idx}">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 0;color:var(--text2);font-size:11px;font-family:var(--font-mono)">
+          <div class="spinner-sm"></div> Loading fair price from Screener.in…
+        </div>
       </div>
     </div>
 
