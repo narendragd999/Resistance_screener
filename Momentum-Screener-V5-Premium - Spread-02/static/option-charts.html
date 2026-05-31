@@ -131,6 +131,12 @@ header{
 #sp-spot-banner.loading{border-color:rgba(74,144,226,.3);background:rgba(74,144,226,.05)}
 .spot-label{color:var(--text2);letter-spacing:.05em}
 .spot-price{color:#f59e0b;font-size:15px;font-weight:700;letter-spacing:.02em}
+
+/* lot size badge */
+#sp-lot-badge.nse  {color:#00d97e;background:rgba(0,217,126,.1);border:1px solid rgba(0,217,126,.3)}
+#sp-lot-badge.static{color:#f59e0b;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3)}
+#sp-lot-badge.manual{color:#8b8fa8;background:rgba(139,143,168,.1);border:1px solid rgba(139,143,168,.25)}
+#sp-lot-badge.error {color:#ff3b5c;background:rgba(255,59,92,.08);border:1px solid rgba(255,59,92,.25)}
 .spot-hint{color:var(--text2);font-size:10px}
 .spot-otm-chips{display:flex;gap:6px;flex-wrap:wrap;margin-left:4px}
 .otm-chip{
@@ -619,8 +625,14 @@ td.amber{color:var(--amber)}
       </div>
 
       <div class="field">
-        <label>Lot Size *</label>
-        <input type="number" id="sp-lot-size" value="1" min="1" step="1" placeholder="e.g. 250"/>
+        <label style="display:flex;align-items:center;gap:6px">
+          Lot Size *
+          <span id="sp-lot-badge" style="display:none;font-size:9px;padding:2px 7px;border-radius:99px;font-weight:600;letter-spacing:.04em"></span>
+          <span id="sp-lot-spinner" style="display:none"><div class="spinner-sm" style="width:10px;height:10px;border-width:1.5px"></div></span>
+        </label>
+        <input type="number" id="sp-lot-size" value="" min="1" step="1" placeholder="Auto-fetched from NSE"
+          style="transition:border-color .2s"
+          oninput="document.getElementById('sp-lot-badge').style.display='none'"/>
       </div>
 
       <div class="field">
@@ -748,6 +760,17 @@ async function loadMeta() {
       : '<option value="">No tickers (upload tickers.csv)</option>';
     document.getElementById('inp-symbol').innerHTML = opts;
     document.getElementById('sp-symbol').innerHTML = opts;
+    // Restore last used symbol if saved, then auto-fetch lot size
+    const lastSym = sessionStorage.getItem('oc_last_symbol');
+    if (lastSym) {
+      const spSel = document.getElementById('sp-symbol');
+      if ([...spSel.options].some(o => o.value === lastSym)) {
+        spSel.value = lastSym;
+        document.getElementById('inp-symbol').value = lastSym;
+      }
+    }
+    // Fire lot fetch for whatever symbol is now selected
+    scheduleLotFetch();
   } catch(e) {
     const err = '<option value="">Error loading tickers</option>';
     document.getElementById('inp-symbol').innerHTML = err;
@@ -1010,6 +1033,8 @@ function initDatePickers() {
       if (fpSpExpiry2 && dates[0]) fpSpExpiry2.set('minDate', dates[0]);
       scheduleSpreadSuggest();
       scheduleSpotFetch();
+      _lotFetchedSymbol = null;  // force re-fetch with new date context
+      scheduleLotFetch();
     },
   });
   fpSpExpiry1 = flatpickr('#sp-expiry1', {
@@ -1018,6 +1043,8 @@ function initDatePickers() {
       if (fpSpEntry && dates[0]) fpSpEntry.set('maxDate', dates[0]);
       scheduleSpreadSuggest();
       scheduleSpotFetch();
+      _lotFetchedSymbol = null;  // force re-fetch with new expiry
+      scheduleLotFetch();
     },
   });
   fpSpExpiry2 = flatpickr('#sp-expiry2', { ...FP_CONFIG });
@@ -1262,6 +1289,86 @@ document.getElementById('sp-symbol').addEventListener('change', scheduleSpotFetc
 document.getElementById('sp-instrument').addEventListener('change', scheduleSpotFetch);
 
 // ═══════════════════════════════════════════
+//  LOT SIZE AUTO-FETCH
+// ═══════════════════════════════════════════
+let _lotFetchDebounce = null;
+let _lotFetchedSymbol = null;   // track which symbol was last auto-fetched
+
+function _showLotBadge(text, cls) {
+  const b = document.getElementById('sp-lot-badge');
+  b.textContent = text;
+  b.className   = cls;
+  b.style.display = 'inline-block';
+}
+
+async function fetchLotSize() {
+  const symbol = document.getElementById('sp-symbol').value?.trim();
+  const inst   = document.getElementById('sp-instrument').value;
+  const input  = document.getElementById('sp-lot-size');
+  const spinner = document.getElementById('sp-lot-spinner');
+
+  if (!symbol || inst.startsWith('FUT')) {
+    // Futures don't need lot size from NSE the same way — clear badge
+    document.getElementById('sp-lot-badge').style.display = 'none';
+    return;
+  }
+  // Don't re-fetch if symbol hasn't changed since last successful fetch
+  if (_lotFetchedSymbol === symbol) return;
+
+  spinner.style.display = 'inline-flex';
+  document.getElementById('sp-lot-badge').style.display = 'none';
+  input.placeholder = 'Fetching from NSE…';
+
+  try {
+    const entry  = fpSpEntry?.input?.value?.trim()   || '';
+    const expiry = fpSpExpiry1?.input?.value?.trim() || '';
+    let lotUrl = `/api/option-charts/lot-size?symbol=${encodeURIComponent(symbol)}&instrument_type=${encodeURIComponent(inst)}`;
+    if (entry)  lotUrl += `&entry_date=${encodeURIComponent(entry)}`;
+    if (expiry) lotUrl += `&expiry_date=${encodeURIComponent(expiry)}`;
+    const res = await fetch(lotUrl);
+    const data = await res.json();
+
+    if (data.lot_size && data.lot_size > 0) {
+      input.value       = data.lot_size;
+      input.placeholder = 'Auto-fetched from NSE';
+      _lotFetchedSymbol = symbol;
+
+      if (data.source === 'nse') {
+        _showLotBadge('✓ NSE Live', 'nse');
+      } else if (data.source === 'static') {
+        _showLotBadge('⚡ Cached', 'static');
+      }
+      // Re-run spot fetch now that we have lot context
+      scheduleSpotFetch();
+    } else {
+      input.value       = '';
+      input.placeholder = 'Enter manually';
+      _showLotBadge('⚠ Not found — enter manually', 'error');
+    }
+  } catch(e) {
+    input.placeholder = 'Enter manually';
+    _showLotBadge('⚠ Fetch failed — enter manually', 'error');
+  } finally {
+    spinner.style.display = 'none';
+  }
+}
+
+function scheduleLotFetch() {
+  clearTimeout(_lotFetchDebounce);
+  // Reset tracking so re-selecting same symbol after a clear re-fetches
+  _lotFetchedSymbol = null;
+  _lotFetchDebounce = setTimeout(fetchLotSize, 300);
+}
+
+document.getElementById('sp-symbol').addEventListener('change', scheduleLotFetch);
+document.getElementById('sp-instrument').addEventListener('change', scheduleLotFetch);
+// Remember last selected symbol across page reloads
+document.getElementById('sp-symbol').addEventListener('change', () => {
+  const v = document.getElementById('sp-symbol').value;
+  if (v) sessionStorage.setItem('oc_last_symbol', v);
+});
+
+// ═══════════════════════════════════════════
 //  TAB 2 — STRIKE SUGGESTION ENGINE
 // ═══════════════════════════════════════════
 let _suggestDebounce = null;
@@ -1444,6 +1551,9 @@ document.getElementById('btn-spread-clear').addEventListener('click', () => {
   closeSuggestPanel();
   _suggestReq = null; _suggestData = null; _suggestSelShort = null; _suggestSelLong = null;
   _spotReq = null; _spotData = null;
+  _lotFetchedSymbol = null;
+  document.getElementById('sp-lot-badge').style.display   = 'none';
+  document.getElementById('sp-lot-size').placeholder      = 'Auto-fetched from NSE';
   document.getElementById('sp-spot-banner').classList.remove('visible');
   document.getElementById('sp-spot-loading').classList.remove('visible');
   document.getElementById('sp-short-strike').value = '';
@@ -1704,7 +1814,23 @@ async function analyzeSpread() {
   const entryDate   = fpSpEntry?.input?.value?.trim() || '';
   const expiry1     = fpSpExpiry1?.input?.value?.trim() || '';
   const expiry2     = fpSpExpiry2?.input?.value?.trim() || '';
-  const lotSize     = parseInt(document.getElementById('sp-lot-size').value) || 1;
+  const lotSizeRaw  = document.getElementById('sp-lot-size').value;
+  const lotSize     = parseInt(lotSizeRaw) || 0;
+  if (!lotSize || lotSize < 1) {
+    document.getElementById('spread-results').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">⚠️</div>
+        <div class="empty-title">Lot Size Required</div>
+        <div style="color:var(--text2);font-size:12px">
+          Lot size could not be auto-fetched for this symbol.<br>
+          Please enter it manually in the <strong>Lot Size</strong> field.
+        </div>
+      </div>`;
+    document.getElementById('sp-lot-size').focus();
+    document.getElementById('sp-lot-size').style.borderColor = 'var(--red)';
+    setTimeout(() => document.getElementById('sp-lot-size').style.borderColor = '', 2000);
+    return;
+  }
   const numLots     = parseInt(document.getElementById('sp-num-lots').value) || 1;
 
   if (!symbol)                    { toast('warn','Select a symbol'); return; }

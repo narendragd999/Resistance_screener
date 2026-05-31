@@ -654,6 +654,178 @@ async def oc_strikes(
     return {"strikes": strikes, "source": source, "count": len(strikes)}
 
 
+@router.get("/api/option-charts/lot-size")
+async def oc_lot_size(
+    symbol:          str,
+    instrument_type: str = "OPTSTK",
+    entry_date:      str = "",   # DD-MM-YYYY  — trade date (from date)
+    expiry_date:     str = "",   # DD-MM-YYYY  — expiry date (to date)
+):
+    """
+    Fetch the NSE lot size for a symbol by reading FH_MARKET_LOT from
+    historicalOR/foCPV.  When entry_date + expiry_date are supplied the
+    request mirrors exactly how every other call in the app works:
+      from=<entry_date>  to=<expiry_date>  expiryDate=<expiry_date>
+    Falls back to upcoming-expiry discovery, then to the static map.
+    """
+    symbol = symbol.strip().upper()
+    inst   = instrument_type.strip().upper()
+
+    # Parse optional dates
+    fmt = "%d-%m-%Y"
+    entry_dt  = None
+    expiry_dt = None
+    try:
+        if entry_date:
+            entry_dt  = datetime.strptime(entry_date.strip(),  fmt).date()
+        if expiry_date:
+            expiry_dt = datetime.strptime(expiry_date.strip(), fmt).date()
+    except ValueError:
+        pass   # bad format — fall through to auto-discovery
+
+    try:
+        lot = await asyncio.to_thread(_do_fetch_lot_size, symbol, inst, entry_dt, expiry_dt)
+        return {"symbol": symbol, "lot_size": lot, "source": "nse"}
+    except Exception as e:
+        lot = _STATIC_LOT_MAP.get(symbol)
+        if lot:
+            return {"symbol": symbol, "lot_size": lot, "source": "static"}
+        return {"symbol": symbol, "lot_size": None, "source": "unavailable", "error": str(e)}
+
+
+# ── Common lot sizes (fallback when NSE is unreachable) ──
+_STATIC_LOT_MAP: dict[str, int] = {
+    "NIFTY": 75, "BANKNIFTY": 30, "FINNIFTY": 40, "MIDCPNIFTY": 75,
+    "SENSEX": 10, "BANKEX": 15,
+    "RELIANCE": 250, "TCS": 175, "INFY": 300, "HDFCBANK": 550,
+    "ICICIBANK": 700, "SBIN": 1500, "WIPRO": 1500, "AXISBANK": 625,
+    "KOTAKBANK": 400, "LT": 175, "HINDUNILVR": 300, "ITC": 3200,
+    "BAJFINANCE": 125, "MARUTI": 25, "TITAN": 175, "ULTRACEMCO": 100,
+    "SUNPHARMA": 700, "HCLTECH": 700, "TATAMOTORS": 1425, "ADANIENT": 250,
+    "ADANIPORTS": 1250, "POWERGRID": 4700, "NTPC": 4500, "ONGC": 3850,
+    "COALINDIA": 4200, "BPCL": 3500, "TECHM": 600, "DIVISLAB": 150,
+    "DRREDDY": 125, "CIPLA": 650, "EICHERMOT": 175, "HEROMOTOCO": 300,
+    "BAJAJFINSV": 125, "ASIANPAINT": 200, "NESTLEIND": 50, "BRITANNIA": 100,
+    "DABUR": 2500, "PIDILITIND": 400, "GODREJCP": 500, "MARICO": 1200,
+    "COLPAL": 350, "BERGEPAINT": 1100, "HAVELLS": 500, "VOLTAS": 500,
+    "TATAPOWER": 3375, "TATACONSUM": 900, "TATASTEEL": 5500,
+    "HINDALCO": 2150, "JSWSTEEL": 1350, "VEDL": 2000, "SAIL": 6800,
+    "GRASIM": 475, "SHREECEM": 25, "AMBUJACEMENT": 2000, "ACC": 500,
+    "INDUSINDBK": 500, "FEDERALBNK": 5000, "IDFCFIRSTB": 5000,
+    "PNB": 8000, "CANBK": 2300, "BANKBARODA": 5850,
+    "ZOMATO": 4500, "NYKAA": 1500, "PAYTM": 2000, "POLICYBZR": 1100,
+    "BANDHANBNK": 1800, "RBLBANK": 5000, "IDBI": 7000, "YESBANK": 40000,
+    "AUBANK": 500, "DCBBANK": 3000, "SOUTHBANK": 15000, "UJJIVANSFB": 4000,
+    "EQUITASBNK": 5000, "CSBBANK": 2000, "IDFC": 8000,
+    "ABCAPITAL": 2800, "SBICARD": 500, "SBILIFE": 750, "HDFCLIFE": 1100,
+    "ICICIPRULI": 1500, "ICICIGI": 500, "LICI": 700, "STARHEALTH": 500,
+    "APOLLOHOSP": 250, "MAXHEALTH": 800, "FORTIS": 2000,
+    "AUROPHARMA": 650, "LUPIN": 650, "BIOCON": 2600, "ALKEM": 150,
+    "TORNTPHARM": 150, "GLAND": 375, "ABBOTINDIA": 50,
+    "MPHASIS": 250, "PERSISTENT": 250, "COFORGE": 200, "LTIM": 150,
+    "OFSS": 100, "KPITTECH": 1000,
+    "PIIND": 200, "DEEPAKNTR": 250, "TATACHEM": 500, "AARTIIND": 1000,
+    "APOLLOTYRE": 2600, "MRF": 10, "BALKRISHNA": 400, "CEAT": 400,
+    "GODREJPROP": 350, "DLF": 1500, "OBEROIRLTY": 500, "PRESTIGE": 800,
+    "DMART": 350, "TRENT": 350, "INDIGO": 350, "CONCOR": 1000,
+    "CUMMINSIND": 600, "BHARATFORG": 1000, "THERMAX": 350,
+    "DELHIVERY": 2475, "IRCTC": 875, "IRFC": 7600, "RVNL": 3600,
+    "HAL": 150, "BEL": 3700, "BHEL": 4500,
+    "MUTHOOTFIN": 375, "CHOLAFIN": 625,
+    "JUBLFOOD": 1250, "NAUKRI": 150, "INDHOTEL": 2400,
+}
+
+
+def _do_fetch_lot_size(
+    symbol:          str,
+    instrument_type: str,
+    entry_dt=None,   # datetime.date — trade/entry date  (= "from" param)
+    expiry_dt=None,  # datetime.date — expiry date       (= "to" + expiryDate param)
+) -> int:
+    """
+    Fetch NSE lot size via FH_MARKET_LOT from historicalOR/foCPV.
+
+    When entry_dt + expiry_dt are supplied, the call is:
+      from=entry_dt  to=expiry_dt  expiryDate=expiry_dt
+    which mirrors every other call in the app and is guaranteed to return data.
+
+    When dates are absent, falls back to auto-discovering the nearest
+    upcoming monthly expiry (last Thursday of current/next months).
+    """
+    from datetime import date, timedelta
+
+    session  = _get_oc_session()
+    _warm_up(session)
+    api_hdrs = {
+        "Accept":           "application/json, text/plain, */*",
+        "Referer":          "https://www.nseindia.com/market-data/equity-derivatives-watch",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    today = date.today()
+
+    def _try_fetch(from_d, to_d, exp_d):
+        """Single NSE call; returns lot size int or None."""
+        params = {
+            "from":           from_d.strftime("%d-%m-%Y"),
+            "to":             to_d.strftime("%d-%m-%Y"),
+            "instrumentType": instrument_type,
+            "symbol":         symbol,
+            "year":           str(exp_d.year),
+            "expiryDate":     exp_d.strftime("%d-%b-%Y").upper(),
+            "optionType":     "CE",
+            # NO strikePrice — NSE returns FH_MARKET_LOT in every row without it
+        }
+        try:
+            r = session.get(NSE_OC_URL, params=params, headers=api_hdrs, timeout=15)
+            if r.status_code != 200:
+                return None
+            for row in r.json().get("data", []):
+                lot = row.get("FH_MARKET_LOT")
+                if lot:
+                    return int(float(lot))
+        except Exception:
+            pass
+        return None
+
+    # ── Path A: caller supplied entry + expiry dates ──────────────────────
+    if entry_dt and expiry_dt:
+        lot = _try_fetch(entry_dt, expiry_dt, expiry_dt)
+        if lot:
+            return lot
+        # Fallback within Path A: widen window to full expiry month
+        month_start = date(expiry_dt.year, expiry_dt.month, 1)
+        lot = _try_fetch(month_start, expiry_dt, expiry_dt)
+        if lot:
+            return lot
+
+    # ── Path B: auto-discover nearest upcoming monthly expiry ─────────────
+    for months_ahead in [0, 1, 2, 3]:
+        target            = today + timedelta(days=30 * months_ahead)
+        expiry_candidates = _get_monthly_expiries(target.year, target.month)
+        for exp_candidate in reversed(expiry_candidates):
+            if months_ahead == 0 and exp_candidate < today:
+                continue
+            month_start = date(exp_candidate.year, exp_candidate.month, 1)
+            lot = _try_fetch(month_start, exp_candidate, exp_candidate)
+            if lot:
+                return lot
+
+    raise ValueError(f"Could not fetch lot size for {symbol} from NSE")
+
+
+def _get_monthly_expiries(year: int, month: int):
+    """Return list of Thursdays in a given month (NSE monthly expiry candidates)."""
+    from datetime import date, timedelta
+    thursdays = []
+    d = date(year, month, 1)
+    while d.month == month:
+        if d.weekday() == 3:  # Thursday = 3
+            thursdays.append(d)
+        d += timedelta(days=1)
+    return thursdays
+
+
 @router.post("/api/option-charts/fetch")
 async def oc_fetch(req: OcFetchRequest):
     fmt = "%d-%m-%Y"
