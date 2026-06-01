@@ -19,6 +19,7 @@ backtest_*.json
 indexes/
 storage/
 backtest_cache/
+data/
 
 # ── Python ──
 __pycache__/
