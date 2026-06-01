@@ -2038,6 +2038,23 @@ function buildExpPanel(e, symbol, shortStrike, longStrike, lotSize, numLots, idx
       </div>
     </div>
 
+    <!-- ── OPTION LEG CHARTS ── -->
+    <div class="chart-section">
+      <div class="section-title" style="margin-bottom:8px">
+        <span style="color:var(--red)">📉</span> Short CE ${shortStrike} — OHLC Price Chart
+        <span style="margin-left:8px;font-size:9px;color:var(--text2);font-weight:400;font-family:var(--font-mono)">Sold leg · close marks entry premium</span>
+      </div>
+      <div id="short-ohlc-chart-${idx}" style="height:280px"></div>
+    </div>
+
+    <div class="chart-section">
+      <div class="section-title" style="margin-bottom:8px">
+        <span style="color:var(--blue)">📈</span> Long CE ${longStrike} — OHLC Price Chart
+        <span style="margin-left:8px;font-size:9px;color:var(--text2);font-weight:400;font-family:var(--font-mono)">Bought leg · close marks entry premium</span>
+      </div>
+      <div id="long-ohlc-chart-${idx}" style="height:280px"></div>
+    </div>
+
     <!-- ── CHARTS ── -->
     <div class="chart-section">
       <div class="section-title">Daily P&L Progression</div>
@@ -2111,6 +2128,150 @@ function renderSpreadCharts(e, symbol, shortStrike, longStrike, idx) {
   const s      = e.stats;
   const pnlSer = e.pnl_series;
   const payoff = e.payoff;
+
+  // ── 0a. Short CE OHLC candlestick ──
+  const shortOhlc = e.short_ohlc || [];
+  if (shortOhlc.length) {
+    const sDates = shortOhlc.map(r => r.date);
+    const sOpen  = shortOhlc.map(r => r.open  ?? r.ltp);
+    const sHigh  = shortOhlc.map(r => r.high  ?? r.ltp);
+    const sLow   = shortOhlc.map(r => r.low   ?? r.ltp);
+    const sClose = shortOhlc.map(r => r.close ?? r.ltp);
+    const sVol   = shortOhlc.map(r => r.volume ?? 0);
+
+    const shortEntryPrem = e.short_entry_premium;
+    const shortEntryDate = e.entry_date;
+
+    Plotly.react('short-ohlc-chart-' + idx, [
+      // Candlestick
+      {
+        type: 'candlestick',
+        x: sDates, open: sOpen, high: sHigh, low: sLow, close: sClose,
+        name: `Short CE ${shortStrike}`,
+        increasing: { line: { color: '#00d97e', width: 1 }, fillcolor: 'rgba(0,217,126,0.6)' },
+        decreasing: { line: { color: '#ff3b5c', width: 1 }, fillcolor: 'rgba(255,59,92,0.6)' },
+        whiskerwidth: 0.3,
+        yaxis: 'y',
+      },
+      // Volume bars
+      {
+        type: 'bar', x: sDates, y: sVol, name: 'Volume',
+        marker: { color: 'rgba(61,155,255,0.18)', line: { color: 'rgba(61,155,255,0.35)', width: 0.5 } },
+        yaxis: 'y2', showlegend: false,
+      },
+      // Entry premium horizontal line
+      {
+        type: 'scatter', mode: 'lines',
+        x: [sDates[0], sDates[sDates.length - 1]],
+        y: [shortEntryPrem, shortEntryPrem],
+        name: `Entry ₹${shortEntryPrem}`,
+        line: { color: 'rgba(255,59,92,0.7)', width: 1.5, dash: 'dot' },
+        yaxis: 'y',
+      },
+      // Entry date marker
+      {
+        type: 'scatter', mode: 'markers+text',
+        x: [shortEntryDate], y: [shortEntryPrem],
+        text: [`Entry\n₹${shortEntryPrem}`], textposition: 'top right',
+        marker: { color: '#ff3b5c', size: 7, symbol: 'diamond' },
+        name: 'Entry point',
+        textfont: { size: 9, color: '#ff3b5c', family: "'JetBrains Mono',monospace" },
+        yaxis: 'y', showlegend: false,
+      },
+    ], {
+      paper_bgcolor: '#070f1c', plot_bgcolor: '#070f1c',
+      font: { family: "'JetBrains Mono',monospace", size: 11, color: '#7a91b0' },
+      margin: { l: 70, r: 60, t: 16, b: 50 },
+      xaxis: {
+        gridcolor: '#1a3150', rangebreaks: [{ bounds: ['sat', 'mon'] }],
+        showgrid: true,
+      },
+      yaxis: {
+        gridcolor: '#1a3150', tickprefix: '₹', side: 'left',
+        title: { text: 'Premium (₹)', font: { size: 10 } },
+      },
+      yaxis2: {
+        overlaying: 'y', side: 'right', showgrid: false,
+        title: { text: 'Volume', font: { size: 10 } },
+        tickformat: '.2s',
+      },
+      legend: { bgcolor: 'rgba(0,0,0,0)', font: { size: 10 } },
+      xaxis_rangeslider_visible: false,
+      autosize: true,
+    }, { responsive: true, scrollZoom: true, displayModeBar: false });
+  }
+
+  // ── 0b. Long CE OHLC candlestick ──
+  const longOhlc = e.long_ohlc || [];
+  if (longOhlc.length) {
+    const lDates = longOhlc.map(r => r.date);
+    const lOpen  = longOhlc.map(r => r.open  ?? r.ltp);
+    const lHigh  = longOhlc.map(r => r.high  ?? r.ltp);
+    const lLow   = longOhlc.map(r => r.low   ?? r.ltp);
+    const lClose = longOhlc.map(r => r.close ?? r.ltp);
+    const lVol   = longOhlc.map(r => r.volume ?? 0);
+
+    const longEntryPrem = e.long_entry_premium;
+    const longEntryDate = e.entry_date;
+
+    Plotly.react('long-ohlc-chart-' + idx, [
+      // Candlestick
+      {
+        type: 'candlestick',
+        x: lDates, open: lOpen, high: lHigh, low: lLow, close: lClose,
+        name: `Long CE ${longStrike}`,
+        increasing: { line: { color: '#00d97e', width: 1 }, fillcolor: 'rgba(0,217,126,0.6)' },
+        decreasing: { line: { color: '#ff3b5c', width: 1 }, fillcolor: 'rgba(255,59,92,0.6)' },
+        whiskerwidth: 0.3,
+        yaxis: 'y',
+      },
+      // Volume bars
+      {
+        type: 'bar', x: lDates, y: lVol, name: 'Volume',
+        marker: { color: 'rgba(61,155,255,0.18)', line: { color: 'rgba(61,155,255,0.35)', width: 0.5 } },
+        yaxis: 'y2', showlegend: false,
+      },
+      // Entry premium horizontal line
+      {
+        type: 'scatter', mode: 'lines',
+        x: [lDates[0], lDates[lDates.length - 1]],
+        y: [longEntryPrem, longEntryPrem],
+        name: `Entry ₹${longEntryPrem}`,
+        line: { color: 'rgba(61,155,255,0.7)', width: 1.5, dash: 'dot' },
+        yaxis: 'y',
+      },
+      // Entry date marker
+      {
+        type: 'scatter', mode: 'markers+text',
+        x: [longEntryDate], y: [longEntryPrem],
+        text: [`Entry\n₹${longEntryPrem}`], textposition: 'top right',
+        marker: { color: '#3d9bff', size: 7, symbol: 'diamond' },
+        name: 'Entry point',
+        textfont: { size: 9, color: '#3d9bff', family: "'JetBrains Mono',monospace" },
+        yaxis: 'y', showlegend: false,
+      },
+    ], {
+      paper_bgcolor: '#070f1c', plot_bgcolor: '#070f1c',
+      font: { family: "'JetBrains Mono',monospace", size: 11, color: '#7a91b0' },
+      margin: { l: 70, r: 60, t: 16, b: 50 },
+      xaxis: {
+        gridcolor: '#1a3150', rangebreaks: [{ bounds: ['sat', 'mon'] }],
+        showgrid: true,
+      },
+      yaxis: {
+        gridcolor: '#1a3150', tickprefix: '₹', side: 'left',
+        title: { text: 'Premium (₹)', font: { size: 10 } },
+      },
+      yaxis2: {
+        overlaying: 'y', side: 'right', showgrid: false,
+        title: { text: 'Volume', font: { size: 10 } },
+        tickformat: '.2s',
+      },
+      legend: { bgcolor: 'rgba(0,0,0,0)', font: { size: 10 } },
+      xaxis_rangeslider_visible: false,
+      autosize: true,
+    }, { responsive: true, scrollZoom: true, displayModeBar: false });
+  }
 
   // ── 1. Daily P&L line chart ──
   const pnlDates  = pnlSer.map(r => r.date);
