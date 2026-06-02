@@ -31,7 +31,7 @@ THESIS
    resistance. Theta decay + failed retest = profit.
 """
 
-import os, json, time, random, asyncio, threading, uuid, io, math
+import os, json, time, random, asyncio, threading, uuid, io
 from pathlib import Path
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
@@ -69,7 +69,6 @@ PROXIMITY_FILE = "proximity_alerts.json"
 SCAN_LOG_FILE  = "scan_log.json"
 TRACKER_FILE        = "strike_tracker.json"
 PREMIUM_ZONE_FILE   = "premium_zone.json"
-PNL_TRACKER_FILE    = "pnl_tracker.json"
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -201,11 +200,6 @@ DEFAULT_CONFIG = {
     "premium_min_vol_surge":       1.5,
     # How many OTM strikes above ATM to include in the option ladder
     "premium_otm_depth":           3,
-    # Lifetime High filter — skip stocks where current price is at/near 52-week high
-    # (price at new lifetime high = breakout mode, not a retest → CE selling is risky)
-    "lifetime_high_filter_enabled": True,
-    "lifetime_high_lookback_days":  252,   # ~1 trading year
-    "lifetime_high_buffer_pct":     1.0,   # skip if price >= 52w_high * (1 - buffer%)
 }
 
 def load_config() -> Dict:
@@ -243,8 +237,6 @@ load_scan_log  = lambda: _rj(SCAN_LOG_FILE, [])
 save_scan_log  = lambda d: _wj(SCAN_LOG_FILE, d)
 load_premium_zone  = lambda: _rj(PREMIUM_ZONE_FILE, [])
 save_premium_zone  = lambda d: _wj(PREMIUM_ZONE_FILE, d)
-load_pnl_tracker   = lambda: _rj(PNL_TRACKER_FILE, [])
-save_pnl_tracker   = lambda d: _wj(PNL_TRACKER_FILE, d)
 
 # ─────────────────────────────────────────────────────────────
 #  TELEGRAM
@@ -292,97 +284,6 @@ def now_ist_str() -> str:
 def compute_ema(values: np.ndarray, period: int) -> np.ndarray:
     """EMA via pandas ewm — matches standard charting tools."""
     return pd.Series(values, dtype=float).ewm(span=period, adjust=False).mean().values
-
-
-# ─────────────────────────────────────────────────────────────
-#  IMPLIED VOLATILITY (Black-Scholes Newton-Raphson)
-# ─────────────────────────────────────────────────────────────
-def _bs_call_price(S: float, K: float, T: float, r: float, sigma: float) -> float:
-    """Black-Scholes European call price."""
-    if T <= 0 or sigma <= 0:
-        return max(S - K, 0.0)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
-    from scipy.special import ndtr
-    return S * ndtr(d1) - K * math.exp(-r * T) * ndtr(d2)
-
-
-def _bs_vega(S: float, K: float, T: float, r: float, sigma: float) -> float:
-    """Black-Scholes vega (dC/dσ)."""
-    if T <= 0 or sigma <= 0:
-        return 1e-8
-    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
-    from scipy.special import ndtr
-    # pdf of standard normal
-    nd1 = math.exp(-0.5 * d1 * d1) / math.sqrt(2 * math.pi)
-    return S * nd1 * math.sqrt(T)
-
-
-def compute_iv(
-    spot: float,
-    strike: float,
-    ce_ltp: float,
-    expiry_str: str,          # "DD-Mon-YYYY"
-    risk_free_rate: float = 0.065,
-) -> Optional[float]:
-    """
-    Compute implied volatility (annualised, as a percentage) for a CE option
-    using Newton-Raphson on the Black-Scholes model.
-    Returns IV% (e.g. 32.5 for 32.5%) or None if it cannot be computed.
-    """
-    try:
-        if spot <= 0 or strike <= 0 or ce_ltp <= 0:
-            return None
-        expiry_dt = datetime.strptime(expiry_str, "%d-%b-%Y").date()
-        today     = date.today()
-        T = (expiry_dt - today).days / 365.0
-        if T <= 0:
-            return None
-
-        # Bounds check — intrinsic floor; can't back out IV if LTP < intrinsic
-        intrinsic = max(spot - strike, 0.0)
-        if ce_ltp <= intrinsic:
-            return None
-
-        # Newton-Raphson with fallback to bisection
-        sigma = 0.35  # initial guess 35%
-        for _ in range(100):
-            price = _bs_call_price(spot, strike, T, risk_free_rate, sigma)
-            vega  = _bs_vega(spot, strike, T, risk_free_rate, sigma)
-            diff  = price - ce_ltp
-            if abs(diff) < 1e-5:
-                break
-            if vega < 1e-8:
-                break
-            sigma -= diff / vega
-            sigma = max(0.001, min(sigma, 20.0))  # clamp 0.1% – 2000%
-
-        iv_pct = round(sigma * 100, 1)
-        return iv_pct if 1.0 <= iv_pct <= 500.0 else None
-    except Exception:
-        return None
-
-
-# ─────────────────────────────────────────────────────────────
-#  52-WEEK (LIFETIME) HIGH CHECK
-# ─────────────────────────────────────────────────────────────
-def get_lifetime_high(ticker: str, lookback_days: int = 252) -> Optional[float]:
-    """
-    Returns the highest intraday High over the past `lookback_days` calendar days.
-    Used to detect stocks trading at/near 52-week highs where CE selling is risky.
-    """
-    try:
-        end_dt   = date.today()
-        start_dt = end_dt - timedelta(days=lookback_days + 10)
-        hist = yf.Ticker(f"{ticker}.NS").history(
-            start=str(start_dt), end=str(end_dt), auto_adjust=True
-        )
-        if hist.empty or len(hist) < 5:
-            return None
-        return float(hist["High"].max())
-    except Exception as e:
-        print(f"[yf] Lifetime high error {ticker}: {e}")
-        return None
 
 # ─────────────────────────────────────────────────────────────
 #  NSE SESSION  (TTL-based proactive refresh)
@@ -817,38 +718,6 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
                     f"({lth_exclude}-{lth_lookback}d window)",
                     "info",
                 )
-    # ── CHECK 1b: 52-Week (Lifetime) High filter ─────────────────────────────
-    # Skip tickers where current price is at or near the 52-week high.
-    # A stock at its annual high is in breakout mode — no overhead resistance
-    # to reject price → CE selling thesis doesn't apply.
-    lth52_enabled = cfg.get("lifetime_high_filter_enabled", True)
-    lifetime_52w_high: Optional[float] = None
-    if lth52_enabled:
-        lth52_lookback = int(cfg.get("lifetime_high_lookback_days", 252))
-        lth52_buffer   = float(cfg.get("lifetime_high_buffer_pct", 1.0))
-        cur_p          = float(live_price if live_price is not None else closes[-1])
-
-        lifetime_52w_high = get_lifetime_high(ticker, lth52_lookback)
-        if lifetime_52w_high is not None and lifetime_52w_high > 0:
-            lth52_threshold = lifetime_52w_high * (1.0 - lth52_buffer / 100.0)
-            if cur_p >= lth52_threshold:
-                if job_id:
-                    job_log(
-                        job_id,
-                        f"{ticker} SKIP (52W-High): "
-                        f"price Rs{cur_p:.2f} >= {lth52_threshold:.2f} "
-                        f"(52w high Rs{lifetime_52w_high:.2f}, buffer {lth52_buffer}%) — breakout mode",
-                        "fail",
-                    )
-                return None
-            if job_id:
-                dist52 = (lifetime_52w_high - cur_p) / lifetime_52w_high * 100
-                job_log(
-                    job_id,
-                    f"{ticker} 52W-High OK: price Rs{cur_p:.2f} is {dist52:.1f}% "
-                    f"below 52w high Rs{lifetime_52w_high:.2f}",
-                    "info",
-                )
     ema_period  = int(cfg.get("ema_period", 9))
     ema_enabled = cfg.get("ema_filter_enabled", True)
     ema_values  = compute_ema(closes, ema_period)
@@ -1054,8 +923,6 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
         "breakdown_date":          dates[breakdown_idx].strftime("%Y-%m-%d"),
         # Previous-Pullup-High filter metadata (Check 1)
         "prev_pullup_high":        round(lifetime_high, 2) if lifetime_high else None,
-        # 52-week high metadata (Check 1b)
-        "lifetime_52w_high":       round(lifetime_52w_high, 2) if lifetime_52w_high else None,
     }
 
 
@@ -1100,13 +967,6 @@ def find_best_strike(candidate: Dict, cfg: Dict, job_id: str = "") -> Optional[D
         if job_id:
             job_log(job_id, f"{ticker} strike Rs{strike:.0f} CE LTP=0 (illiquid)", "fail")
         return None
-
-    # ── IMPLIED VOLATILITY ────────────────────────────────────────────────────
-    spot_price = float(candidate.get("today_close", 0) or strike * 0.97)
-    iv_pct = compute_iv(spot_price, strike, ce_ltp, expiry)
-    if job_id:
-        iv_str = f"{iv_pct:.1f}%" if iv_pct is not None else "N/A"
-        job_log(job_id, f"{ticker} IV={iv_str}  strike Rs{strike:.0f}  spot Rs{spot_price:.2f}", "info")
 
     ce_hist_high        = None
     ce_above_30d_status = "Unverified"
@@ -1234,14 +1094,11 @@ def find_best_strike(candidate: Dict, cfg: Dict, job_id: str = "") -> Optional[D
         "Days_Since_Surge_End": candidate["days_since_surge_end"],
         # Previous-Pullup-High filter metadata (Check 1)
         "Prev_Pullup_High":     candidate.get("prev_pullup_high"),
-        # Lifetime 52-week high metadata (Check 1b)
-        "Lifetime_52W_High":    candidate.get("lifetime_52w_high"),
         # Short CE leg  (Check 2 — primary sell leg)
         "Suggested_Strike":     strike,
         "Expiry":               expiry,
         "CE_LTP":               round(ce_ltp, 2),
         "CE_OI":                ce_oi,
-        "IV_Pct":               iv_pct,          # Implied Volatility %
         "CE_30d_High":          round(ce_hist_high, 2) if ce_hist_high else "N/A",
         "CE_Above_30d_High":    ce_above_30d_status,
         "Remark":               remark,
@@ -1933,10 +1790,6 @@ class ConfigUpdate(BaseModel):
     # Premium Sell Zone
     premium_min_vol_surge:            Optional[float] = None
     premium_otm_depth:                Optional[int]   = None
-    # Lifetime 52-week high filter
-    lifetime_high_filter_enabled:     Optional[bool]  = None
-    lifetime_high_lookback_days:      Optional[int]   = None
-    lifetime_high_buffer_pct:         Optional[float] = None
 
 class SpecificScreenRequest(BaseModel):
     tickers: List[str]
@@ -2192,132 +2045,6 @@ async def clear_premium_zone():
     """Clear saved Premium Zone results."""
     save_premium_zone([])
     return {"ok": True}
-
-
-# ─────────────────────────────────────────────────────────────
-#  P&L TRACKER ROUTES
-#  Tracks per-signal entry (CE sold) and marks-to-market daily.
-#  trade_id  = Ticker + "_" + Suggested_Strike + "_" + Expiry
-# ─────────────────────────────────────────────────────────────
-
-class PnLEntryRequest(BaseModel):
-    ticker:        str
-    strike:        float
-    expiry:        str               # "DD-Mon-YYYY"
-    entry_ltp:     float             # CE LTP when position was entered
-    lots:          Optional[int]     = 1
-    lot_size:      Optional[int]     = 1   # NSE lot size for the stock
-    notes:         Optional[str]     = ""
-
-class PnLMarkRequest(BaseModel):
-    trade_id: str
-    current_ltp: float               # live CE LTP for mark-to-market
-
-
-def _make_trade_id(ticker: str, strike: float, expiry: str) -> str:
-    return f"{ticker.upper()}_{int(strike)}_{expiry.replace(' ', '')}"
-
-
-def _mtm_pnl(entry_ltp: float, current_ltp: float, lots: int, lot_size: int) -> Dict:
-    """Return P&L metrics for a short CE position."""
-    pnl_per_unit  = entry_ltp - current_ltp      # short CE: profit when LTP falls
-    total_qty     = lots * lot_size
-    gross_pnl     = round(pnl_per_unit * total_qty, 2)
-    pnl_pct       = round((pnl_per_unit / entry_ltp) * 100, 2) if entry_ltp > 0 else 0.0
-    return {
-        "pnl_per_unit":  round(pnl_per_unit, 2),
-        "gross_pnl":     gross_pnl,
-        "pnl_pct":       pnl_pct,
-        "total_qty":     total_qty,
-    }
-
-
-@app.get("/api/pnl")
-async def get_pnl():
-    """Return all P&L tracker entries with live mark-to-market."""
-    trades = load_pnl_tracker()
-    # Attach latest CE LTP from yfinance fast_info if available
-    # (lightweight — no NSE call needed for mark-to-market approximation)
-    return trades
-
-
-@app.post("/api/pnl/entry")
-async def add_pnl_entry(req: PnLEntryRequest):
-    """Record a new trade entry (sell CE position)."""
-    trades   = load_pnl_tracker()
-    trade_id = _make_trade_id(req.ticker, req.strike, req.expiry)
-
-    # Upsert — if trade exists, update; else append
-    existing = next((t for t in trades if t["trade_id"] == trade_id), None)
-    entry = {
-        "trade_id":       trade_id,
-        "ticker":         req.ticker.upper(),
-        "strike":         req.strike,
-        "expiry":         req.expiry,
-        "entry_ltp":      req.entry_ltp,
-        "lots":           req.lots,
-        "lot_size":       req.lot_size,
-        "notes":          req.notes or "",
-        "entry_time":     now_ist_str(),
-        "status":         "open",
-        "exit_ltp":       None,
-        "exit_time":      None,
-        "mtm_ltp":        req.entry_ltp,
-        "mtm_time":       now_ist_str(),
-        **_mtm_pnl(req.entry_ltp, req.entry_ltp, req.lots or 1, req.lot_size or 1),
-    }
-    if existing:
-        trades = [entry if t["trade_id"] == trade_id else t for t in trades]
-    else:
-        trades.append(entry)
-
-    save_pnl_tracker(trades)
-    return entry
-
-
-@app.put("/api/pnl/{trade_id}/mark")
-async def mark_pnl(trade_id: str, req: PnLMarkRequest):
-    """Update mark-to-market LTP for an open trade."""
-    trades = load_pnl_tracker()
-    trade  = next((t for t in trades if t["trade_id"] == trade_id), None)
-    if not trade:
-        raise HTTPException(404, "Trade not found")
-
-    trade["mtm_ltp"]  = req.current_ltp
-    trade["mtm_time"] = now_ist_str()
-    trade.update(_mtm_pnl(trade["entry_ltp"], req.current_ltp,
-                           trade.get("lots", 1), trade.get("lot_size", 1)))
-
-    save_pnl_tracker(trades)
-    return trade
-
-
-@app.put("/api/pnl/{trade_id}/close")
-async def close_pnl_trade(trade_id: str, req: PnLMarkRequest):
-    """Mark a trade as closed (bought back CE) and lock P&L."""
-    trades = load_pnl_tracker()
-    trade  = next((t for t in trades if t["trade_id"] == trade_id), None)
-    if not trade:
-        raise HTTPException(404, "Trade not found")
-
-    trade["exit_ltp"]  = req.current_ltp
-    trade["exit_time"] = now_ist_str()
-    trade["status"]    = "closed"
-    trade["mtm_ltp"]   = req.current_ltp
-    trade["mtm_time"]  = now_ist_str()
-    trade.update(_mtm_pnl(trade["entry_ltp"], req.current_ltp,
-                           trade.get("lots", 1), trade.get("lot_size", 1)))
-
-    save_pnl_tracker(trades)
-    return trade
-
-
-@app.delete("/api/pnl/{trade_id}")
-async def delete_pnl_trade(trade_id: str):
-    """Remove a trade from the tracker."""
-    trades = [t for t in load_pnl_tracker() if t["trade_id"] != trade_id]
-    save_pnl_tracker(trades)
-    return {"ok": True, "remaining": len(trades)}
 
 
 # ─────────────────────────────────────────────────────────────

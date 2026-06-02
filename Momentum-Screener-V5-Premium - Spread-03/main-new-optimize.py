@@ -31,7 +31,8 @@ THESIS
    resistance. Theta decay + failed retest = profit.
 """
 
-import os, json, time, random, asyncio, threading, uuid, io, math
+import os, json, time, random, asyncio, threading, uuid, io
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
@@ -69,7 +70,6 @@ PROXIMITY_FILE = "proximity_alerts.json"
 SCAN_LOG_FILE  = "scan_log.json"
 TRACKER_FILE        = "strike_tracker.json"
 PREMIUM_ZONE_FILE   = "premium_zone.json"
-PNL_TRACKER_FILE    = "pnl_tracker.json"
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -201,11 +201,6 @@ DEFAULT_CONFIG = {
     "premium_min_vol_surge":       1.5,
     # How many OTM strikes above ATM to include in the option ladder
     "premium_otm_depth":           3,
-    # Lifetime High filter — skip stocks where current price is at/near 52-week high
-    # (price at new lifetime high = breakout mode, not a retest → CE selling is risky)
-    "lifetime_high_filter_enabled": True,
-    "lifetime_high_lookback_days":  252,   # ~1 trading year
-    "lifetime_high_buffer_pct":     1.0,   # skip if price >= 52w_high * (1 - buffer%)
 }
 
 def load_config() -> Dict:
@@ -243,8 +238,6 @@ load_scan_log  = lambda: _rj(SCAN_LOG_FILE, [])
 save_scan_log  = lambda d: _wj(SCAN_LOG_FILE, d)
 load_premium_zone  = lambda: _rj(PREMIUM_ZONE_FILE, [])
 save_premium_zone  = lambda d: _wj(PREMIUM_ZONE_FILE, d)
-load_pnl_tracker   = lambda: _rj(PNL_TRACKER_FILE, [])
-save_pnl_tracker   = lambda d: _wj(PNL_TRACKER_FILE, d)
 
 # ─────────────────────────────────────────────────────────────
 #  TELEGRAM
@@ -293,97 +286,6 @@ def compute_ema(values: np.ndarray, period: int) -> np.ndarray:
     """EMA via pandas ewm — matches standard charting tools."""
     return pd.Series(values, dtype=float).ewm(span=period, adjust=False).mean().values
 
-
-# ─────────────────────────────────────────────────────────────
-#  IMPLIED VOLATILITY (Black-Scholes Newton-Raphson)
-# ─────────────────────────────────────────────────────────────
-def _bs_call_price(S: float, K: float, T: float, r: float, sigma: float) -> float:
-    """Black-Scholes European call price."""
-    if T <= 0 or sigma <= 0:
-        return max(S - K, 0.0)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
-    from scipy.special import ndtr
-    return S * ndtr(d1) - K * math.exp(-r * T) * ndtr(d2)
-
-
-def _bs_vega(S: float, K: float, T: float, r: float, sigma: float) -> float:
-    """Black-Scholes vega (dC/dσ)."""
-    if T <= 0 or sigma <= 0:
-        return 1e-8
-    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
-    from scipy.special import ndtr
-    # pdf of standard normal
-    nd1 = math.exp(-0.5 * d1 * d1) / math.sqrt(2 * math.pi)
-    return S * nd1 * math.sqrt(T)
-
-
-def compute_iv(
-    spot: float,
-    strike: float,
-    ce_ltp: float,
-    expiry_str: str,          # "DD-Mon-YYYY"
-    risk_free_rate: float = 0.065,
-) -> Optional[float]:
-    """
-    Compute implied volatility (annualised, as a percentage) for a CE option
-    using Newton-Raphson on the Black-Scholes model.
-    Returns IV% (e.g. 32.5 for 32.5%) or None if it cannot be computed.
-    """
-    try:
-        if spot <= 0 or strike <= 0 or ce_ltp <= 0:
-            return None
-        expiry_dt = datetime.strptime(expiry_str, "%d-%b-%Y").date()
-        today     = date.today()
-        T = (expiry_dt - today).days / 365.0
-        if T <= 0:
-            return None
-
-        # Bounds check — intrinsic floor; can't back out IV if LTP < intrinsic
-        intrinsic = max(spot - strike, 0.0)
-        if ce_ltp <= intrinsic:
-            return None
-
-        # Newton-Raphson with fallback to bisection
-        sigma = 0.35  # initial guess 35%
-        for _ in range(100):
-            price = _bs_call_price(spot, strike, T, risk_free_rate, sigma)
-            vega  = _bs_vega(spot, strike, T, risk_free_rate, sigma)
-            diff  = price - ce_ltp
-            if abs(diff) < 1e-5:
-                break
-            if vega < 1e-8:
-                break
-            sigma -= diff / vega
-            sigma = max(0.001, min(sigma, 20.0))  # clamp 0.1% – 2000%
-
-        iv_pct = round(sigma * 100, 1)
-        return iv_pct if 1.0 <= iv_pct <= 500.0 else None
-    except Exception:
-        return None
-
-
-# ─────────────────────────────────────────────────────────────
-#  52-WEEK (LIFETIME) HIGH CHECK
-# ─────────────────────────────────────────────────────────────
-def get_lifetime_high(ticker: str, lookback_days: int = 252) -> Optional[float]:
-    """
-    Returns the highest intraday High over the past `lookback_days` calendar days.
-    Used to detect stocks trading at/near 52-week highs where CE selling is risky.
-    """
-    try:
-        end_dt   = date.today()
-        start_dt = end_dt - timedelta(days=lookback_days + 10)
-        hist = yf.Ticker(f"{ticker}.NS").history(
-            start=str(start_dt), end=str(end_dt), auto_adjust=True
-        )
-        if hist.empty or len(hist) < 5:
-            return None
-        return float(hist["High"].max())
-    except Exception as e:
-        print(f"[yf] Lifetime high error {ticker}: {e}")
-        return None
-
 # ─────────────────────────────────────────────────────────────
 #  NSE SESSION  (TTL-based proactive refresh)
 # ─────────────────────────────────────────────────────────────
@@ -420,9 +322,30 @@ def reset_nse_session():
         _nse_session         = None
         _nse_session_created = None
 
+# Adaptive NSE throttle — tracks consecutive 429/403 responses.
+# If NSE starts rate-limiting, sleeps scale up automatically.
+_nse_backoff = 0
+_nse_backoff_lock = threading.Lock()
+
+def _nse_ok():
+    global _nse_backoff
+    with _nse_backoff_lock:
+        _nse_backoff = max(0, _nse_backoff - 1)
+
+def _nse_hit():
+    global _nse_backoff
+    with _nse_backoff_lock:
+        _nse_backoff = min(_nse_backoff + 3, 12)
+
+def _nse_sleep(base_lo: float, base_hi: float):
+    """Sleep with exponential backoff if NSE has been returning errors."""
+    with _nse_backoff_lock:
+        b = _nse_backoff
+    extra = b * 2.0
+    time.sleep(random.uniform(base_lo + extra, base_hi + extra))
+
 # ─────────────────────────────────────────────────────────────
-#  NSE OPTION CHAIN
-# ─────────────────────────────────────────────────────────────
+
 def fetch_option_chain(ticker: str) -> Tuple[Optional[Dict], Optional[str]]:
     session = get_nse_session()
     if session is None:
@@ -433,10 +356,12 @@ def fetch_option_chain(ticker: str) -> Tuple[Optional[Dict], Optional[str]]:
             timeout=12,
         )
         if r.status_code in (429, 403):
+            _nse_hit()
             reset_nse_session()
             return None, None
         if r.status_code != 200 or not r.text.strip().startswith("{"):
             return None, None
+        _nse_ok()
         d = r.json()
         expiries = d.get("expiryDates", []) or d.get("records", {}).get("expiryDates", [])
         if not expiries:
@@ -459,7 +384,7 @@ def fetch_option_chain(ticker: str) -> Tuple[Optional[Dict], Optional[str]]:
         print(f"[NSE] Expiry error {ticker}: {e}")
         return None, None
 
-    time.sleep(random.uniform(1.0, 2.0))
+    _nse_sleep(0.5, 1.0)  # adaptive: scales up automatically if 429s occur
 
     try:
         r2 = session.get(
@@ -468,10 +393,12 @@ def fetch_option_chain(ticker: str) -> Tuple[Optional[Dict], Optional[str]]:
             timeout=15,
         )
         if r2.status_code in (429, 403):
+            _nse_hit()
             reset_nse_session()
             return None, None
         if r2.status_code != 200 or not r2.text.strip().startswith("{"):
             return None, None
+        _nse_ok()
         records = r2.json().get("filtered", {}).get("data", [])
         strike_map: Dict[float, Dict] = {}
         for rec in records:
@@ -489,11 +416,23 @@ def fetch_option_chain(ticker: str) -> Tuple[Optional[Dict], Optional[str]]:
 # ─────────────────────────────────────────────────────────────
 #  YFINANCE HELPERS
 # ─────────────────────────────────────────────────────────────
-def get_price_history(ticker: str, days: int) -> Optional[pd.DataFrame]:
+# ── Per-scan yfinance cache ──────────────────────────────────────────────────
+# Within a single scan job we fetch each ticker once (120 days — enough for
+# both the short lookback AND the prev-pullup-high window).  Subsequent calls
+# with smaller `days` values are satisfied from the cache by slicing.
+# The cache is reset at the start of every scan job (see run_screen_job).
+_yf_cache: Dict[str, pd.DataFrame] = {}
+_yf_cache_lock = threading.Lock()
+
+# Maximum days we ever need in one call (prev_high_lookback_days default=120)
+_YF_FETCH_DAYS = 135   # 120 + 15 buffer
+
+def _fetch_and_cache(ticker: str) -> Optional[pd.DataFrame]:
+    """Fetch 120d of history for ticker, store in cache, return full frame."""
     try:
         now_ist  = datetime.now(IST)
         end_dt   = (now_ist + timedelta(days=1)).date()
-        start_dt = (now_ist - timedelta(days=days + 15)).date()
+        start_dt = (now_ist - timedelta(days=_YF_FETCH_DAYS)).date()
         hist = yf.Ticker(f"{ticker}.NS").history(
             start=str(start_dt), end=str(end_dt), auto_adjust=True
         )
@@ -504,17 +443,40 @@ def get_price_history(ticker: str, days: int) -> Optional[pd.DataFrame]:
         hist.index = hist.index.tz_convert(IST)
         hist = hist.sort_index()
         hist = hist[hist.index.date <= now_ist.date()]
+        with _yf_cache_lock:
+            _yf_cache[ticker] = hist
         return hist
     except Exception as e:
         print(f"[yf] History error {ticker}: {e}")
         return None
 
+def get_price_history(ticker: str, days: int) -> Optional[pd.DataFrame]:
+    """Return price history for `days` lookback. Uses per-scan cache."""
+    with _yf_cache_lock:
+        cached = _yf_cache.get(ticker)
+    if cached is None:
+        cached = _fetch_and_cache(ticker)
+    if cached is None:
+        return None
+    # Slice to requested window
+    now_ist  = datetime.now(IST)
+    start_dt = (now_ist - timedelta(days=days + 15)).date()
+    sliced   = cached[cached.index.date >= start_dt]
+    return sliced if not sliced.empty else None
+
 def get_current_price(ticker: str) -> Optional[float]:
     try:
         p = yf.Ticker(f"{ticker}.NS").fast_info.last_price
-        return float(p) if p else None
+        if p:
+            return float(p)
     except Exception:
-        return None
+        pass
+    # Fallback: use last close from cache (avoids extra HTTP during bulk scan)
+    with _yf_cache_lock:
+        cached = _yf_cache.get(ticker)
+    if cached is not None and not cached.empty:
+        return float(cached["Close"].iloc[-1])
+    return None
 
 def get_previous_pullup_high(
     ticker: str,
@@ -522,33 +484,31 @@ def get_previous_pullup_high(
     exclude_recent_days: int = 20,
 ) -> Optional[float]:
     """
-    Returns the highest intraday High in the "prior window":
+    Returns the highest intraday High in the 'prior window':
         from  (today - lookback_days)
         to    (today - exclude_recent_days)
 
-    This captures the last significant pullup/swing high that the stock
-    reached BEFORE the current surge — the prior resistance ceiling.
-
-    The `exclude_recent_days` gap skips the recent surge/breakdown period
-    so the current move doesn't self-report as the "previous high."
-
-    Example — HINDALCO (as of May 2026):
-        exclude_recent_days = 20  →  window ends ~Apr 14
-        lookback_days       = 120 →  window starts ~Jan 5
-        Jan 29 peak (~985) falls inside this window → returned as prior high.
-        Current price ~1,042 >= 985 × 0.995 → filter fires → SKIP.
+    Uses the per-scan yfinance cache — NO second HTTP call.
     """
     try:
         end_dt   = date.today() - timedelta(days=exclude_recent_days)
         start_dt = date.today() - timedelta(days=lookback_days)
         if end_dt <= start_dt:
             return None
-        hist = yf.Ticker(f"{ticker}.NS").history(
-            start=str(start_dt), end=str(end_dt), auto_adjust=True
-        )
-        if hist.empty or len(hist) < 3:
+        # Pull from cache (already fetched by get_price_history)
+        with _yf_cache_lock:
+            hist = _yf_cache.get(ticker)
+        if hist is None:
+            hist = _fetch_and_cache(ticker)
+        if hist is None:
             return None
-        return float(hist["High"].max())
+        window = hist[
+            (hist.index.date >= start_dt) &
+            (hist.index.date <= end_dt)
+        ]
+        if window.empty or len(window) < 3:
+            return None
+        return float(window["High"].max())
     except Exception as e:
         print(f"[yf] Previous pullup high error {ticker}: {e}")
         return None
@@ -817,38 +777,6 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
                     f"({lth_exclude}-{lth_lookback}d window)",
                     "info",
                 )
-    # ── CHECK 1b: 52-Week (Lifetime) High filter ─────────────────────────────
-    # Skip tickers where current price is at or near the 52-week high.
-    # A stock at its annual high is in breakout mode — no overhead resistance
-    # to reject price → CE selling thesis doesn't apply.
-    lth52_enabled = cfg.get("lifetime_high_filter_enabled", True)
-    lifetime_52w_high: Optional[float] = None
-    if lth52_enabled:
-        lth52_lookback = int(cfg.get("lifetime_high_lookback_days", 252))
-        lth52_buffer   = float(cfg.get("lifetime_high_buffer_pct", 1.0))
-        cur_p          = float(live_price if live_price is not None else closes[-1])
-
-        lifetime_52w_high = get_lifetime_high(ticker, lth52_lookback)
-        if lifetime_52w_high is not None and lifetime_52w_high > 0:
-            lth52_threshold = lifetime_52w_high * (1.0 - lth52_buffer / 100.0)
-            if cur_p >= lth52_threshold:
-                if job_id:
-                    job_log(
-                        job_id,
-                        f"{ticker} SKIP (52W-High): "
-                        f"price Rs{cur_p:.2f} >= {lth52_threshold:.2f} "
-                        f"(52w high Rs{lifetime_52w_high:.2f}, buffer {lth52_buffer}%) — breakout mode",
-                        "fail",
-                    )
-                return None
-            if job_id:
-                dist52 = (lifetime_52w_high - cur_p) / lifetime_52w_high * 100
-                job_log(
-                    job_id,
-                    f"{ticker} 52W-High OK: price Rs{cur_p:.2f} is {dist52:.1f}% "
-                    f"below 52w high Rs{lifetime_52w_high:.2f}",
-                    "info",
-                )
     ema_period  = int(cfg.get("ema_period", 9))
     ema_enabled = cfg.get("ema_filter_enabled", True)
     ema_values  = compute_ema(closes, ema_period)
@@ -1054,8 +982,6 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
         "breakdown_date":          dates[breakdown_idx].strftime("%Y-%m-%d"),
         # Previous-Pullup-High filter metadata (Check 1)
         "prev_pullup_high":        round(lifetime_high, 2) if lifetime_high else None,
-        # 52-week high metadata (Check 1b)
-        "lifetime_52w_high":       round(lifetime_52w_high, 2) if lifetime_52w_high else None,
     }
 
 
@@ -1101,39 +1027,21 @@ def find_best_strike(candidate: Dict, cfg: Dict, job_id: str = "") -> Optional[D
             job_log(job_id, f"{ticker} strike Rs{strike:.0f} CE LTP=0 (illiquid)", "fail")
         return None
 
-    # ── IMPLIED VOLATILITY ────────────────────────────────────────────────────
-    spot_price = float(candidate.get("today_close", 0) or strike * 0.97)
-    iv_pct = compute_iv(spot_price, strike, ce_ltp, expiry)
-    if job_id:
-        iv_str = f"{iv_pct:.1f}%" if iv_pct is not None else "N/A"
-        job_log(job_id, f"{ticker} IV={iv_str}  strike Rs{strike:.0f}  spot Rs{spot_price:.2f}", "info")
-
     ce_hist_high        = None
     ce_above_30d_status = "Unverified"
     nse_hist_calls      = 0
     remark              = "Unverified 30d High"
 
-    if cfg.get("ce_above_historical_high", True):
-        ce_hist_high, nse_hist_calls = get_ce_historical_high(
-            ticker, strike, expiry, cfg.get("ce_history_days", 30)
-        )
-        if ce_hist_high is not None:
-            if ce_ltp <= ce_hist_high:
-                ce_above_30d_status = False
-                remark = "CE Below 30d High"
-                if job_id:
-                    job_log(job_id,
-                        f"{ticker} CE LTP Rs{ce_ltp} <= 30d high Rs{ce_hist_high} -- included with caution",
-                        "warn")
-            else:
-                ce_above_30d_status = True
-                remark = "CE at New High"
-                if job_id:
-                    job_log(job_id,
-                        f"{ticker} CE LTP Rs{ce_ltp} > 30d high Rs{ce_hist_high} -- strong signal",
-                        "signal")
-    else:
+    # ── CE historical-high check: deferred during bulk scan ──────────────────
+    # During a scan of 200+ tickers this check adds 1–3s per candidate (one
+    # extra NSE HTTP call + sleep).  We skip it here and mark CE_Hist_Checked=False.
+    # The check runs on-demand when the user opens a signal's detail modal
+    # (POST /api/signals/{ticker}/ce-check).  If ce_above_historical_high is
+    # disabled in settings the check never runs at all.
+    ce_filter_enabled = cfg.get("ce_above_historical_high", True)
+    if not ce_filter_enabled:
         remark = "check disabled"
+    # else: remains "Unverified 30d High" — deferred
 
     if job_id:
         job_log(job_id,
@@ -1234,18 +1142,16 @@ def find_best_strike(candidate: Dict, cfg: Dict, job_id: str = "") -> Optional[D
         "Days_Since_Surge_End": candidate["days_since_surge_end"],
         # Previous-Pullup-High filter metadata (Check 1)
         "Prev_Pullup_High":     candidate.get("prev_pullup_high"),
-        # Lifetime 52-week high metadata (Check 1b)
-        "Lifetime_52W_High":    candidate.get("lifetime_52w_high"),
         # Short CE leg  (Check 2 — primary sell leg)
         "Suggested_Strike":     strike,
         "Expiry":               expiry,
         "CE_LTP":               round(ce_ltp, 2),
         "CE_OI":                ce_oi,
-        "IV_Pct":               iv_pct,          # Implied Volatility %
         "CE_30d_High":          round(ce_hist_high, 2) if ce_hist_high else "N/A",
         "CE_Above_30d_High":    ce_above_30d_status,
         "Remark":               remark,
         "NSE_Hist_Calls":       nse_hist_calls,
+        "CE_Hist_Checked":      False,   # set True after on-demand check
         # Bear Call Spread — hedge (buy) leg  (Check 2)
         # All None when spread disabled or no liquid hedge found.
         "BCS_Hedge_Strike":     hedge_strike,
@@ -1507,34 +1413,109 @@ def prune_stale_signals(signals: List[Dict], cfg: Dict) -> Tuple[List[Dict], int
 #  SCREEN JOB
 # ─────────────────────────────────────────────────────────────
 def run_screen_job(tickers: List[str], cfg: Dict, job_id: str):
-    signals   = []
+    """
+    Optimised scan pipeline for 200+ tickers.
+
+    Phase 1 — Parallel yfinance prefetch (ThreadPoolExecutor).
+              All tickers fetched concurrently; results stored in _yf_cache.
+              yfinance/Yahoo has no meaningful rate limit for equity history.
+
+    Phase 2 — Parallel surge detection (CPU + cache reads, no IO).
+              check_surge_and_loss() is now pure-memory after Phase 1.
+              Live price (fast_info) calls are also batched here.
+
+    Phase 3 — Sequential NSE option-chain calls with polite jitter.
+              NSE session is shared and rate-sensitive; we keep one call
+              at a time with the existing sleep pattern.  This is where
+              most of the remaining elapsed time goes for candidates only
+              (~5–15% of tickers typically qualify as candidates).
+    """
+    global _yf_cache
     total     = len(tickers)
+    signals   = []
     nse_calls = 0
 
-    job_log(job_id, f"Starting scan of {total} tickers...", "info")
+    job_log(job_id, f"Starting scan of {total} tickers (parallel prefetch)…", "info")
 
-    for idx, ticker in enumerate(tickers):
-        job_progress(job_id, idx, total, ticker)
-        candidate = check_surge_and_loss(ticker, cfg, job_id)
-        if candidate is None:
-            time.sleep(random.uniform(0.1, 0.3))
-            continue
+    # ── Reset per-scan cache ─────────────────────────────────────────────────
+    with _yf_cache_lock:
+        _yf_cache = {}
 
-        time.sleep(random.uniform(3.0, 5.0))
+    # ── PHASE 1: Parallel yfinance prefetch ─────────────────────────────────
+    # Fetch up to 16 tickers concurrently.  yfinance handles its own HTTP
+    # pooling; 16 workers is a sweet spot — more workers don't help much
+    # because each call is a single HTTP round-trip (~0.5s).
+    PREFETCH_WORKERS = min(16, total)
+    job_log(job_id, f"Phase 1 — prefetching {total} tickers ({PREFETCH_WORKERS} workers)…", "info")
+
+    prefetch_done = 0
+    with ThreadPoolExecutor(max_workers=PREFETCH_WORKERS) as pool:
+        future_to_ticker = {pool.submit(_fetch_and_cache, t): t for t in tickers}
+        for future in as_completed(future_to_ticker):
+            t = future_to_ticker[future]
+            prefetch_done += 1
+            try:
+                result = future.result()
+                if result is None:
+                    job_log(job_id, f"{t} — no price history", "fail")
+            except Exception as exc:
+                job_log(job_id, f"{t} prefetch error: {exc}", "fail")
+            job_progress(job_id, prefetch_done, total, t)
+
+    job_log(job_id, f"Phase 1 complete — {len(_yf_cache)}/{total} tickers cached", "info")
+
+    # ── PHASE 2: Parallel surge detection ───────────────────────────────────
+    # All data is now in _yf_cache; check_surge_and_loss() only reads memory.
+    # Live price calls (fast_info) are lightweight but still IO — batch at 8.
+    SURGE_WORKERS = min(8, len(_yf_cache))
+    job_log(job_id, f"Phase 2 — surge detection ({SURGE_WORKERS} workers)…", "info")
+
+    candidates: List[Dict] = []
+    surge_done  = 0
+    cached_tickers = list(_yf_cache.keys())
+
+    with ThreadPoolExecutor(max_workers=SURGE_WORKERS) as pool:
+        future_to_ticker = {
+            pool.submit(check_surge_and_loss, t, cfg, job_id): t
+            for t in cached_tickers
+        }
+        for future in as_completed(future_to_ticker):
+            t = future_to_ticker[future]
+            surge_done += 1
+            try:
+                candidate = future.result()
+                if candidate is not None:
+                    candidates.append(candidate)
+            except Exception as exc:
+                job_log(job_id, f"{t} surge-check error: {exc}", "fail")
+            job_progress(job_id, total + surge_done, total * 2, t)
+
+    job_log(job_id,
+        f"Phase 2 complete — {len(candidates)} candidate(s) from {len(cached_tickers)} cached tickers",
+        "info")
+
+    # ── PHASE 3: Sequential NSE option-chain calls (rate-limit safe) ─────────
+    # NSE uses a shared session with cookies; concurrent requests get 403/429.
+    # Keep one call at a time with polite jitter — same as before.
+    job_log(job_id, f"Phase 3 — NSE option chain for {len(candidates)} candidate(s)…", "info")
+
+    for idx, candidate in enumerate(candidates):
+        ticker = candidate["ticker"]
+        job_progress(job_id, total * 2 + idx, total * 2 + len(candidates), ticker)
+        _nse_sleep(1.5, 2.5)   # adaptive: scales if NSE starts rate-limiting
         signal = find_best_strike(candidate, cfg, job_id)
         nse_calls += 2
         if signal is None:
+            time.sleep(random.uniform(0.5, 1.0))
             continue
-
         signals.append(signal)
-        time.sleep(random.uniform(2.0, 4.0))
+        _nse_sleep(1.0, 2.0)
 
-    # ── Update Gate 2 state for all signals (including newly found ones) ──
+    # ── Gate 2, prune, merge ─────────────────────────────────────────────────
     gate2_new = update_sell_zone_gates(cfg)
     if gate2_new:
         job_log(job_id, f"Gate 2 newly confirmed for {gate2_new} signal(s)", "info")
 
-    # Prune stale then merge
     existing, pruned = prune_stale_signals(load_signals(), cfg)
     if pruned:
         job_log(job_id, f"Pruned {pruned} stale signal(s) (>{cfg.get('max_signal_age_days',5)}d)", "info")
@@ -1547,7 +1528,6 @@ def run_screen_job(tickers: List[str], cfg: Dict, job_id: str):
             seen.add(s["Ticker"])
             added += 1
         else:
-            # Refresh signal but PRESERVE Gate 2 sticky state
             old = next((ex for ex in existing if ex["Ticker"] == s["Ticker"]), None)
             if old:
                 s["Sell_Zone_EMA_Confirmed"]    = old.get("Sell_Zone_EMA_Confirmed", False)
@@ -1566,9 +1546,13 @@ def run_screen_job(tickers: List[str], cfg: Dict, job_id: str):
     save_scan_log(log[-100:])
 
     job_log(job_id,
-        f"Done -- {len(signals)} signal(s) found, {added} new, {pruned} pruned.", "info")
+        f"Done — {len(signals)} signal(s) found, {added} new, {pruned} pruned.", "info")
     job_progress(job_id, total, total, "")
     job_done(job_id, signals)
+
+    # Clear cache after job to free memory
+    with _yf_cache_lock:
+        _yf_cache = {}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1933,10 +1917,6 @@ class ConfigUpdate(BaseModel):
     # Premium Sell Zone
     premium_min_vol_surge:            Optional[float] = None
     premium_otm_depth:                Optional[int]   = None
-    # Lifetime 52-week high filter
-    lifetime_high_filter_enabled:     Optional[bool]  = None
-    lifetime_high_lookback_days:      Optional[int]   = None
-    lifetime_high_buffer_pct:         Optional[float] = None
 
 class SpecificScreenRequest(BaseModel):
     tickers: List[str]
@@ -2046,6 +2026,61 @@ async def remove_signal(ticker: str):
     sigs = [s for s in load_signals() if s["Ticker"] != ticker.upper()]
     save_signals(sigs)
     return {"ok": True, "remaining": len(sigs)}
+
+
+@app.post("/api/signals/{ticker}/ce-check")
+async def run_ce_check(ticker: str):
+    """
+    On-demand CE historical-high check for a single signal.
+    Called from the detail modal so the bulk scan doesn't pay this cost.
+    """
+    ticker = ticker.upper()
+    sigs   = load_signals()
+    sig    = next((s for s in sigs if s["Ticker"] == ticker), None)
+    if not sig:
+        raise HTTPException(404, f"Signal {ticker} not found")
+
+    cfg    = load_config()
+    if not cfg.get("ce_above_historical_high", True):
+        return {"ticker": ticker, "remark": "check disabled", "ce_30d_high": None}
+
+    strike = sig.get("Suggested_Strike")
+    expiry = sig.get("Expiry")
+    ce_ltp = sig.get("CE_LTP", 0)
+    if not strike or not expiry:
+        raise HTTPException(400, "Signal missing strike or expiry")
+
+    ce_hist_high, _ = await asyncio.to_thread(
+        get_ce_historical_high, ticker, strike, expiry, cfg.get("ce_history_days", 30)
+    )
+
+    if ce_hist_high is None:
+        remark = "Unverified 30d High"
+        status = "Unverified"
+    elif ce_ltp <= ce_hist_high:
+        remark = "CE Below 30d High"
+        status = False
+    else:
+        remark = "CE at New High"
+        status = True
+
+    # Persist result back to signal
+    for s in sigs:
+        if s["Ticker"] == ticker:
+            s["CE_30d_High"]       = round(ce_hist_high, 2) if ce_hist_high else "N/A"
+            s["CE_Above_30d_High"] = status
+            s["Remark"]            = remark
+            s["CE_Hist_Checked"]   = True
+            break
+    save_signals(sigs)
+
+    return {
+        "ticker":       ticker,
+        "ce_ltp":       ce_ltp,
+        "ce_30d_high":  round(ce_hist_high, 2) if ce_hist_high else None,
+        "remark":       remark,
+        "status":       status,
+    }
 
 @app.get("/api/proximity")
 async def get_proximity():
@@ -2192,132 +2227,6 @@ async def clear_premium_zone():
     """Clear saved Premium Zone results."""
     save_premium_zone([])
     return {"ok": True}
-
-
-# ─────────────────────────────────────────────────────────────
-#  P&L TRACKER ROUTES
-#  Tracks per-signal entry (CE sold) and marks-to-market daily.
-#  trade_id  = Ticker + "_" + Suggested_Strike + "_" + Expiry
-# ─────────────────────────────────────────────────────────────
-
-class PnLEntryRequest(BaseModel):
-    ticker:        str
-    strike:        float
-    expiry:        str               # "DD-Mon-YYYY"
-    entry_ltp:     float             # CE LTP when position was entered
-    lots:          Optional[int]     = 1
-    lot_size:      Optional[int]     = 1   # NSE lot size for the stock
-    notes:         Optional[str]     = ""
-
-class PnLMarkRequest(BaseModel):
-    trade_id: str
-    current_ltp: float               # live CE LTP for mark-to-market
-
-
-def _make_trade_id(ticker: str, strike: float, expiry: str) -> str:
-    return f"{ticker.upper()}_{int(strike)}_{expiry.replace(' ', '')}"
-
-
-def _mtm_pnl(entry_ltp: float, current_ltp: float, lots: int, lot_size: int) -> Dict:
-    """Return P&L metrics for a short CE position."""
-    pnl_per_unit  = entry_ltp - current_ltp      # short CE: profit when LTP falls
-    total_qty     = lots * lot_size
-    gross_pnl     = round(pnl_per_unit * total_qty, 2)
-    pnl_pct       = round((pnl_per_unit / entry_ltp) * 100, 2) if entry_ltp > 0 else 0.0
-    return {
-        "pnl_per_unit":  round(pnl_per_unit, 2),
-        "gross_pnl":     gross_pnl,
-        "pnl_pct":       pnl_pct,
-        "total_qty":     total_qty,
-    }
-
-
-@app.get("/api/pnl")
-async def get_pnl():
-    """Return all P&L tracker entries with live mark-to-market."""
-    trades = load_pnl_tracker()
-    # Attach latest CE LTP from yfinance fast_info if available
-    # (lightweight — no NSE call needed for mark-to-market approximation)
-    return trades
-
-
-@app.post("/api/pnl/entry")
-async def add_pnl_entry(req: PnLEntryRequest):
-    """Record a new trade entry (sell CE position)."""
-    trades   = load_pnl_tracker()
-    trade_id = _make_trade_id(req.ticker, req.strike, req.expiry)
-
-    # Upsert — if trade exists, update; else append
-    existing = next((t for t in trades if t["trade_id"] == trade_id), None)
-    entry = {
-        "trade_id":       trade_id,
-        "ticker":         req.ticker.upper(),
-        "strike":         req.strike,
-        "expiry":         req.expiry,
-        "entry_ltp":      req.entry_ltp,
-        "lots":           req.lots,
-        "lot_size":       req.lot_size,
-        "notes":          req.notes or "",
-        "entry_time":     now_ist_str(),
-        "status":         "open",
-        "exit_ltp":       None,
-        "exit_time":      None,
-        "mtm_ltp":        req.entry_ltp,
-        "mtm_time":       now_ist_str(),
-        **_mtm_pnl(req.entry_ltp, req.entry_ltp, req.lots or 1, req.lot_size or 1),
-    }
-    if existing:
-        trades = [entry if t["trade_id"] == trade_id else t for t in trades]
-    else:
-        trades.append(entry)
-
-    save_pnl_tracker(trades)
-    return entry
-
-
-@app.put("/api/pnl/{trade_id}/mark")
-async def mark_pnl(trade_id: str, req: PnLMarkRequest):
-    """Update mark-to-market LTP for an open trade."""
-    trades = load_pnl_tracker()
-    trade  = next((t for t in trades if t["trade_id"] == trade_id), None)
-    if not trade:
-        raise HTTPException(404, "Trade not found")
-
-    trade["mtm_ltp"]  = req.current_ltp
-    trade["mtm_time"] = now_ist_str()
-    trade.update(_mtm_pnl(trade["entry_ltp"], req.current_ltp,
-                           trade.get("lots", 1), trade.get("lot_size", 1)))
-
-    save_pnl_tracker(trades)
-    return trade
-
-
-@app.put("/api/pnl/{trade_id}/close")
-async def close_pnl_trade(trade_id: str, req: PnLMarkRequest):
-    """Mark a trade as closed (bought back CE) and lock P&L."""
-    trades = load_pnl_tracker()
-    trade  = next((t for t in trades if t["trade_id"] == trade_id), None)
-    if not trade:
-        raise HTTPException(404, "Trade not found")
-
-    trade["exit_ltp"]  = req.current_ltp
-    trade["exit_time"] = now_ist_str()
-    trade["status"]    = "closed"
-    trade["mtm_ltp"]   = req.current_ltp
-    trade["mtm_time"]  = now_ist_str()
-    trade.update(_mtm_pnl(trade["entry_ltp"], req.current_ltp,
-                           trade.get("lots", 1), trade.get("lot_size", 1)))
-
-    save_pnl_tracker(trades)
-    return trade
-
-
-@app.delete("/api/pnl/{trade_id}")
-async def delete_pnl_trade(trade_id: str):
-    """Remove a trade from the tracker."""
-    trades = [t for t in load_pnl_tracker() if t["trade_id"] != trade_id]
-    save_pnl_tracker(trades)
-    return {"ok": True, "remaining": len(trades)}
 
 
 # ─────────────────────────────────────────────────────────────
