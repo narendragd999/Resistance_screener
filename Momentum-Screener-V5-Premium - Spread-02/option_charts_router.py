@@ -1314,7 +1314,7 @@ def _do_fetch_strikes_with_underlying(
             if diffs:
                 step = int(sorted(diffs)[len(diffs)//2])
 
-        for i, short_s in enumerate(otm_strikes[:8]):
+        for i, short_s in enumerate(otm_strikes[:12]):
             for width_mult in [1, 2, 3]:
                 long_s = short_s + (step * width_mult if step else 0)
                 if long_s in strikes and long_s != short_s:
@@ -1323,9 +1323,9 @@ def _do_fetch_strikes_with_underlying(
                              "spread_width": long_s - short_s, "short_pct_otm": short_pct}
                     if entry not in spread_pairs:
                         spread_pairs.append(entry)
-                    if len(spread_pairs) >= 6:
+                    if len(spread_pairs) >= 12:
                         break
-            if len(spread_pairs) >= 6:
+            if len(spread_pairs) >= 12:
                 break
 
     return {

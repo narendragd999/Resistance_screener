@@ -1,9 +1,3 @@
-"""
-Historical NSE Option Chart — FastAPI Router
-Ported from core_new.py — zero Streamlit dependency
-
-Added: Bear Call Spread analyzer (/api/option-charts/spread/bear-call)
-"""
 import os, time, asyncio, threading, math
 from datetime import datetime, timedelta
 from typing import Optional, List
@@ -22,7 +16,9 @@ _oc_session: Optional[requests.Session] = None
 _oc_lock    = threading.Lock()
 _oc_warmed  = False
 
+# API URLs
 NSE_OC_URL      = "https://www.nseindia.com/api/historicalOR/foCPV"
+NSE_EQUITY_URL  = "https://www.nseindia.com/api/historicalOR/generateSecurityWiseHistoricalData"
 
 INSTRUMENT_TYPES = ["OPTSTK", "OPTIDX", "FUTIDX", "FUTSTK", "FUTIVX"]
 OPTION_TYPES     = ["CE", "PE"]
@@ -73,6 +69,211 @@ def _warm_up(session: requests.Session) -> bool:
             return False
     _oc_warmed = True
     return True
+
+
+# ════════════════════════════════════════════════════════════════════
+#  🆕 NEW: UNDERLYING PRICE FETCHER — EQUITY HISTORICAL DATA API
+# ════════════════════════════════════════════════════════════════════
+def _fetch_underlying_price_equity(
+    symbol: str,
+    target_date: datetime,
+) -> Optional[dict]:
+    """
+    Fetch underlying equity price using the NEW NSE Historical Data API.
+    
+    Endpoint: /api/historicalOR/generateSecurityWiseHistoricalData
+    Parameters: from, to, symbol, type=priceVolumeDeliverable, series=ALL
+    
+    Returns dict with keys: price, date, high, low, open, close, volume
+    or None if data not available.
+    """
+    session = _get_oc_session()
+    _warm_up(session)
+
+    # Format dates - search within ±5 days of target for better hit rate
+    from_dt = target_date - timedelta(days=5)
+    to_dt   = target_date + timedelta(days=5)
+    
+    params = {
+        "from":   from_dt.strftime("%d-%m-%Y"),
+        "to":     to_dt.strftime("%d-%m-%Y"),
+        "symbol": symbol.strip().upper(),
+        "type":   "priceVolumeDeliverable",
+        "series": "ALL",
+    }
+    
+    api_hdrs = {
+        "Accept":           "application/json, text/plain, */*",
+        "Referer":          "https://www.nseind.com/market-data/equities-historical",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    for attempt in range(2):
+        try:
+            r = session.get(NSE_EQUITY_URL, params=params, headers=api_hdrs, timeout=15)
+            
+            if r.status_code == 401:
+                _warm_up(session)
+                time.sleep(2)
+                continue
+            
+            if r.status_code == 403:
+                _reset_oc_session()
+                return None
+                
+            if r.status_code != 200:
+                return None
+
+            resp_data = r.json()
+            if not resp_data or "data" not in resp_data or not resp_data["data"]:
+                return None
+
+            # Find the row closest to target_date
+            best_match = None
+            best_diff  = None
+            target_str = target_date.strftime("%d %b %Y")  # NSE format like "12 Dec 2022"
+            
+            for row in resp_data["data"]:
+                ts = row.get("mTIMESTAMP") or row.get("timestamp") or row.get("date")
+                if not ts:
+                    continue
+                    
+                try:
+                    # Try multiple date formats NSE might return
+                    for fmt in ["%d %b %Y", "%d-%b-%Y", "%Y-%m-%d"]:
+                        try:
+                            row_date = datetime.strptime(str(ts).strip(), fmt)
+                            diff = abs((row_date.date() - target_date.date()).days)
+                            if best_diff is None or diff < best_diff:
+                                best_diff = diff
+                                best_match = row
+                            break
+                        except ValueError:
+                            continue
+                except Exception:
+                    continue
+
+            if best_match and best_diff is not None and best_diff <= 5:
+                # Extract price fields - NSE equity API field names
+                price_data = {
+                    "price":  float(best_match.get("CH_CLOSING_PRICE") or best_match.get("CH_TRADE_LAST_PRICE") or 0),
+                    "date":   str(best_match.get("mTIMESTAMP") or best_match.get("timestamp") or ""),
+                    "open":   float(best_match.get("CH_OPENING_PRICE") or 0),
+                    "high":   float(best_match.get("CH_TRADE_HIGH_PRICE") or 0),
+                    "low":    float(best_match.get("CH_TRADE_LOW_PRICE") or 0),
+                    "close":  float(best_match.get("CH_CLOSING_PRICE") or 0),
+                    "volume": int(best_match.get("CH_TOTAL_TRADED_QUANTITY") or 0),
+                    "source": "equity_api",
+                }
+                
+                # Validate we got a real price
+                if price_data["price"] > 0:
+                    return price_data
+                    
+            return None
+
+        except requests.RequestException:
+            if attempt == 1:
+                return None
+            time.sleep(2)
+        except Exception:
+            return None
+
+    return None
+
+
+def _fetch_underlying_price_fallback(
+    symbol: str,
+    instrument_type: str,
+    expiry_dt: datetime,
+    option_type: str,
+    entry_dt: datetime,
+) -> Optional[float]:
+    """
+    Fallback: Try to get underlying price from options data (original method).
+    Uses FH_UNDERLYING_VALUE from foCPV API.
+    """
+    session = _get_oc_session()
+    _warm_up(session)
+    
+    api_hdrs = {
+        "Accept":           "application/json, text/plain, */*",
+        "Referer":          "https://www.nseindia.com/market-data/equity-derivatives-watch",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    # Try wide window around entry date
+    entry_from = entry_dt - timedelta(days=5)
+    entry_to   = min(entry_dt + timedelta(days=10), expiry_dt)
+    
+    params = {
+        "from":           entry_from.strftime("%d-%m-%Y"),
+        "to":             entry_to.strftime("%d-%m-%Y"),
+        "instrumentType": instrument_type,
+        "symbol":         symbol,
+        "year":           str(expiry_dt.year),
+        "expiryDate":     expiry_dt.strftime("%d-%b-%Y").upper(),
+        "optionType":     option_type,
+    }
+
+    try:
+        r = session.get(NSE_OC_URL, params=params, headers=api_hdrs, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            if data and "data" in data and data["data"]:
+                best_diff = None
+                best_price = None
+                for row in data["data"]:
+                    uv = row.get("FH_UNDERLYING_VALUE")
+                    ts = row.get("FH_TIMESTAMP")
+                    if uv and ts:
+                        try:
+                            uval = float(uv)
+                            row_dt = datetime.strptime(ts, "%d-%b-%Y")
+                            diff = abs((row_dt.date() - entry_dt.date()).days)
+                            if best_diff is None or diff < best_diff:
+                                best_diff = diff
+                                best_price = uval
+                        except Exception:
+                            pass
+                if best_price:
+                    return {"price": best_price, "source": "options_fallback"}
+    except Exception:
+        pass
+    
+    return None
+
+
+def _get_underlying_price(
+    symbol: str,
+    target_date: datetime,
+    instrument_type: str = "OPTSTK",
+    expiry_dt: Optional[datetime] = None,
+    option_type: str = "CE",
+) -> Optional[dict]:
+    """
+    Unified underlying price fetcher.
+    
+    Strategy:
+    1. PRIMARY: Use new Equity Historical Data API (more reliable for spot prices)
+    2. FALLBACK: Extract from options OHLC data (FH_UNDERLYING_VALUE)
+    
+    Returns dict with 'price', 'date', 'source' keys or None.
+    """
+    # ── Primary: Equity API ──
+    result = _fetch_underlying_price_equity(symbol, target_date)
+    if result and result.get("price"):
+        return result
+    
+    # ── Fallback: Options API ──
+    if expiry_dt:
+        result = _fetch_underlying_price_fallback(
+            symbol, instrument_type, expiry_dt, option_type, target_date
+        )
+        if result and result.get("price"):
+            return result
+    
+    return None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -262,28 +463,19 @@ def _do_fetch_strikes(
 # ─────────────────────────────────────────────────────────────
 
 def _build_daily_pnl_series(
-    short_data: list,      # OHLC rows for short (sold) call
-    long_data: list,       # OHLC rows for long (bought) call
-    entry_date: str,       # YYYY-MM-DD — the trade initiation date
-    short_entry_premium: float,   # premium received on short leg
-    long_entry_premium: float,    # premium paid on long leg
+    short_data: list,      
+    long_data: list,       
+    entry_date: str,       
+    short_entry_premium: float,   
+    long_entry_premium: float,    
     lot_size: int,
     num_lots: int,
 ) -> list:
-    """
-    Build day-by-day P&L for a Bear Call Spread.
-    Short Call Sold @ short_entry_premium, Long Call Bought @ long_entry_premium.
-    Net credit = short_entry_premium - long_entry_premium.
-
-    Daily unrealised P&L:
-      pnl_per_lot = ((short_entry_premium - short_close) - (long_close - long_entry_premium)) * lot_size
-    """
-    # Index by date
+    """Build day-by-day P&L for a Bear Call Spread."""
     short_map = {r["date"]: r for r in short_data}
     long_map  = {r["date"]: r for r in long_data}
 
     all_dates = sorted(set(short_map.keys()) | set(long_map.keys()))
-    # Only from entry_date onward
     all_dates = [d for d in all_dates if d >= entry_date]
 
     net_credit_per_share = round(short_entry_premium - long_entry_premium, 2)
@@ -302,8 +494,6 @@ def _build_daily_pnl_series(
         if sc is None or lc is None:
             continue
 
-        # P&L per share = net_credit - current_net_debit_to_close
-        # Current net debit to close = (buy back short) - (sell long) = sc - lc
         pnl_per_share  = net_credit_per_share - (sc - lc)
         pnl_per_lot    = round(pnl_per_share * lot_size, 2)
         pnl_total      = round(pnl_per_lot * num_lots, 2)
@@ -333,7 +523,7 @@ def _calc_spread_stats(
     long_entry: float,
     lot_size: int,
     num_lots: int,
-    expiry_str: str,         # label only
+    expiry_str: str,         
 ) -> dict:
     """Calculate summary statistics for the spread."""
     if not pnl_rows:
@@ -350,26 +540,21 @@ def _calc_spread_stats(
     max_loss_tot    = round(max_loss_ps * lot_size * total_lots, 2)
     capital_at_risk = max_loss_tot
 
-    # Final row = expiry (last available close)
     final_row   = pnl_rows[-1]
     final_pnl   = final_row["pnl_total"]
     final_pct   = final_row["pct_of_max"]
 
-    # Peak unrealised profit and drawdown
     pnl_series  = [r["pnl_total"] for r in pnl_rows]
     peak_pnl    = max(pnl_series)
     trough_pnl  = min(pnl_series)
     max_dd      = round(peak_pnl - trough_pnl, 2) if peak_pnl > trough_pnl else 0
 
-    # Days in profit vs loss
     days_profit = sum(1 for p in pnl_series if p > 0)
     days_loss   = sum(1 for p in pnl_series if p < 0)
     days_flat   = len(pnl_series) - days_profit - days_loss
 
-    # Risk/reward
     rr = round(max_profit_tot / max_loss_tot, 3) if max_loss_tot != 0 else None
 
-    # Outcome
     if final_pnl >= max_profit_tot * 0.95:
         outcome = "FULL PROFIT 🎯"
     elif final_pnl > 0:
@@ -421,19 +606,15 @@ def _build_payoff_curve(
     max_loss     = spread_width - net_credit
     breakeven    = short_strike + net_credit
 
-    # Price range: from short_strike * 0.85 to long_strike * 1.15
     lo = int(short_strike * 0.85)
     hi = int(long_strike  * 1.15)
     step = max(1, (hi - lo) // 200)
 
     prices, pnls_ps, pnls_total = [], [], []
     for price in range(lo, hi + step, step):
-        # Short call P&L at expiry
         short_pnl = net_credit - max(0, price - short_strike)
-        # Long call offsets losses above long_strike
         long_pnl  = max(0, price - long_strike)
         pnl_ps    = round(short_pnl + long_pnl, 4)
-        # Clamp to theoretical bounds
         pnl_ps    = max(-max_loss, min(max_profit, pnl_ps))
         prices.append(price)
         pnls_ps.append(pnl_ps)
@@ -456,13 +637,13 @@ def _do_bear_call_spread(
     short_strike: int,
     long_strike: int,
     expiry_dt: datetime,
-    entry_date: str,         # YYYY-MM-DD
+    entry_date: str,         
     lot_size: int,
     num_lots: int,
 ) -> dict:
     """
     Full Bear Call Spread analysis for one expiry.
-    Fetches OHLC for both legs from entry_date → expiry_dt.
+    UPDATED: Now uses new equity API for underlying price on entry date.
     """
     fmt = "%d-%m-%Y"
     from_dt = datetime.strptime(entry_date, "%Y-%m-%d")
@@ -485,7 +666,7 @@ def _do_bear_call_spread(
     if not long_rows:
         raise ValueError(f"No data for long leg (CE {long_strike}) on expiry {expiry_dt.strftime('%d-%b-%Y')}")
 
-    # Entry premiums = close/ltp on entry_date (first available row ≥ entry_date)
+    # Entry premiums = close/ltp on entry_date
     def _find_entry_premium(rows, entry):
         for r in sorted(rows, key=lambda x: x["date"]):
             if r["date"] >= entry:
@@ -531,52 +712,26 @@ def _do_bear_call_spread(
         lot_size, num_lots, last_underlying,
     )
 
-    # ── Underlying price on entry date ────────────────────────────────────────
-    # PRIMARY: use the equity securityArchives close — this is the real EOD close
-    # price and is always more accurate than FH_UNDERLYING_VALUE (which is an
-    # F&O settlement snapshot that can lag or differ significantly, e.g. ₹240
-    # gap seen on 16-Jun-2023 vs the actual equity close).
-    entry_underlying      = None
+    # 🆕 UPDATED: Get underlying price using new unified method
+    entry_underlying = None
     entry_underlying_date = None
-
-    try:
-        eq_from = datetime.strptime(actual_entry_date, "%Y-%m-%d") - timedelta(days=5)
-        eq_to   = datetime.strptime(actual_entry_date, "%Y-%m-%d") + timedelta(days=2)
-        eq_rows = _fetch_stock_ohlc_raw(symbol, eq_from, eq_to)
-        # Walk forward from actual_entry_date — take the first trading day on or after it
-        for row in sorted(eq_rows, key=lambda x: x["date"]):
-            if row["date"] >= actual_entry_date and row.get("close"):
-                entry_underlying      = row["close"]
-                entry_underlying_date = row["date"]
-                break
-        # If nothing on/after entry, take the nearest before (holiday/weekend edge case)
-        if entry_underlying is None and eq_rows:
-            closest = sorted(eq_rows, key=lambda x: x["date"])[-1]
-            entry_underlying      = closest["close"]
-            entry_underlying_date = closest["date"]
-    except Exception:
-        pass   # equity fetch failed — fall through to FH_UNDERLYING_VALUE
-
-    # FALLBACK: FH_UNDERLYING_VALUE from the options OHLC rows
-    # Used only when the equity endpoint is unreachable (OPTIDX, network error, etc.)
+    
+    # First try the new equity API for entry date
+    entry_dt_for_lookup = datetime.strptime(actual_entry_date, "%Y-%m-%d")
+    ul_result = _get_underlying_price(symbol, entry_dt_for_lookup, instrument_type, expiry_dt, "CE")
+    
+    if ul_result and ul_result.get("price"):
+        entry_underlying      = ul_result["price"]
+        entry_underlying_date = ul_result.get("date", actual_entry_date)
+    
+    # Fallback: scan short_rows for closest to actual_entry_date  
     if entry_underlying is None:
-        if pnl_rows:
-            # Scan all pnl_rows for the one whose date == actual_entry_date first,
-            # then widen to the nearest row — avoids grabbing a stale earlier date.
-            target_date = actual_entry_date
-            best_diff   = None
-            for row in pnl_rows:
-                uv = row.get("underlying")
-                if uv is None:
-                    continue
-                diff = abs((datetime.strptime(row["date"], "%Y-%m-%d") -
-                            datetime.strptime(target_date, "%Y-%m-%d")).days)
-                if best_diff is None or diff < best_diff:
-                    best_diff             = diff
-                    entry_underlying      = uv
-                    entry_underlying_date = row["date"]
-        if entry_underlying is None:
-            # Last resort: scan short_rows directly
+        for row in short_rows:
+            if row.get("date") == actual_entry_date:
+                entry_underlying      = row.get("underlying")
+                entry_underlying_date = row.get("date")
+                break
+        if entry_underlying is None and short_rows:
             for row in sorted(short_rows, key=lambda x: x["date"]):
                 if row.get("date") >= actual_entry_date and row.get("underlying") is not None:
                     entry_underlying      = row.get("underlying")
@@ -598,6 +753,7 @@ def _do_bear_call_spread(
         "entry_underlying_date": entry_underlying_date,
         "short_otm_pct":        short_otm_pct,
         "long_otm_pct":         long_otm_pct,
+        "underlying_source":    ul_result.get("source") if ul_result else "options_data",
         "stats":                stats,
         "pnl_series":           pnl_rows,
         "payoff":               payoff,
@@ -612,24 +768,29 @@ def _do_bear_call_spread(
 class OcFetchRequest(BaseModel):
     symbol:          str
     instrument_type: str = "OPTSTK"
-    expiry_date:     str            # DD-MM-YYYY
+    expiry_date:     str            
     option_type:     str = "CE"
     strike_price:    int
-    from_date:       str            # DD-MM-YYYY
-    to_date:         str            # DD-MM-YYYY
+    from_date:       str            
+    to_date:         str            
 
+# 🆕 NEW MODEL for underlying price request
+class UnderlyingPriceRequest(BaseModel):
+    symbol:          str
+    target_date:     str              # DD-MM-YYYY
+    instrument_type: str = "OPTSTK"   # For fallback only
+    expiry_date:     Optional[str] = None  # DD-MM-YYYY - For fallback only
 
 class BearCallSpreadRequest(BaseModel):
     symbol:          str
     instrument_type: str = "OPTSTK"
-    short_strike:    int            # Sold (lower) call strike
-    long_strike:     int            # Bought (higher) call strike
-    entry_date:      str            # DD-MM-YYYY — trade initiation date
-    expiry_date_1:   str            # DD-MM-YYYY — first (nearest) expiry
-    expiry_date_2:   Optional[str] = None  # DD-MM-YYYY — second expiry (optional)
-    lot_size:        int = 1        # NSE lot size for the symbol
-    num_lots:        int = 1        # Number of lots to trade
-
+    short_strike:    int            
+    long_strike:     int            
+    entry_date:      str            
+    expiry_date_1:   str            
+    expiry_date_2:   Optional[str] = None  
+    lot_size:        int = 1        
+    num_lots:        int = 1        
 
 # ─────────────────────────────────────────────────────────────
 #  ROUTES
@@ -689,20 +850,12 @@ async def oc_strikes(
 async def oc_lot_size(
     symbol:          str,
     instrument_type: str = "OPTSTK",
-    entry_date:      str = "",   # DD-MM-YYYY  — trade date (from date)
-    expiry_date:     str = "",   # DD-MM-YYYY  — expiry date (to date)
+    entry_date:      str = "",   
+    expiry_date:     str = "",   
 ):
-    """
-    Fetch the NSE lot size for a symbol by reading FH_MARKET_LOT from
-    historicalOR/foCPV.  When entry_date + expiry_date are supplied the
-    request mirrors exactly how every other call in the app works:
-      from=<entry_date>  to=<expiry_date>  expiryDate=<expiry_date>
-    Falls back to upcoming-expiry discovery, then to the static map.
-    """
     symbol = symbol.strip().upper()
     inst   = instrument_type.strip().upper()
 
-    # Parse optional dates
     fmt = "%d-%m-%Y"
     entry_dt  = None
     expiry_dt = None
@@ -712,7 +865,7 @@ async def oc_lot_size(
         if expiry_date:
             expiry_dt = datetime.strptime(expiry_date.strip(), fmt).date()
     except ValueError:
-        pass   # bad format — fall through to auto-discovery
+        pass   
 
     try:
         lot = await asyncio.to_thread(_do_fetch_lot_size, symbol, inst, entry_dt, expiry_dt)
@@ -724,7 +877,6 @@ async def oc_lot_size(
         return {"symbol": symbol, "lot_size": None, "source": "unavailable", "error": str(e)}
 
 
-# ── Common lot sizes (fallback when NSE is unreachable) ──
 _STATIC_LOT_MAP: dict[str, int] = {
     "NIFTY": 75, "BANKNIFTY": 30, "FINNIFTY": 40, "MIDCPNIFTY": 75,
     "SENSEX": 10, "BANKEX": 15,
@@ -768,21 +920,11 @@ _STATIC_LOT_MAP: dict[str, int] = {
 
 
 def _do_fetch_lot_size(
-    symbol:          str,
+    symbol: str,
     instrument_type: str,
-    entry_dt=None,   # datetime.date — trade/entry date  (= "from" param)
-    expiry_dt=None,  # datetime.date — expiry date       (= "to" + expiryDate param)
+    entry_dt=None,   
+    expiry_dt=None,  
 ) -> int:
-    """
-    Fetch NSE lot size via FH_MARKET_LOT from historicalOR/foCPV.
-
-    When entry_dt + expiry_dt are supplied, the call is:
-      from=entry_dt  to=expiry_dt  expiryDate=expiry_dt
-    which mirrors every other call in the app and is guaranteed to return data.
-
-    When dates are absent, falls back to auto-discovering the nearest
-    upcoming monthly expiry (last Thursday of current/next months).
-    """
     from datetime import date, timedelta
 
     session  = _get_oc_session()
@@ -796,7 +938,6 @@ def _do_fetch_lot_size(
     today = date.today()
 
     def _try_fetch(from_d, to_d, exp_d):
-        """Single NSE call; returns lot size int or None."""
         params = {
             "from":           from_d.strftime("%d-%m-%Y"),
             "to":             to_d.strftime("%d-%m-%Y"),
@@ -805,7 +946,6 @@ def _do_fetch_lot_size(
             "year":           str(exp_d.year),
             "expiryDate":     exp_d.strftime("%d-%b-%Y").upper(),
             "optionType":     "CE",
-            # NO strikePrice — NSE returns FH_MARKET_LOT in every row without it
         }
         try:
             r = session.get(NSE_OC_URL, params=params, headers=api_hdrs, timeout=15)
@@ -819,18 +959,15 @@ def _do_fetch_lot_size(
             pass
         return None
 
-    # ── Path A: caller supplied entry + expiry dates ──────────────────────
     if entry_dt and expiry_dt:
         lot = _try_fetch(entry_dt, expiry_dt, expiry_dt)
         if lot:
             return lot
-        # Fallback within Path A: widen window to full expiry month
         month_start = date(expiry_dt.year, expiry_dt.month, 1)
         lot = _try_fetch(month_start, expiry_dt, expiry_dt)
         if lot:
             return lot
 
-    # ── Path B: auto-discover nearest upcoming monthly expiry ─────────────
     for months_ahead in [0, 1, 2, 3]:
         target            = today + timedelta(days=30 * months_ahead)
         expiry_candidates = _get_monthly_expiries(target.year, target.month)
@@ -846,12 +983,11 @@ def _do_fetch_lot_size(
 
 
 def _get_monthly_expiries(year: int, month: int):
-    """Return list of Thursdays in a given month (NSE monthly expiry candidates)."""
     from datetime import date, timedelta
     thursdays = []
     d = date(year, month, 1)
     while d.month == month:
-        if d.weekday() == 3:  # Thursday = 3
+        if d.weekday() == 3:
             thursdays.append(d)
         d += timedelta(days=1)
     return thursdays
@@ -906,6 +1042,87 @@ async def oc_fetch(req: OcFetchRequest):
     }
 
 
+# 🆕 NEW ENDPOINT: Dedicated Underlying Price API
+@router.post("/api/option-charts/underlying-price")
+async def get_underlying_price(req: UnderlyingPriceRequest):
+    """
+    Fetch underlying equity price for a given symbol and date.
+    
+    Uses the new NSE generateSecurityWiseHistoricalData API as primary source,
+    with fallback to options data extraction.
+    
+    Parameters
+    ----------
+    symbol          : NSE ticker (e.g., HDFCBANK, RELIANCE, NIFTY)
+    target_date     : Date for which you want the price (DD-MM-YYYY)
+    instrument_type : OPTSTK/OPTIDX (used only for fallback)
+    expiry_date     : Expiry date (used only for fallback)
+    
+    Returns
+    -------
+    JSON with:
+    - symbol, target_date
+    - price: Closing price on/near target_date
+    - date: Actual date of the price
+    - open, high, low, volume: Additional OHLCV data (if available)
+    - source: "equity_api" or "options_fallback"
+    """
+    if not req.symbol or not req.target_date:
+        raise HTTPException(400, "symbol and target_date are required")
+    
+    try:
+        target_dt = datetime.strptime(req.target_date, "%d-%m-%Y")
+    except ValueError:
+        raise HTTPException(400, "Invalid target_date format — use DD-MM-YYYY")
+    
+    expiry_dt = None
+    if req.expiry_date:
+        try:
+            expiry_dt = datetime.strptime(req.expiry_date, "%d-%m-%Y")
+        except ValueError:
+            pass
+    
+    try:
+        result = await asyncio.to_thread(
+            _get_underlying_price,
+            req.symbol.strip().upper(),
+            target_dt,
+            req.instrument_type.upper(),
+            expiry_dt,
+            "CE",
+        )
+        
+        if result and result.get("price"):
+            return {
+                "symbol":      req.symbol.strip().upper(),
+                "target_date": req.target_date,
+                "success":     True,
+                **result,
+            }
+        else:
+            return {
+                "symbol":      req.symbol.strip().upper(),
+                "target_date": req.target_date,
+                "success":     False,
+                "error":       f"No price data found for {req.symbol} near {req.target_date}",
+                "price":       None,
+            }
+            
+    except Exception as exc:
+        raise HTTPException(500, f"Error fetching underlying price: {exc}")
+
+
+# 🆕 NEW ENDPOINT: GET underlying price (GET version for convenience)
+@router.get("/api/option-charts/underlying-price")
+async def get_underlying_price_get(
+    symbol:      str,
+    target_date: str,
+):
+    """Convenience GET endpoint for underlying price lookup."""
+    req = UnderlyingPriceRequest(symbol=symbol, target_date=target_date)
+    return await get_underlying_price(req)
+
+
 def _do_fetch_strikes_with_underlying(
     symbol: str,
     instrument_type: str,
@@ -914,34 +1131,25 @@ def _do_fetch_strikes_with_underlying(
     entry_dt: datetime,
 ) -> dict:
     """
-    Fetch available CE strikes for a given expiry AND the underlying price
-    on/near the entry date. Returns both so the frontend can show OTM context.
+    🆕 UPDATED: Fetch available CE strikes AND underlying price using new API.
+    Primary source for underlying: generateSecurityWiseHistoricalData
+    Fallback: FH_UNDERLYING_VALUE from options data
     """
     session = _get_oc_session()
     _warm_up(session)
 
-    # ── Pass 1: fetch strikes list using a window centred on the ENTRY DATE ──
-    # CRITICAL: we use entry_date ± a few days, NOT near expiry.
-    # Reason: near-expiry windows only return deep ITM/OTM strikes that were
-    # still trading in the final days. On the entry date the full OTM range
-    # near spot was active — that's what we want to show the user.
-    # We also collect FH_UNDERLYING_VALUE from this same response so we get
-    # the spot price for free in Pass 1 before even needing Pass 2.
+    # To get strikes: use narrow window around expiry
     today = datetime.now().date()
-    if entry_dt.date() >= today:
-        # Future/current entry — use a trailing 7-day window ending today
-        p1_to   = datetime.now()
-        p1_from = p1_to - timedelta(days=7)
+    if expiry_dt.date() >= today:
+        to_dt   = datetime.now()
+        from_dt = to_dt - timedelta(days=7)
     else:
-        p1_from = entry_dt - timedelta(days=2)
-        p1_to   = entry_dt + timedelta(days=7)
-        # Don't overshoot expiry
-        if p1_to.date() > expiry_dt.date():
-            p1_to = expiry_dt
+        to_dt   = expiry_dt
+        from_dt = expiry_dt - timedelta(days=3)
 
     params = {
-        "from":           p1_from.strftime("%d-%m-%Y"),
-        "to":             p1_to.strftime("%d-%m-%Y"),
+        "from":           from_dt.strftime("%d-%m-%Y"),
+        "to":             to_dt.strftime("%d-%m-%Y"),
         "instrumentType": instrument_type,
         "symbol":         symbol,
         "year":           str(expiry_dt.year),
@@ -955,10 +1163,13 @@ def _do_fetch_strikes_with_underlying(
     }
 
     strikes = set()
-    underlying_price = None
-    underlying_date  = None
+    underlying_price  = None
+    underlying_date   = None
+    underlying_source = None
+    # strike -> closest-to-entry-date closing premium
+    strike_premium_map: dict = {}
 
-    # ── Pass 1: fetch strikes + grab underlying from same response ──
+    # ── Pass 1: fetch strikes list (+ harvest premiums per strike) ──
     for attempt in range(2):
         try:
             r = session.get(NSE_OC_URL, params=params, headers=api_hdrs, timeout=15)
@@ -971,31 +1182,32 @@ def _do_fetch_strikes_with_underlying(
             data = r.json()
             if not data or "data" not in data or not data["data"]:
                 break
-
-            best_diff = None
+            _best_diff: dict = {}
             for row in data["data"]:
-                # Collect strike
                 sv = row.get("FH_STRIKE_PRICE")
                 if sv is not None:
                     try:
                         s = int(float(sv))
                         if s > 0:
                             strikes.add(s)
+                            # Harvest premium: prefer close, fallback ltp/settle
+                            prem_raw = (
+                                row.get("FH_CLOSING_PRICE")
+                                or row.get("FH_LAST_TRADED_PRICE")
+                                or row.get("FH_SETTLE_PRICE")
+                            )
+                            ts = row.get("FH_TIMESTAMP")
+                            if prem_raw and ts:
+                                try:
+                                    prem_val = float(prem_raw)
+                                    row_dt   = datetime.strptime(ts, "%d-%b-%Y")
+                                    diff     = abs((row_dt.date() - entry_dt.date()).days)
+                                    if s not in _best_diff or diff < _best_diff[s]:
+                                        _best_diff[s]         = diff
+                                        strike_premium_map[s] = round(prem_val, 2)
+                                except Exception:
+                                    pass
                     except (ValueError, TypeError):
-                        pass
-                # Collect underlying: pick the row whose date is closest to entry_dt
-                uv = row.get("FH_UNDERLYING_VALUE")
-                ts = row.get("FH_TIMESTAMP")
-                if uv and ts:
-                    try:
-                        uval   = float(uv)
-                        row_dt = datetime.strptime(ts, "%d-%b-%Y")
-                        diff   = abs((row_dt.date() - entry_dt.date()).days)
-                        if best_diff is None or diff < best_diff:
-                            best_diff        = diff
-                            underlying_price = uval
-                            underlying_date  = row_dt.strftime("%d-%b-%Y")
-                    except Exception:
                         pass
             break
         except requests.RequestException:
@@ -1005,15 +1217,67 @@ def _do_fetch_strikes_with_underlying(
         except Exception:
             break
 
-    # ── Pass 2: fetch underlying price on/near entry_date using a wide window ──
-    # Use entry_date as the centre of the window; fetch full range entry→expiry
-    # with a specific strike so NSE returns data for old series too.
-    if strikes:
+    # ── Pass 1b: fetch premiums around ENTRY DATE (separate window) ──
+    # Pass 1 window is near expiry — premiums there are near-zero/settle prices.
+    # We need a window around entry_dt to get the actual entry-day closing premium.
+    entry_from = entry_dt - timedelta(days=2)
+    entry_to   = entry_dt + timedelta(days=2)
+    # Don't exceed expiry
+    if entry_to.date() > expiry_dt.date():
+        entry_to = expiry_dt
+    entry_params = {
+        "from":           entry_from.strftime("%d-%m-%Y"),
+        "to":             entry_to.strftime("%d-%m-%Y"),
+        "instrumentType": instrument_type,
+        "symbol":         symbol,
+        "year":           str(expiry_dt.year),
+        "expiryDate":     expiry_dt.strftime("%d-%b-%Y").upper(),
+        "optionType":     option_type,
+        # no strikePrice → NSE returns all strikes for this window
+    }
+    try:
+        rp = session.get(NSE_OC_URL, params=entry_params, headers=api_hdrs, timeout=15)
+        if rp.status_code == 200:
+            dp = rp.json()
+            if dp and "data" in dp and dp["data"]:
+                _ep_best: dict = {}
+                for row in dp["data"]:
+                    sv = row.get("FH_STRIKE_PRICE")
+                    ts = row.get("FH_TIMESTAMP")
+                    if sv is None or ts is None:
+                        continue
+                    try:
+                        s        = int(float(sv))
+                        row_dt   = datetime.strptime(ts, "%d-%b-%Y")
+                        diff     = abs((row_dt.date() - entry_dt.date()).days)
+                        prem_raw = (
+                            row.get("FH_CLOSING_PRICE")
+                            or row.get("FH_LAST_TRADED_PRICE")
+                            or row.get("FH_SETTLE_PRICE")
+                        )
+                        if prem_raw and s > 0:
+                            prem_val = float(prem_raw)
+                            if s not in _ep_best or diff < _ep_best[s]:
+                                _ep_best[s]           = diff
+                                strike_premium_map[s] = round(prem_val, 2)
+                    except Exception:
+                        pass
+    except Exception:
+        pass  # keep whatever Pass 1 harvested
+
+    # ── Pass 2: 🆕 Use NEW Equity API for underlying price (PRIMARY) ──
+    ul_result = _get_underlying_price(symbol, entry_dt, instrument_type, expiry_dt, option_type)
+    if ul_result and ul_result.get("price"):
+        underlying_price  = ul_result["price"]
+        underlying_date   = ul_result.get("date")
+        underlying_source = ul_result.get("source", "unknown")
+
+    # ── Pass 3: Fallback to options data if equity API failed ──
+    if underlying_price is None and strikes:
         try:
-            any_strike  = sorted(strikes)[len(strikes) // 2]   # pick a middle strike
+            any_strike  = sorted(strikes)[len(strikes) // 2]
             entry_from  = entry_dt - timedelta(days=5)
-            entry_to    = entry_dt + timedelta(days=10)        # wider look-ahead
-            # Don't go past expiry
+            entry_to    = entry_dt + timedelta(days=10)
             if entry_to.date() > expiry_dt.date():
                 entry_to = expiry_dt
             entry_params = {
@@ -1042,13 +1306,14 @@ def _do_fetch_strikes_with_underlying(
                                 if best_diff is None or diff < best_diff:
                                     best_diff        = diff
                                     underlying_price = uval
-                                    underlying_date  = row_dt.strftime("%d-%b-%Y")
+                                    underlying_date  = row_dt.strftime("%d-%m-%Y")
+                                    underlying_source = "options_fallback"
                             except Exception:
                                 pass
         except Exception:
             pass
 
-    # ── Pass 3: if still no underlying, try each available strike until one returns data ──
+    # ── Pass 4: Try each available strike until one returns data ──
     if underlying_price is None and strikes:
         for try_strike in sorted(strikes)[:5]:
             try:
@@ -1080,7 +1345,8 @@ def _do_fetch_strikes_with_underlying(
                                     if best_diff is None or diff < best_diff:
                                         best_diff        = diff
                                         underlying_price = uval
-                                        underlying_date  = row_dt.strftime("%d-%b-%Y")
+                                        underlying_date  = row_dt.strftime("%d-%m-%Y")
+                                        underlying_source = "options_fallback_multi_strike"
                                 except Exception:
                                     pass
                         if underlying_price is not None:
@@ -1090,7 +1356,7 @@ def _do_fetch_strikes_with_underlying(
 
     strikes_sorted = sorted(strikes)
 
-    # Build strike_detail with OTM/ATM/ITM classification for CE
+    # Build strike_detail with OTM/ATM/ITM classification
     strikes_detail = []
     for s in strikes_sorted:
         if underlying_price is not None:
@@ -1104,9 +1370,14 @@ def _do_fetch_strikes_with_underlying(
         else:
             pct_otm = None
             zone    = "UNK"
-        strikes_detail.append({"strike": s, "pct_otm": pct_otm, "zone": zone})
+        strikes_detail.append({
+            "strike":  s,
+            "pct_otm": pct_otm,
+            "zone":    zone,
+            "premium": strike_premium_map.get(s),
+        })
 
-    # Build suggested spread pairs: pairs of (short, long) both OTM, spread_width ≈ 1-3 strike steps
+    # Build suggested spread pairs
     spread_pairs = []
     if underlying_price is not None:
         otm_strikes = [s for s in strikes_sorted if s > underlying_price]
@@ -1114,7 +1385,7 @@ def _do_fetch_strikes_with_underlying(
         if len(otm_strikes) >= 2:
             diffs = [otm_strikes[i+1] - otm_strikes[i] for i in range(min(5, len(otm_strikes)-1))]
             if diffs:
-                step = int(sorted(diffs)[len(diffs)//2])  # median step
+                step = int(sorted(diffs)[len(diffs)//2])
 
         for i, short_s in enumerate(otm_strikes[:8]):
             for width_mult in [1, 2, 3]:
@@ -1131,11 +1402,12 @@ def _do_fetch_strikes_with_underlying(
                 break
 
     return {
-        "strikes":        strikes_sorted,
-        "strikes_detail": strikes_detail,
-        "underlying":     round(underlying_price, 2) if underlying_price else None,
-        "underlying_date": underlying_date,
-        "spread_pairs":   spread_pairs,
+        "strikes":           strikes_sorted,
+        "strikes_detail":    strikes_detail,
+        "underlying":        round(underlying_price, 2) if underlying_price else None,
+        "underlying_date":   underlying_date,
+        "underlying_source": underlying_source,
+        "spread_pairs":      spread_pairs,
     }
 
 
@@ -1149,9 +1421,7 @@ async def spread_suggest_strikes(
     num_otm_levels:  int = 5,
 ):
     """
-    Returns available CE strikes for the given expiry with OTM/ATM/ITM classification
-    based on historical underlying price on the entry_date.
-    Also returns suggested Bear Call Spread pairs.
+    🆕 UPDATED: Now returns underlying_source to show which API provided the price.
     """
     if not symbol or not expiry_date or not entry_date:
         raise HTTPException(400, "symbol, expiry_date and entry_date are required")
@@ -1184,34 +1454,11 @@ async def spread_suggest_strikes(
 @router.post("/api/option-charts/spread/bear-call")
 async def bear_call_spread(req: BearCallSpreadRequest):
     """
-    Bear Call Spread historical analysis.
-
-    Fetches OHLC data for both legs (short lower CE + long higher CE),
-    computes daily unrealised P&L, final stats, and payoff curve.
-    Supports analysis across two expiry dates for comparison.
-
-    Parameters
-    ----------
-    symbol          : NSE F&O ticker (e.g. RELIANCE, NIFTY)
-    instrument_type : OPTSTK or OPTIDX
-    short_strike    : Strike of the SOLD (lower) call
-    long_strike     : Strike of the BOUGHT (higher) call
-    entry_date      : Date you initiated the trade (DD-MM-YYYY)
-    expiry_date_1   : First expiry to evaluate (DD-MM-YYYY)
-    expiry_date_2   : Second expiry to evaluate (DD-MM-YYYY), optional
-    lot_size        : NSE lot size for the symbol
-    num_lots        : Number of lots
-
-    Returns
-    -------
-    JSON with:
-    - expiry_1: { entry_date, short_entry_premium, long_entry_premium,
-                  stats, pnl_series, payoff, short_ohlc, long_ohlc }
-    - expiry_2: same structure (if expiry_date_2 provided)
+    🆕 UPDATED: Bear Call Spread analysis now uses new equity API for 
+    underlying price detection. Response includes 'underlying_source' field.
     """
     fmt = "%d-%m-%Y"
 
-    # ── Validate inputs ──
     try:
         entry_dt   = datetime.strptime(req.entry_date, fmt)
         expiry1_dt = datetime.strptime(req.expiry_date_1, fmt)
@@ -1233,11 +1480,11 @@ async def bear_call_spread(req: BearCallSpreadRequest):
 
     symbol    = req.symbol.strip().upper()
     inst_type = req.instrument_type.upper()
-    entry_str = entry_dt.strftime("%Y-%m-%d")   # internal YYYY-MM-DD
+    entry_str = entry_dt.strftime("%Y-%m-%d")
 
     result = {"symbol": symbol, "instrument_type": inst_type}
 
-    # ── Expiry 1 ──
+    # Expiry 1
     try:
         e1 = await asyncio.to_thread(
             _do_bear_call_spread,
@@ -1252,7 +1499,7 @@ async def bear_call_spread(req: BearCallSpreadRequest):
     except Exception as exc:
         raise HTTPException(500, f"Expiry 1 internal error: {exc}")
 
-    # ── Expiry 2 (optional) ──
+    # Expiry 2 (optional)
     if req.expiry_date_2:
         try:
             expiry2_dt = datetime.strptime(req.expiry_date_2, fmt)
@@ -1277,124 +1524,3 @@ async def bear_call_spread(req: BearCallSpreadRequest):
             result["expiry_2_error"] = f"Internal error: {exc}"
 
     return result
-# ─────────────────────────────────────────────────────────────
-#  STOCK HISTORICAL OHLC  (unadjusted, no splits/dividends)
-# ─────────────────────────────────────────────────────────────
-NSE_EQ_HIST_URL = "https://www.nseindia.com/api/historicalOR/securityArchives"
-
-def _fetch_stock_ohlc_raw(symbol: str, from_dt: datetime, to_dt: datetime) -> list:
-    """
-    Fetch unadjusted daily OHLC from NSE securityArchives for an equity.
-    Returns list of {date, open, high, low, close, volume} dicts sorted by date asc.
-    """
-    session = _get_oc_session()
-    _warm_up(session)
-
-    params = {
-        "from":    from_dt.strftime("%d-%m-%Y"),
-        "to":      to_dt.strftime("%d-%m-%Y"),
-        "symbol":  symbol.upper(),
-        "dataType": "priceVolumeDeliverable",
-        "series":  "EQ",
-    }
-    api_hdrs = {
-        "Accept":           "application/json, text/plain, */*",
-        "Referer":          "https://www.nseindia.com/get-quotes/equity?symbol=" + symbol.upper(),
-        "X-Requested-With": "XMLHttpRequest",
-    }
-
-    for attempt in range(2):
-        try:
-            r = session.get(NSE_EQ_HIST_URL, params=params, headers=api_hdrs, timeout=20)
-            if r.status_code == 401:
-                _warm_up(session)
-                time.sleep(2)
-                continue
-            if r.status_code == 403:
-                _reset_oc_session()
-                raise ValueError("HTTP 403 — NSE blocked. Retry in a few seconds.")
-            r.raise_for_status()
-            payload = r.json()
-            break
-        except ValueError:
-            raise
-        except Exception as exc:
-            if attempt == 1:
-                raise ValueError(f"NSE equity fetch failed: {exc}")
-            time.sleep(2)
-    else:
-        raise ValueError("NSE equity fetch failed after retries.")
-
-    # payload shape: {"data": [...]} or {"CH_SERIES": [...]} depending on NSE version
-    rows_raw = payload.get("data") or payload.get("CH_SERIES") or []
-    if not rows_raw and isinstance(payload, list):
-        rows_raw = payload
-
-    result = []
-    for r in rows_raw:
-        try:
-            # NSE field names for securityArchives
-            dt_str = r.get("CH_TIMESTAMP") or r.get("mTIMESTAMP") or r.get("date") or ""
-            if not dt_str:
-                continue
-            # Normalise date → YYYY-MM-DD
-            for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d-%m-%Y"):
-                try:
-                    dt_obj = datetime.strptime(dt_str[:10], fmt)
-                    dt_iso = dt_obj.strftime("%Y-%m-%d")
-                    break
-                except ValueError:
-                    continue
-            else:
-                continue
-
-            open_  = float(r.get("CH_OPENING_PRICE")  or r.get("open")  or 0)
-            high_  = float(r.get("CH_TRADE_HIGH_PRICE") or r.get("high") or 0)
-            low_   = float(r.get("CH_TRADE_LOW_PRICE")  or r.get("low")  or 0)
-            close_ = float(r.get("CH_CLOSING_PRICE")   or r.get("close") or 0)
-            vol_   = int(float(r.get("CH_TOT_TRADED_QTY") or r.get("volume") or 0))
-
-            if close_ == 0:
-                continue
-            result.append({
-                "date": dt_iso,
-                "open": open_, "high": high_, "low": low_, "close": close_,
-                "volume": vol_,
-            })
-        except Exception:
-            continue
-
-    result.sort(key=lambda x: x["date"])
-    return result
-
-
-@router.get("/api/option-charts/stock-ohlc")
-async def get_stock_ohlc(
-    symbol:    str,
-    from_date: str,   # DD-MM-YYYY
-    to_date:   str,   # DD-MM-YYYY
-):
-    """
-    Return unadjusted daily OHLC for an NSE equity symbol.
-    Prices are raw/historical — no split or dividend adjustment.
-    """
-    try:
-        fmt = "%d-%m-%Y"
-        from_dt = datetime.strptime(from_date.strip(), fmt)
-        to_dt   = datetime.strptime(to_date.strip(),   fmt)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Dates must be DD-MM-YYYY")
-
-    if from_dt > to_dt:
-        raise HTTPException(status_code=400, detail="from_date must be <= to_date")
-
-    try:
-        rows = await asyncio.get_event_loop().run_in_executor(
-            None, _fetch_stock_ohlc_raw, symbol, from_dt, to_dt
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Internal error: {exc}")
-
-    return {"symbol": symbol.upper(), "rows": len(rows), "data": rows}

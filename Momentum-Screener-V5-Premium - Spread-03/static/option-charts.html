@@ -123,9 +123,10 @@ header{
   padding:10px 16px;
   font-family:var(--font-mono);
   font-size:11px;
-  align-items:center;
-  gap:10px;
+  align-items:flex-start;
+  gap:8px;
   flex-wrap:wrap;
+  row-gap:8px;
 }
 #sp-spot-banner.visible{display:flex}
 #sp-spot-banner.loading{border-color:rgba(74,144,226,.3);background:rgba(74,144,226,.05)}
@@ -138,10 +139,11 @@ header{
 #sp-lot-badge.manual{color:#8b8fa8;background:rgba(139,143,168,.1);border:1px solid rgba(139,143,168,.25)}
 #sp-lot-badge.error {color:#ff3b5c;background:rgba(255,59,92,.08);border:1px solid rgba(255,59,92,.25)}
 .spot-hint{color:var(--text2);font-size:10px}
-.spot-otm-chips{display:flex;gap:6px;flex-wrap:wrap;margin-left:4px}
+.spot-otm-chips{display:flex;gap:5px;flex-wrap:wrap;margin-left:4px;max-width:100%}
 .otm-chip{
-  padding:3px 9px;border-radius:99px;font-size:10px;font-weight:600;
-  border:1px solid;letter-spacing:.03em;cursor:default;
+  padding:4px 9px;border-radius:6px;font-size:10px;font-weight:600;
+  border:1px solid;letter-spacing:.03em;cursor:pointer;
+  display:inline-flex;align-items:center;
 }
 .otm-chip.far-otm{color:#00d97e;border-color:rgba(0,217,126,.4);background:rgba(0,217,126,.07)}
 .otm-chip.near-otm{color:#f59e0b;border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.07)}
@@ -166,7 +168,6 @@ header{
 .btn-outline:hover:not(:disabled){background:var(--bg3);color:var(--text0);border-color:var(--teal-dim)}
 .btn-danger{background:var(--red-glow);color:var(--red);border-color:rgba(255,59,92,.3)}
 .btn-sm{padding:5px 11px;font-size:11px}
-.active-range{background:var(--bg3)!important;color:var(--amber)!important;border-color:var(--amber)!important}
 
 /* ── METRICS ── */
 .metrics-row{
@@ -1267,15 +1268,30 @@ function _renderSpotBanner(data) {
   dateEl.textContent  = underlying_date ? '(' + underlying_date + ')' : '';
   if (noteEl) noteEl.textContent = 'Click a chip to set as Short strike';
 
-  // OTM chips: ATM + first OTM strikes
+  // Chips: 3 closest ITM + ATM + up to 12 OTM
   if (strikes_detail && strikes_detail.length) {
-    const relevant = strikes_detail.filter(s => s.zone === 'OTM' || s.zone === 'ATM').slice(0, 7);
+    const itm      = strikes_detail.filter(s => s.zone === 'ITM').slice(-3);
+    const atm      = strikes_detail.filter(s => s.zone === 'ATM');
+    const otm      = strikes_detail.filter(s => s.zone === 'OTM').slice(0, 20);
+    const relevant = [...itm, ...atm, ...otm];
     chipsEl.innerHTML = relevant.map(s => {
-      const pct = s.pct_otm != null ? (s.pct_otm >= 0 ? '+' : '') + s.pct_otm.toFixed(1) + '%' : '';
-      const cls = s.zone === 'ATM' ? 'atm' : s.pct_otm < 2 ? 'near-otm' : 'far-otm';
-      return `<span class="otm-chip ${cls}" title="Click to set as Short strike"
-                onclick="document.getElementById('sp-short-strike').value=${s.strike};this.style.outline='2px solid var(--teal)'">
-                ${s.strike.toLocaleString('en-IN')} <span style="opacity:.75">${pct} ${s.zone}</span>
+      const pct      = s.pct_otm != null ? (s.pct_otm >= 0 ? '+' : '') + s.pct_otm.toFixed(1) + '%' : '';
+      const cls      = s.zone === 'ATM' ? 'atm' : s.zone === 'ITM' ? 'itm' : s.pct_otm < 2 ? 'near-otm' : 'far-otm';
+      const optType  = document.getElementById('sp-instrument').value.includes('IDX') ? 'IDX' : 'STK';
+      const ceOrPe   = (document.getElementById('sp-instrument').value || 'CE').includes('PE') ? 'PE' : 'CE';
+      const premLabel = s.premium != null ? '₹' + s.premium.toFixed(2) : '—';
+      const tooltip  = `Strike: ${s.strike}  |  ${ceOrPe} Premium: ${premLabel}  |  ${pct} ${s.zone}\nClick to set as Short strike`;
+      return `<span class="otm-chip ${cls}" data-strike="${s.strike}" title="${tooltip}"
+                onclick="
+                  document.getElementById('sp-short-strike').value=${s.strike};
+                  document.querySelectorAll('#sp-spot-chips .otm-chip').forEach(c=>c.style.outline='');
+                  this.style.outline='2px solid var(--teal)';
+                  this.style.outlineOffset='1px';
+                ">
+                <span style="display:flex;flex-direction:column;align-items:center;gap:1px">
+                  <span>${s.strike.toLocaleString('en-IN')} <span style="opacity:.75;font-size:9px">${pct} ${s.zone}</span></span>
+                  ${s.premium != null ? `<span style="color:var(--teal);font-size:9px;font-weight:600;opacity:.9">₹${s.premium.toFixed(2)}</span>` : ''}
+                </span>
               </span>`;
     }).join('');
   } else {
@@ -1613,101 +1629,84 @@ function renderFairPrice(r, idx, expiryDateStr, entryUnderlying) {
   const sal = r.sales || {};
 
   // ── Determine the FY year that corresponds to the selected expiry ──
-  // Indian FY: Apr–Mar. e.g. Oct 2024 trade → FY ends Mar 2025 → FY2025.
-  // KEY RULE: We want the FY whose *annual results were already published* at the
-  // time of the trade (i.e. the last completed FY ≤ the trade FY). This ensures
-  // that the OP used for fair-price comparison was actually known to the market
-  // on the entry date — we never use forward/unpublished results.
-  // Results for FY-X are published ~May–Jun of that same calendar year.
-  // So for a Sep-2024 trade (FY2025): FY2025 results aren't out yet → use FY2024.
-  //
-  // Additionally, the `expiryFyKey` label is set to the FY that was *last reported*
-  // before the trade date, not the FY end-year of the expiry, so the card reads
-  // "OP Fair Price (FY2024)" for a Sep-2024 trade — matching what was on record.
-
+  // Indian FY: Apr-Mar. e.g. May 2025 = FY2026 (Apr 2025 - Mar 2026).
+  // KEY RULE: if the matched FY is still open (annual results not published yet),
+  // fall back to the last *completed* FY. This prevents showing live/current price
+  // as "Historical Actual" for an ongoing FY.
   let expiryFyKey   = null;
   let expiryFyLabel = null;
   let fyIsOpen      = false;
 
-  // Helper: parse both dd-mm-yyyy and yyyy-mm-dd → Date
-  function _parseDate(s) {
-    if (!s) return null;
-    const p = s.split('-');
-    if (p[0].length === 4) return new Date(s);
-    return new Date(p[2] + '-' + p[1] + '-' + p[0]);
-  }
-
-  const tradeDate = _parseDate(expiryDateStr);  // expiry date passed as proxy for trade period
-
-  if (tradeDate && !isNaN(tradeDate)) {
-    // Indian FY end year: Jan–Mar → same year; Apr–Dec → next year
-    const fyEndYear  = tradeDate.getMonth() <= 2
-                     ? tradeDate.getFullYear()
-                     : tradeDate.getFullYear() + 1;
-    expiryFyLabel    = 'FY' + fyEndYear;
-
-    const histKeys   = Object.keys(op.historical || {});
-    const keyYear    = k => { const m = k.match(/\d{4}/); return m ? parseInt(m[0]) : 0; };
-    const sortedKeys = histKeys.slice().sort((a,b) => keyYear(a) - keyYear(b));
-
-    // Annual results for FY-X are published ~May–Jun of the same calendar year.
-    // A result is "available" at trade date if: result publish month <= tradeDate
-    // Simplified: FY-X results available if tradeDate >= (X-year, June 1)
-    const tradeMth  = tradeDate.getMonth(); // 0-based
-    const tradeYear = tradeDate.getFullYear();
-
-    // Last FY whose results were published by the trade date:
-    //   If trade is Apr–May: previous FY results may not be out yet → use FY(fyEndYear-2)
-    //   If trade is Jun+:    current FY results are likely out → use FY(fyEndYear-1)
-    //   If trade is Jan–Mar: use FY(fyEndYear-1) — current FY still running
-    let lastPublishedFyEndYear;
-    if (tradeMth <= 2) {
-      // Jan–Mar: current FY (fyEndYear) still running; FY(fyEndYear-1) results are out
-      lastPublishedFyEndYear = fyEndYear - 1;
-    } else if (tradeMth <= 4) {
-      // Apr–May: FY(fyEndYear-1) just ended but results not yet out (~Jun)
-      lastPublishedFyEndYear = fyEndYear - 2;
+  if (expiryDateStr) {
+    // Parse dd-mm-yyyy or yyyy-mm-dd
+    let d;
+    const parts = expiryDateStr.split('-');
+    if (parts[0].length === 4) {
+      d = new Date(expiryDateStr);
     } else {
-      // Jun–Dec: FY(fyEndYear-1) results are published
-      lastPublishedFyEndYear = fyEndYear - 1;
+      d = new Date(parts[2] + '-' + parts[1] + '-' + parts[0]);
     }
 
-    // Find the matching key in historical (exact or best-lower)
-    const exactKey = histKeys.find(k => k.includes(String(lastPublishedFyEndYear)));
-    if (exactKey) {
-      expiryFyKey = exactKey;
-    } else {
-      // Fall back: last key with year <= lastPublishedFyEndYear
-      const candidates = sortedKeys.filter(k => keyYear(k) <= lastPublishedFyEndYear);
-      expiryFyKey = candidates.length
-        ? candidates[candidates.length - 1]
-        : (sortedKeys[sortedKeys.length - 1] || null);
-      fyIsOpen = true;  // signal that we fell back
+    if (!isNaN(d)) {
+      // Indian FY ends in March: Jan-Mar => FY ends this year; Apr-Dec => FY ends next year
+      const fyEndYear  = d.getMonth() <= 2 ? d.getFullYear() : d.getFullYear() + 1;
+      expiryFyLabel    = 'FY' + fyEndYear;
+
+      const histKeys   = Object.keys(op.historical || {});
+      const keyYear    = k => { const m = k.match(/\d{4}/); return m ? parseInt(m[0]) : 0; };
+      const sortedKeys = histKeys.slice().sort((a,b) => keyYear(a) - keyYear(b));
+
+      // Determine current open FY (results not yet published for full year)
+      const now          = new Date();
+      const nowFyEndYear = now.getMonth() <= 2 ? now.getFullYear() : now.getFullYear() + 1;
+
+      // Exact match for expiry FY year
+      const exactKey = histKeys.find(k => k.includes(String(fyEndYear)));
+
+      if (exactKey && fyEndYear >= nowFyEndYear) {
+        // This FY is still open — annual results not published, so "actual" is live price
+        // Use the last completed FY (fyEndYear - 1) instead
+        fyIsOpen = true;
+        const completedFyYear = fyEndYear - 1;
+        const prevKey = histKeys.find(k => k.includes(String(completedFyYear)));
+        const prevFallback = sortedKeys.filter(k => keyYear(k) < fyEndYear);
+        expiryFyKey = prevKey || (prevFallback.length ? prevFallback[prevFallback.length - 1] : exactKey);
+      } else if (exactKey) {
+        // FY is closed - use it directly
+        expiryFyKey = exactKey;
+      } else {
+        // No exact match - pick last completed FY <= fyEndYear
+        const candidates = sortedKeys.filter(k => keyYear(k) <= fyEndYear);
+        expiryFyKey = candidates.length ? candidates[candidates.length - 1] : (sortedKeys[sortedKeys.length - 1] || null);
+      }
     }
   }
 
-  // ── Look up the pre-computed historical fair price for the matched FY ──
-  // IMPORTANT: use `expiryHistEntry.fair` directly — this is the model's price
-  // prediction for that FY's OP level, back-tested against the actual stock price.
-  // Do NOT re-run regression coefficients here; the backend already stored the
-  // correct scaled fair value per FY.
+  // ── Compute fair value at entry underlying using regression coefficients ──
+  // op.series contains the regression model; intercept + coef × OP_value = fair price
+  // We use the historical entry for the matched FY if available
   let expiryFairPrice = null;
   let expiryHistEntry = null;
   if (expiryFyKey && op.historical) {
     expiryHistEntry = op.historical[expiryFyKey];
     if (expiryHistEntry) {
-      expiryFairPrice = expiryHistEntry.fair;   // ← pre-computed, correct unit
+      expiryFairPrice = expiryHistEntry.fair;
     }
   }
 
-  // ── Valuation: compare entry underlying vs FY-matched fair price ──
-  // We intentionally NO LONGER recompute via (intercept + coef × profit) here
-  // because the regression coefficients operate on raw OP-in-Crores and the
-  // resulting price is only valid when the model was fit — applying them naively
-  // gives nonsensical results (e.g. ₹742 for a ₹1726 stock).
-  // The backend's pre-computed `fair` for each FY is the ground truth.
+  // If we have entry underlying + regression coefficients, compute predicted fair at entry spot
+  let regressionFairAtEntry = null;
+  if (entryUnderlying != null && op.coef != null && op.intercept != null) {
+    // The regression is: price = intercept + coef * OP
+    // But we need OP for that year — use expiryHistEntry.profit if available
+    if (expiryHistEntry?.profit != null) {
+      regressionFairAtEntry = op.intercept + op.coef * expiryHistEntry.profit;
+    }
+  }
+
+  // ── Valuation: compare entry underlying vs expiry-time fair price ──
   const referencePrice = entryUnderlying != null ? entryUnderlying : r.current_price;
-  const referenceFair  = expiryFairPrice ?? op.pred_price;   // pred_price = latest model output
+  const referenceFair  = regressionFairAtEntry ?? expiryFairPrice ?? op.pred_price;
   const usingCurrent   = !expiryFyKey && !entryUnderlying;
 
   let gainPct = null;
@@ -1733,14 +1732,13 @@ function renderFairPrice(r, idx, expiryDateStr, entryUnderlying) {
   // Historical years for table
   const histYears = Object.keys(op.historical || {}).sort();
 
-  // Context label for verdict banner
-  // Explains which FY's OP data is being used and why (results publication lag)
+  // Context label for verdict banner — explain FY fallback when expiry is in an open FY
   const contextNote = usingCurrent
     ? '(current price vs current model)'
     : expiryFyKey
       ? (fyIsOpen
-          ? `(entry spot vs ${expiryFyKey} fair — last FY with published results at trade date; ${expiryFyLabel} results not yet available)`
-          : `(entry spot vs ${expiryFyKey} fair — last FY with published results at trade date)`)
+          ? `(entry spot vs ${expiryFyKey} fair — using last completed FY; ${expiryFyLabel} results not yet published)`
+          : `(entry spot vs ${expiryFyKey} regression fair)`)
       : '(entry spot vs model)';
 
   bodyEl.innerHTML = `
@@ -1761,13 +1759,13 @@ function renderFairPrice(r, idx, expiryDateStr, entryUnderlying) {
       <div class="metric-card ${gainPct != null ? (gainPct > 0 ? 'profit' : gainPct < 0 ? 'loss' : '') : ''}">
         <div class="metric-label">OP Fair Price${expiryFyKey ? ` (${expiryFyKey})` : ''}</div>
         <div class="metric-value ${gainPct != null ? (gainPct > 0 ? 'green' : gainPct < 0 ? 'red' : 'amber') : 'amber'}">${fmtP(referenceFair)}</div>
-        <div class="metric-sub">${fmtS(gainPct)} · R²: ${op.r2 ?? '—'}${expiryHistEntry?.profit != null ? ` · ${r.profit_label||'OP'}: ₹${parseFloat(expiryHistEntry.profit).toLocaleString('en-IN',{maximumFractionDigits:0})} Cr` : ''}</div>
+        <div class="metric-sub">${fmtS(gainPct)} · R²: ${op.r2 ?? '—'}</div>
       </div>
       ${expiryHistEntry ? `
       <div class="metric-card">
         <div class="metric-label">Historical Actual (${expiryFyKey})</div>
         <div class="metric-value amber">${fmtP(expiryHistEntry.actual)}</div>
-        <div class="metric-sub">Avg stock price in ${expiryFyKey} · ${r.profit_label||'OP'}: ₹${parseFloat(expiryHistEntry.profit||0).toLocaleString('en-IN',{maximumFractionDigits:0})} Cr</div>
+        <div class="metric-sub">${r.profit_label||'OP'}: ₹${parseFloat(expiryHistEntry.profit||0).toLocaleString('en-IN',{maximumFractionDigits:0})} Cr</div>
       </div>` : (r.has_ttm && ttm.pred_price != null ? `
       <div class="metric-card ${ttm.gain_pct > 0 ? 'profit' : ttm.gain_pct < 0 ? 'loss' : ''}">
         <div class="metric-label">TTM Fair Price</div>
@@ -1820,7 +1818,7 @@ function renderFairPrice(r, idx, expiryDateStr, entryUnderlying) {
 
     <div style="font-size:9px;color:var(--text2);margin-top:4px;font-family:var(--font-mono)">
       Source: Screener.in + yfinance · Model: Linear Regression (${r.years_count} FY years) · ${r.is_bank ? 'Bank/NBFC adjusted' : 'Non-finance'}
-      ${expiryFyKey ? ` · Using ${expiryFyKey} — last FY with published results at trade date` : ' · Current fair price (no expiry context)'}
+      ${expiryFyKey ? ` · Fair price at expiry FY (${expiryFyKey})` : ' · Current fair price'}
     </div>
   `;
 }
@@ -2042,27 +2040,6 @@ function buildExpPanel(e, symbol, shortStrike, longStrike, lotSize, numLots, idx
       </div>
     </div>
 
-    <!-- ── STOCK PRICE CHART (unadjusted) ── -->
-    <div class="chart-section" id="stock-price-section-${idx}" style="padding:0 24px 12px">
-      <div class="section-title" style="margin-bottom:10px">
-        <span style="color:var(--amber)">📊</span> ${symbol} — Spot Price Chart
-        <span style="margin-left:8px;font-size:9px;color:var(--text2);font-weight:400;font-family:var(--font-mono)">Unadjusted · original prices (no split/dividend adj.)</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-        <span style="font-size:10px;color:var(--text2);font-family:var(--font-mono)">Range:</span>
-        <button class="btn btn-outline btn-sm stock-range-btn active-range" data-idx="${idx}" data-range="trade3m"
-          style="font-size:9px;padding:3px 9px" onclick="setStockRange(${idx},'trade3m',this)">±3M Trade</button>
-        <button class="btn btn-outline btn-sm stock-range-btn" data-idx="${idx}" data-range="expiry3m"
-          style="font-size:9px;padding:3px 9px" onclick="setStockRange(${idx},'expiry3m',this)">±3M Expiry</button>
-        <button class="btn btn-outline btn-sm stock-range-btn" data-idx="${idx}" data-range="full"
-          style="font-size:9px;padding:3px 9px" onclick="setStockRange(${idx},'full',this)">Entry→Expiry</button>
-        <button class="btn btn-outline btn-sm" style="font-size:9px;padding:3px 9px;margin-left:4px"
-          onclick="reloadStockChart(${idx})">🔄</button>
-        <span id="stock-chart-status-${idx}" style="font-size:9px;color:var(--text2);font-family:var(--font-mono);margin-left:4px"></span>
-      </div>
-      <div id="stock-ohlc-chart-${idx}" style="height:320px"></div>
-    </div>
-
     <!-- ── FAIR PRICE (SMA) ── -->
     <div class="chart-section" id="fair-price-section-${idx}" style="padding:0 24px 6px">
       <div class="section-title" style="cursor:pointer;user-select:none" onclick="toggleExpander(this.parentElement.querySelector('.expander-header')||this)">
@@ -2162,256 +2139,8 @@ function buildExpPanel(e, symbol, shortStrike, longStrike, lotSize, numLots, idx
 // ─────────────────────────────────────────
 const _spreadDataCache = {};
 
-// ─────────────────────────────────────────────────────────────
-//  STOCK SPOT PRICE CHART  (unadjusted NSE securityArchives)
-// ─────────────────────────────────────────────────────────────
-const _stockChartMeta = {};   // idx → { symbol, entryDate, expiryDate, currentRange }
-
-function _datePlusDays(isoDate, days) {
-  const d = new Date(isoDate);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0,10);
-}
-function _isoToDDMMYYYY(iso) {
-  // YYYY-MM-DD → DD-MM-YYYY
-  const [y,m,d] = iso.split('-');
-  return `${d}-${m}-${y}`;
-}
-
-function setStockRange(idx, range, btn) {
-  // Update active button style
-  document.querySelectorAll(`.stock-range-btn[data-idx="${idx}"]`).forEach(b => b.classList.remove('active-range'));
-  if (btn) btn.classList.add('active-range');
-  const meta = _stockChartMeta[idx];
-  if (!meta) return;
-  meta.currentRange = range;
-  _fetchAndRenderStock(idx);
-}
-
-function reloadStockChart(idx) {
-  const meta = _stockChartMeta[idx];
-  if (!meta) return;
-  _fetchAndRenderStock(idx);
-}
-
-async function _fetchAndRenderStock(idx) {
-  const meta = _stockChartMeta[idx];
-  if (!meta) return;
-  const { symbol, entryDate, expiryDate, entryUnderlying, currentRange } = meta;
-  const statusEl = document.getElementById(`stock-chart-status-${idx}`);
-  const chartEl  = document.getElementById(`stock-ohlc-chart-${idx}`);
-  if (!chartEl) return;
-
-  // Compute date window
-  let fromIso, toIso;
-  if (currentRange === 'trade3m') {
-    fromIso = _datePlusDays(entryDate, -91);
-    toIso   = _datePlusDays(entryDate,  91);
-  } else if (currentRange === 'expiry3m') {
-    fromIso = _datePlusDays(expiryDate, -91);
-    toIso   = _datePlusDays(expiryDate,  91);
-  } else {
-    // full: entry to expiry with 10-day padding each side
-    fromIso = _datePlusDays(entryDate,   -10);
-    toIso   = _datePlusDays(expiryDate,   10);
-  }
-
-  const fromDDMM = _isoToDDMMYYYY(fromIso);
-  const toDDMM   = _isoToDDMMYYYY(toIso);
-
-  if (statusEl) statusEl.textContent = '⏳ fetching…';
-  chartEl.style.opacity = '0.4';
-
-  try {
-    const url = `/api/option-charts/stock-ohlc?symbol=${encodeURIComponent(symbol)}&from_date=${encodeURIComponent(fromDDMM)}&to_date=${encodeURIComponent(toDDMM)}`;
-    const resp = await fetch(url);
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${resp.status}`);
-    }
-    const data = await resp.json();
-    const rows = data.data || [];
-
-    if (!rows.length) {
-      if (statusEl) statusEl.textContent = '⚠ no data';
-      chartEl.style.opacity = '1';
-      return;
-    }
-
-    _renderStockCandlestick(idx, symbol, rows, entryDate, expiryDate, entryUnderlying, currentRange);
-    if (statusEl) statusEl.textContent = `${rows.length} candles`;
-    chartEl.style.opacity = '1';
-  } catch(err) {
-    if (statusEl) statusEl.textContent = `❌ ${err.message}`;
-    chartEl.style.opacity = '1';
-  }
-}
-
-function _renderStockCandlestick(idx, symbol, rows, entryDate, expiryDate, entryUnderlying, range) {
-  const dates  = rows.map(r => r.date);
-  const opens  = rows.map(r => r.open);
-  const highs  = rows.map(r => r.high);
-  const lows   = rows.map(r => r.low);
-  const closes = rows.map(r => r.close);
-  const vols   = rows.map(r => r.volume);
-
-  // Find entry price from data (close on/near entryDate)
-  const entryRow = rows.find(r => r.date >= entryDate) || rows[0];
-  const entryClose = entryRow ? entryRow.close : null;
-  const entryDateActual = entryRow ? entryRow.date : entryDate;
-
-  // Find expiry row price
-  const expiryRow = [...rows].reverse().find(r => r.date <= expiryDate);
-  const expiryClose = expiryRow ? expiryRow.close : null;
-  const expiryDateActual = expiryRow ? expiryRow.date : expiryDate;
-
-  const traces = [
-    // Main candlestick
-    {
-      type: 'candlestick',
-      x: dates, open: opens, high: highs, low: lows, close: closes,
-      name: symbol,
-      increasing: { line: { color: '#00d97e', width: 1 }, fillcolor: 'rgba(0,217,126,0.65)' },
-      decreasing: { line: { color: '#ff3b5c', width: 1 }, fillcolor: 'rgba(255,59,92,0.65)' },
-      whiskerwidth: 0.3,
-      yaxis: 'y',
-    },
-    // Volume bars
-    {
-      type: 'bar', x: dates, y: vols, name: 'Volume',
-      marker: { color: 'rgba(61,155,255,0.15)', line: { color: 'rgba(61,155,255,0.28)', width: 0.5 } },
-      yaxis: 'y2', showlegend: false,
-    },
-  ];
-
-  // Entry date vertical line + annotation
-  if (entryClose) {
-    traces.push({
-      type: 'scatter', mode: 'markers+text',
-      x: [entryDateActual], y: [entryClose],
-      text: [`Trade Entry\n₹${fmt(entryClose)}`],
-      textposition: 'top right',
-      marker: { color: '#fbbf24', size: 8, symbol: 'diamond', line: { color: '#fff', width: 1 } },
-      name: 'Trade Entry',
-      textfont: { size: 9, color: '#fbbf24', family: "'JetBrains Mono',monospace" },
-      yaxis: 'y',
-    });
-  }
-
-  // Expiry date marker
-  if (expiryClose) {
-    traces.push({
-      type: 'scatter', mode: 'markers+text',
-      x: [expiryDateActual], y: [expiryClose],
-      text: [`Expiry\n₹${fmt(expiryClose)}`],
-      textposition: 'top left',
-      marker: { color: '#a78bfa', size: 8, symbol: 'x', line: { color: '#fff', width: 1.5 } },
-      name: 'Expiry',
-      textfont: { size: 9, color: '#a78bfa', family: "'JetBrains Mono',monospace" },
-      yaxis: 'y',
-    });
-  }
-
-  // Entry underlying horizontal dotted line (from spread analysis)
-  if (entryUnderlying) {
-    traces.push({
-      type: 'scatter', mode: 'lines',
-      x: [dates[0], dates[dates.length-1]],
-      y: [entryUnderlying, entryUnderlying],
-      name: `Underlying at Entry ₹${fmt(entryUnderlying)}`,
-      line: { color: 'rgba(251,191,36,0.5)', width: 1, dash: 'dot' },
-      yaxis: 'y',
-    });
-  }
-
-  // Entry date vertical shape
-  const shapes = [
-    {
-      type: 'line', xref: 'x', yref: 'paper',
-      x0: entryDate, x1: entryDate, y0: 0, y1: 1,
-      line: { color: 'rgba(251,191,36,0.35)', width: 1.5, dash: 'dash' },
-    },
-    {
-      type: 'line', xref: 'x', yref: 'paper',
-      x0: expiryDate, x1: expiryDate, y0: 0, y1: 1,
-      line: { color: 'rgba(167,139,250,0.35)', width: 1.5, dash: 'dash' },
-    },
-  ];
-
-  const layout = {
-    paper_bgcolor: '#070f1c',
-    plot_bgcolor:  '#070f1c',
-    font: { family: "'JetBrains Mono',monospace", color: '#8899b4', size: 10 },
-    margin: { t: 28, r: 20, b: 40, l: 60 },
-    height: 320,
-    xaxis: {
-      type: 'category',
-      showgrid: false,
-      linecolor: '#1e2d42',
-      tickfont: { size: 9 },
-      rangeslider: { visible: false },
-      tickangle: -30,
-      nticks: 12,
-    },
-    yaxis: {
-      gridcolor: 'rgba(30,45,66,0.6)',
-      linecolor: '#1e2d42',
-      tickfont: { size: 9 },
-      title: { text: 'Price (₹)', font: { size: 9, color: '#8899b4' }, standoff: 4 },
-      domain: [0.22, 1],
-    },
-    yaxis2: {
-      domain: [0, 0.18],
-      showgrid: false,
-      linecolor: '#1e2d42',
-      tickfont: { size: 8 },
-      title: { text: 'Vol', font: { size: 8, color: '#8899b4' }, standoff: 2 },
-    },
-    shapes,
-    legend: {
-      orientation: 'h', x: 0, y: 1.06,
-      font: { size: 9 }, bgcolor: 'transparent',
-    },
-    title: {
-      text: `<b>${symbol}</b> — Unadjusted Spot · ${range === 'trade3m' ? '±3M around Trade' : range === 'expiry3m' ? '±3M around Expiry' : 'Entry → Expiry'}`,
-      font: { color: '#e8edf5', size: 11 },
-      x: 0.01,
-    },
-  };
-
-  Plotly.react(`stock-ohlc-chart-${idx}`, traces, layout, { displayModeBar: false, responsive: true });
-}
-
-function initStockChart(e, symbol, idx) {
-  const entryDate  = e.entry_date  || '';
-  const expiryDate = (e.stats && e.stats.expiry)
-    ? (() => {
-        // Convert DD-MMM-YYYY (e.g. 27-MAR-2025) → YYYY-MM-DD
-        try {
-          const d = new Date(e.stats.expiry.replace(/-/g,' '));
-          if (!isNaN(d)) return d.toISOString().slice(0,10);
-        } catch(_) {}
-        return e.stats.expiry;
-      })()
-    : '';
-
-  if (!entryDate || !expiryDate) return;
-
-  _stockChartMeta[idx] = {
-    symbol,
-    entryDate,
-    expiryDate,
-    entryUnderlying: e.entry_underlying || null,
-    currentRange: 'trade3m',
-  };
-  _fetchAndRenderStock(idx);
-}
-
 function renderSpreadCharts(e, symbol, shortStrike, longStrike, idx) {
   _spreadDataCache[idx] = e;
-
-  // ── Stock spot price chart (unadjusted) ──
-  initStockChart(e, symbol, idx);
 
   const s      = e.stats;
   const pnlSer = e.pnl_series;

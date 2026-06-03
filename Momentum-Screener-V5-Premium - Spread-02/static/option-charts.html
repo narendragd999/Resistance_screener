@@ -123,9 +123,10 @@ header{
   padding:10px 16px;
   font-family:var(--font-mono);
   font-size:11px;
-  align-items:center;
-  gap:10px;
+  align-items:flex-start;
+  gap:8px;
   flex-wrap:wrap;
+  row-gap:8px;
 }
 #sp-spot-banner.visible{display:flex}
 #sp-spot-banner.loading{border-color:rgba(74,144,226,.3);background:rgba(74,144,226,.05)}
@@ -138,7 +139,7 @@ header{
 #sp-lot-badge.manual{color:#8b8fa8;background:rgba(139,143,168,.1);border:1px solid rgba(139,143,168,.25)}
 #sp-lot-badge.error {color:#ff3b5c;background:rgba(255,59,92,.08);border:1px solid rgba(255,59,92,.25)}
 .spot-hint{color:var(--text2);font-size:10px}
-.spot-otm-chips{display:flex;gap:6px;flex-wrap:wrap;margin-left:4px}
+.spot-otm-chips{display:flex;gap:5px;flex-wrap:wrap;margin-left:4px;max-width:100%}
 .otm-chip{
   padding:3px 9px;border-radius:99px;font-size:10px;font-weight:600;
   border:1px solid;letter-spacing:.03em;cursor:default;
@@ -1266,14 +1267,22 @@ function _renderSpotBanner(data) {
   dateEl.textContent  = underlying_date ? '(' + underlying_date + ')' : '';
   if (noteEl) noteEl.textContent = 'Click a chip to set as Short strike';
 
-  // OTM chips: ATM + first OTM strikes
+  // Chips: 3 closest ITM + ATM + up to 12 OTM
   if (strikes_detail && strikes_detail.length) {
-    const relevant = strikes_detail.filter(s => s.zone === 'OTM' || s.zone === 'ATM').slice(0, 7);
+    const itm      = strikes_detail.filter(s => s.zone === 'ITM').slice(-3);
+    const atm      = strikes_detail.filter(s => s.zone === 'ATM');
+    const otm      = strikes_detail.filter(s => s.zone === 'OTM').slice(0, 12);
+    const relevant = [...itm, ...atm, ...otm];
     chipsEl.innerHTML = relevant.map(s => {
       const pct = s.pct_otm != null ? (s.pct_otm >= 0 ? '+' : '') + s.pct_otm.toFixed(1) + '%' : '';
-      const cls = s.zone === 'ATM' ? 'atm' : s.pct_otm < 2 ? 'near-otm' : 'far-otm';
-      return `<span class="otm-chip ${cls}" title="Click to set as Short strike"
-                onclick="document.getElementById('sp-short-strike').value=${s.strike};this.style.outline='2px solid var(--teal)'">
+      const cls = s.zone === 'ATM' ? 'atm' : s.zone === 'ITM' ? 'itm' : s.pct_otm < 2 ? 'near-otm' : 'far-otm';
+      return `<span class="otm-chip ${cls}" data-strike="${s.strike}" title="Click to set as Short strike"
+                onclick="
+                  document.getElementById('sp-short-strike').value=${s.strike};
+                  document.querySelectorAll('#sp-spot-chips .otm-chip').forEach(c=>c.style.outline='');
+                  this.style.outline='2px solid var(--teal)';
+                  this.style.outlineOffset='1px';
+                ">
                 ${s.strike.toLocaleString('en-IN')} <span style="opacity:.75">${pct} ${s.zone}</span>
               </span>`;
     }).join('');
