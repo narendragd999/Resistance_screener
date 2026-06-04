@@ -1431,7 +1431,7 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
             time.sleep(random.uniform(0.1, 0.3))
             continue
 
-        # Surge_High (surge peak) is the primary resistance ceiling.
+        # Surge_High (surge peak) is the primary resistance ceiling for proximity.
         resistance = (
             sig.get("Surge_High")
             or sig.get("Yesterday_High")
@@ -1447,35 +1447,52 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
             time.sleep(random.uniform(0.2, 0.5))
             continue
 
-        # Price broke above surge_high → thesis invalidated (breakout confirmed)
-        if cur_price > resistance:
+        # Proximity ceiling = Surge_High (true resistance).
+        # Yesterday_High is just the pre-breakdown candle — not resistance.
+        surge_high_val    = float(sig.get("Surge_High") or 0)
+        proximity_ceiling = surge_high_val or float(sig.get("Yesterday_High") or 0) or float(resistance or 0)
+
+        if not proximity_ceiling:
             time.sleep(random.uniform(0.2, 0.5))
             continue
 
-        dist_pct = (resistance - cur_price) / resistance * 100
+        # Price above surge_high = retest in progress → always in sell zone.
+        # Price above surge_high completely = full breakout → skip.
+        # (These are the same condition — once price > surge_high it shows,
+        #  only skip if surge_high itself is not set which is handled above.)
+        above_surge  = surge_high_val > 0 and cur_price >= surge_high_val
+        dist_pct     = (proximity_ceiling - cur_price) / proximity_ceiling * 100
 
-        if dist_pct <= proximity_pct:
-            g2_date = sig.get("Sell_Zone_EMA_Confirm_Date", "?")
-            hit = {
-                **sig,
-                "Current_Price":          round(cur_price, 2),
-                "Resistance_High":        round(resistance, 2),
-                "Distance_From_High_Pct": round(dist_pct, 2),
-                "Alert_Time":             now_ist_str(),
-            }
-            sell_zone_hits.append(hit)
-            send_telegram(
-                cfg["telegram_bot_token"],
-                cfg["telegram_chat_id"],
-                f"*SELL ZONE — {ticker}* ✅ All 3 Gates Passed\n"
-                f"Gate 1 ✅ Momentum break (close < prev low)\n"
-                f"Gate 2 ✅ EMA breach confirmed {g2_date}\n"
-                f"Gate 3 ✅ Price Rs{cur_price:.2f} within "
-                f"{dist_pct:.2f}% of Surge High Rs{resistance:.2f} "
-                f"(limit {proximity_pct}%)\n"
-                f"Strike Rs{sig.get('Suggested_Strike','?')} CE  "
-                f"Expiry {sig.get('Expiry','?')}"
-            )
+        # In sell zone if:
+        #   1. Price >= surge_high (retest happening), OR
+        #   2. Price within proximity_pct% of surge_high
+        in_sell_zone = above_surge or (dist_pct <= proximity_pct)
+
+        if not in_sell_zone:
+            time.sleep(random.uniform(0.2, 0.5))
+            continue
+
+        g2_date = sig.get("Sell_Zone_EMA_Confirm_Date", "?")
+        hit = {
+            **sig,
+            "Current_Price":          round(cur_price, 2),
+            "Resistance_High":        round(proximity_ceiling, 2),
+            "Distance_From_High_Pct": round(dist_pct, 2),
+            "Alert_Time":             now_ist_str(),
+        }
+        sell_zone_hits.append(hit)
+        send_telegram(
+            cfg["telegram_bot_token"],
+            cfg["telegram_chat_id"],
+            f"*SELL ZONE — {ticker}* ✅ All 3 Gates Passed\n"
+            f"Gate 1 ✅ Momentum break (close < prev low)\n"
+            f"Gate 2 ✅ EMA breach confirmed {g2_date}\n"
+            f"Gate 3 ✅ Price Rs{cur_price:.2f} within "
+            f"{dist_pct:.2f}% of Swing High Rs{proximity_ceiling:.2f} "
+            f"(limit {proximity_pct}%)\n"
+            f"Strike Rs{sig.get('Suggested_Strike','?')} CE  "
+            f"Expiry {sig.get('Expiry','?')}"
+        )
 
         time.sleep(random.uniform(0.2, 0.5))
 
@@ -1564,6 +1581,28 @@ def run_screen_job(tickers: List[str], cfg: Dict, job_id: str):
         "nse_calls":       nse_calls,
     })
     save_scan_log(log[-100:])
+
+    # ── Gate 3: proximity / sell-zone check ──────────────────────────────────
+    # Run after signals are saved so newly Gate-2-confirmed signals are included.
+    all_sigs = load_signals()
+    if all_sigs:
+        hits = check_proximity_alerts(all_sigs, cfg)
+        if hits:
+            prox = load_proximity()
+            recent = {
+                h["Ticker"] for h in prox
+                if h.get("Alert_Time") and
+                (datetime.now(IST) -
+                 datetime.strptime(h["Alert_Time"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
+                ).total_seconds() < 1800
+            }
+            new_hits = [h for h in hits if h["Ticker"] not in recent]
+            if new_hits:
+                prox.extend(new_hits)
+                save_proximity(prox[-200:])
+                job_log(job_id, f"Sell zone: {len(new_hits)} ticker(s) in proximity zone", "signal")
+        else:
+            job_log(job_id, "Sell zone: no tickers in proximity range", "info")
 
     job_log(job_id,
         f"Done -- {len(signals)} signal(s) found, {added} new, {pruned} pruned.", "info")
@@ -1839,31 +1878,41 @@ def start_scheduler(cfg: Dict):
         c = load_config()
         if c["market_hours_only"] and not is_market_open():
             return
-        jid = create_job()
-        run_screen_job(load_tickers(), c, jid)
-        # Gate 2: check EMA+volume confirmation for all signals
-        update_sell_zone_gates(c)
+        # AUTO-SCAN: Only check existing signals for sell zone proximity.
+        # Full re-scan of all tickers is done manually via "Screen All Tickers".
         all_sigs = load_signals()
-        if all_sigs:
-            hits = check_proximity_alerts(all_sigs, c)
-            if hits:
-                prox = load_proximity()
-                # Deduplicate within 30-min window
-                recent = {
-                    h["Ticker"] for h in prox
-                    if h.get("Alert_Time") and
-                    (datetime.now(IST) -
-                     datetime.strptime(h["Alert_Time"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
-                    ).total_seconds() < 1800
-                }
-                new_hits = [h for h in hits if h["Ticker"] not in recent]
-                if new_hits:
-                    prox.extend(new_hits)
-                    save_proximity(prox[-200:])
+        if not all_sigs:
+            return  # No signals yet — nothing to check
+        # Gate 2: update EMA+volume confirmation for existing signals
+        update_sell_zone_gates(c)
+        all_sigs = load_signals()  # reload after gate2 update
+        # Gate 3: proximity / sell-zone check
+        hits = check_proximity_alerts(all_sigs, c)
+        if hits:
+            prox = load_proximity()
+            # Deduplicate within 30-min window
+            recent = {
+                h["Ticker"] for h in prox
+                if h.get("Alert_Time") and
+                (datetime.now(IST) -
+                 datetime.strptime(h["Alert_Time"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
+                ).total_seconds() < 1800
+            }
+            new_hits = [h for h in hits if h["Ticker"] not in recent]
+            if new_hits:
+                prox.extend(new_hits)
+                save_proximity(prox[-200:])
 
-    interval = max(cfg.get("auto_scan_interval_min", 15), 10)
-    _scheduler.add_job(job, IntervalTrigger(minutes=interval),
-                       id="main_scan", replace_existing=True)
+    interval = max(cfg.get("auto_scan_interval_min", 15), 1)
+    _scheduler.add_job(
+        job,
+        IntervalTrigger(minutes=interval),
+        id="main_scan",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=interval * 60,
+    )
     _scheduler.start()
 
 
@@ -1973,11 +2022,16 @@ async def get_config():
 @app.put("/api/config")
 async def update_config(data: ConfigUpdate):
     cfg     = load_config()
-    updates = {k: v for k, v in data.dict().items() if v is not None}
+    updates = {k: v for k, v in data.dict().items() if v is not None or isinstance(v, bool)}
     cfg.update(updates)
     save_config(cfg)
     if cfg["auto_scan_enabled"]:
         start_scheduler(cfg)
+    else:
+        global _scheduler
+        if _scheduler and _scheduler.running:
+            _scheduler.shutdown(wait=False)
+            _scheduler = None
     return cfg
 
 @app.get("/api/tickers")
@@ -2050,6 +2104,11 @@ async def remove_signal(ticker: str):
 @app.get("/api/proximity")
 async def get_proximity():
     return load_proximity()
+
+@app.delete("/api/proximity")
+async def clear_proximity():
+    _wj(PROXIMITY_FILE, [])
+    return {"ok": True}
 
 @app.post("/api/proximity/check")
 async def check_proximity():
@@ -2331,4 +2390,4 @@ async def startup_event():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
