@@ -1447,49 +1447,52 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
             time.sleep(random.uniform(0.2, 0.5))
             continue
 
-        # Proximity distance measured from yesterday_high (true swing ceiling).
-        # If price is ABOVE surge_high it means the retest is already happening —
-        # always show in sell zone regardless. Only skip if price has broken above
-        # yesterday_high (original swing peak) — thesis truly invalidated there.
-        proximity_ceiling = (
-            sig.get("Yesterday_High")
-            or sig.get("Surge_High")
-            or resistance
-        )
-        if cur_price > proximity_ceiling:
+        # Proximity ceiling = Surge_High (true resistance).
+        # Yesterday_High is just the pre-breakdown candle — not resistance.
+        surge_high_val    = float(sig.get("Surge_High") or 0)
+        proximity_ceiling = surge_high_val or float(sig.get("Yesterday_High") or 0) or float(resistance or 0)
+
+        if not proximity_ceiling:
             time.sleep(random.uniform(0.2, 0.5))
             continue
 
-        surge_high_val = sig.get("Surge_High") or 0
-        above_surge    = surge_high_val > 0 and cur_price > surge_high_val
-        dist_pct       = (proximity_ceiling - cur_price) / proximity_ceiling * 100
+        # Price above surge_high = retest in progress → always in sell zone.
+        # Price above surge_high completely = full breakout → skip.
+        # (These are the same condition — once price > surge_high it shows,
+        #  only skip if surge_high itself is not set which is handled above.)
+        above_surge  = surge_high_val > 0 and cur_price >= surge_high_val
+        dist_pct     = (proximity_ceiling - cur_price) / proximity_ceiling * 100
 
-        # Always in sell zone if price is above surge_high (retest in progress).
-        # Otherwise apply normal proximity % check against yesterday_high.
+        # In sell zone if:
+        #   1. Price >= surge_high (retest happening), OR
+        #   2. Price within proximity_pct% of surge_high
         in_sell_zone = above_surge or (dist_pct <= proximity_pct)
 
-        if in_sell_zone:
-            g2_date = sig.get("Sell_Zone_EMA_Confirm_Date", "?")
-            hit = {
-                **sig,
-                "Current_Price":          round(cur_price, 2),
-                "Resistance_High":        round(proximity_ceiling, 2),
-                "Distance_From_High_Pct": round(dist_pct, 2),
-                "Alert_Time":             now_ist_str(),
-            }
-            sell_zone_hits.append(hit)
-            send_telegram(
-                cfg["telegram_bot_token"],
-                cfg["telegram_chat_id"],
-                f"*SELL ZONE — {ticker}* ✅ All 3 Gates Passed\n"
-                f"Gate 1 ✅ Momentum break (close < prev low)\n"
-                f"Gate 2 ✅ EMA breach confirmed {g2_date}\n"
-                f"Gate 3 ✅ Price Rs{cur_price:.2f} within "
-                f"{dist_pct:.2f}% of Swing High Rs{proximity_ceiling:.2f} "
-                f"(limit {proximity_pct}%)\n"
-                f"Strike Rs{sig.get('Suggested_Strike','?')} CE  "
-                f"Expiry {sig.get('Expiry','?')}"
-            )
+        if not in_sell_zone:
+            time.sleep(random.uniform(0.2, 0.5))
+            continue
+
+        g2_date = sig.get("Sell_Zone_EMA_Confirm_Date", "?")
+        hit = {
+            **sig,
+            "Current_Price":          round(cur_price, 2),
+            "Resistance_High":        round(proximity_ceiling, 2),
+            "Distance_From_High_Pct": round(dist_pct, 2),
+            "Alert_Time":             now_ist_str(),
+        }
+        sell_zone_hits.append(hit)
+        send_telegram(
+            cfg["telegram_bot_token"],
+            cfg["telegram_chat_id"],
+            f"*SELL ZONE — {ticker}* ✅ All 3 Gates Passed\n"
+            f"Gate 1 ✅ Momentum break (close < prev low)\n"
+            f"Gate 2 ✅ EMA breach confirmed {g2_date}\n"
+            f"Gate 3 ✅ Price Rs{cur_price:.2f} within "
+            f"{dist_pct:.2f}% of Swing High Rs{proximity_ceiling:.2f} "
+            f"(limit {proximity_pct}%)\n"
+            f"Strike Rs{sig.get('Suggested_Strike','?')} CE  "
+            f"Expiry {sig.get('Expiry','?')}"
+        )
 
         time.sleep(random.uniform(0.2, 0.5))
 
@@ -2367,4 +2370,4 @@ async def startup_event():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
