@@ -1976,7 +1976,7 @@
   {
     "Ticker": "ANGELONE",
     "Today_Close": 334.75,
-    "Surge_High": 351.0,
+    "Surge_High": 330.23,
     "Yesterday_High": 351.0,
     "Yesterday_Close": 344.45,
     "Yesterday_Low": 343.0,
@@ -1995,7 +1995,7 @@
     "Days_Since_Surge_End": 43,
     "Prev_Pullup_High": null,
     "Lifetime_52W_High": 351.0,
-    "Suggested_Strike": 360,
+    "Suggested_Strike": 335.0,
     "Expiry": "30-Jun-2026",
     "CE_LTP": 16.8,
     "CE_OI": 198,
@@ -2018,6 +2018,6 @@
     "Breakdown_Date": "2026-05-27",
     "Sell_Zone_EMA_Confirmed": true,
     "Sell_Zone_EMA_Confirm_Date": "2026-06-03",
-    "Scanned_At": "2026-06-04 08:32:15"
+    "Scanned_At": "2026-06-04 08:33:56"
   }
 ]

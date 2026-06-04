@@ -1,11 +1,5 @@
 [
   {
-    "time": "2026-04-27 12:05:12",
-    "tickers_scanned": 201,
-    "signals_found": 32,
-    "nse_calls": 76
-  },
-  {
     "time": "2026-04-27 12:20:57",
     "tickers_scanned": 201,
     "signals_found": 32,
@@ -595,6 +589,12 @@
   },
   {
     "time": "2026-06-04 08:32:18",
+    "tickers_scanned": 1,
+    "signals_found": 1,
+    "nse_calls": 2
+  },
+  {
+    "time": "2026-06-04 08:34:00",
     "tickers_scanned": 1,
     "signals_found": 1,
     "nse_calls": 2
