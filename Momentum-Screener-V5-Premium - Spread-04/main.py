@@ -238,7 +238,22 @@ def _wj(path: str, data):
 load_signals   = lambda: _rj(SIGNALS_FILE, [])
 save_signals   = lambda d: _wj(SIGNALS_FILE, d)
 load_proximity = lambda: _rj(PROXIMITY_FILE, [])
-save_proximity = lambda d: _wj(PROXIMITY_FILE, d)
+
+def save_proximity(data: list):
+    """
+    Persist proximity alerts.
+    Before writing, drop any entries whose stored Distance_From_High_Pct exceeds
+    the CURRENT price_proximity_percent so the file never accumulates stale
+    wide-range alerts from a previous (looser) setting.
+    """
+    try:
+        cfg      = load_config()
+        prox_pct = float(cfg.get("price_proximity_percent", 2.0))
+        data     = [a for a in data if a.get("Distance_From_High_Pct", 999) <= prox_pct]
+    except Exception:
+        pass   # if config can't be read, write as-is (safe fallback)
+    _wj(PROXIMITY_FILE, data)
+
 load_scan_log  = lambda: _rj(SCAN_LOG_FILE, [])
 save_scan_log  = lambda d: _wj(SCAN_LOG_FILE, d)
 load_premium_zone  = lambda: _rj(PREMIUM_ZONE_FILE, [])
@@ -1017,8 +1032,22 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
     # ── CRITICAL: Use SURGE_HIGH as resistance (not yesterday_high) ────────
     # The surge window's highest point is the true resistance level where
     # price exhausted momentum. Even after breakdown + recovery, this level
-    # will likely reject price again (as seen in DIXON 20 May 2025 example).
-    surge_window_highs = scan_highs[surge_start_idx:surge_end_idx + 1]   # ✅ uses pre-breakdown slice — excludes live-price injection on today's candle
+    # will likely reject price again.
+    #
+    # BUG FIX: surge_high must span from surge_start_idx all the way up to
+    # the breakdown candle (exclusive), NOT just to surge_end_idx.
+    #
+    # Why: the best-gain window picker (above) finds the window with the
+    # highest % net close-to-close gain.  That window often ends a few
+    # candles BEFORE the absolute price peak (e.g. BHEL: the best-gain
+    # window ends in Apr while the true intraday high of Rs424.70 is in
+    # mid-May).  Restricting surge_window_highs to [start:end+1] therefore
+    # MISSES the real resistance ceiling.
+    #
+    # The correct approach: max(High) from surge_start_idx to the breakdown
+    # candle.  scan_highs already excludes today's live-price injection
+    # (it is sliced as highs[:breakdown_idx] above).
+    surge_window_highs = scan_highs[surge_start_idx:]   # start → breakdown (exclusive)
     surge_high         = float(np.max(surge_window_highs))
 
     if job_id:
@@ -1330,12 +1359,22 @@ def check_ema_confirmed_after_breakdown(
         if closes[i] < ema_values[i]:
             vol_ratio = float(vols[i]) / avg_vol_20d
             if vol_ratio >= min_vol_ratio:
-                # ── Recompute surge_high: max high from (breakdown - recency_days)
-                #    up to (but not including) this Gate-2 candle.
-                #    Mirrors backtest.py backtest_ticker() lines 592-596.
-                lookback_start = max(0, start_idx - recency_days)
-                if lookback_start < i:
-                    recomputed_surge_high = float(np.max(highs[lookback_start:i]))
+                # ── Recompute surge_high: max High from the full pre-breakdown
+                #    window up to (but not including) this Gate-2 candle.
+                #
+                # BUG FIX: the previous code used `start_idx - recency_days`
+                # as the lookback start, which is only ~5 candles before the
+                # breakdown candle.  That's far too narrow — it misses highs
+                # that occurred earlier in the surge (e.g. BHEL's Rs424.70
+                # peak in mid-May, where breakdown was Jun-01 and recency=5
+                # only looked back to ~May-27).
+                #
+                # The correct lookback start is `lookback_days` worth of
+                # history before the breakdown candle, which is the same
+                # window used in Gate-1 detection.  We use the full `hist`
+                # already in memory (fetched with lookback_days above).
+                if start_idx > 0:
+                    recomputed_surge_high = float(np.max(highs[:start_idx]))
                 else:
                     recomputed_surge_high = None
                 return True, dates[i].strftime("%Y-%m-%d"), recomputed_surge_high
@@ -1878,31 +1917,41 @@ def start_scheduler(cfg: Dict):
         c = load_config()
         if c["market_hours_only"] and not is_market_open():
             return
-        jid = create_job()
-        run_screen_job(load_tickers(), c, jid)
-        # Gate 2: check EMA+volume confirmation for all signals
-        update_sell_zone_gates(c)
+        # AUTO-SCAN: Only check existing signals for sell zone proximity.
+        # Full re-scan of all tickers is done manually via "Screen All Tickers".
         all_sigs = load_signals()
-        if all_sigs:
-            hits = check_proximity_alerts(all_sigs, c)
-            if hits:
-                prox = load_proximity()
-                # Deduplicate within 30-min window
-                recent = {
-                    h["Ticker"] for h in prox
-                    if h.get("Alert_Time") and
-                    (datetime.now(IST) -
-                     datetime.strptime(h["Alert_Time"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
-                    ).total_seconds() < 1800
-                }
-                new_hits = [h for h in hits if h["Ticker"] not in recent]
-                if new_hits:
-                    prox.extend(new_hits)
-                    save_proximity(prox[-200:])
+        if not all_sigs:
+            return  # No signals yet — nothing to check
+        # Gate 2: update EMA+volume confirmation for existing signals
+        update_sell_zone_gates(c)
+        all_sigs = load_signals()  # reload after gate2 update
+        # Gate 3: proximity / sell-zone check
+        hits = check_proximity_alerts(all_sigs, c)
+        if hits:
+            prox = load_proximity()
+            # Deduplicate within 30-min window
+            recent = {
+                h["Ticker"] for h in prox
+                if h.get("Alert_Time") and
+                (datetime.now(IST) -
+                 datetime.strptime(h["Alert_Time"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
+                ).total_seconds() < 1800
+            }
+            new_hits = [h for h in hits if h["Ticker"] not in recent]
+            if new_hits:
+                prox.extend(new_hits)
+                save_proximity(prox[-200:])
 
-    interval = max(cfg.get("auto_scan_interval_min", 15), 10)
-    _scheduler.add_job(job, IntervalTrigger(minutes=interval),
-                       id="main_scan", replace_existing=True)
+    interval = max(cfg.get("auto_scan_interval_min", 15), 1)
+    _scheduler.add_job(
+        job,
+        IntervalTrigger(minutes=interval),
+        id="main_scan",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=interval * 60,
+    )
     _scheduler.start()
 
 
@@ -2012,11 +2061,16 @@ async def get_config():
 @app.put("/api/config")
 async def update_config(data: ConfigUpdate):
     cfg     = load_config()
-    updates = {k: v for k, v in data.dict().items() if v is not None}
+    updates = {k: v for k, v in data.dict().items() if v is not None or isinstance(v, bool)}
     cfg.update(updates)
     save_config(cfg)
     if cfg["auto_scan_enabled"]:
         start_scheduler(cfg)
+    else:
+        global _scheduler
+        if _scheduler and _scheduler.running:
+            _scheduler.shutdown(wait=False)
+            _scheduler = None
     return cfg
 
 @app.get("/api/tickers")
@@ -2088,7 +2142,24 @@ async def remove_signal(ticker: str):
 
 @app.get("/api/proximity")
 async def get_proximity():
-    return load_proximity()
+    """
+    Return saved sell-zone alerts, filtered by the CURRENT price_proximity_percent.
+    Alerts generated under a wider setting are automatically excluded — no manual
+    clear needed when the user tightens the proximity threshold.
+    """
+    cfg      = load_config()
+    prox_pct = float(cfg.get("price_proximity_percent", 2.0))
+    alerts   = load_proximity()
+    filtered = [
+        a for a in alerts
+        if a.get("Distance_From_High_Pct", 999) <= prox_pct
+    ]
+    return filtered
+
+@app.delete("/api/proximity")
+async def clear_proximity():
+    _wj(PROXIMITY_FILE, [])
+    return {"ok": True}
 
 @app.post("/api/proximity/check")
 async def check_proximity():
@@ -2370,4 +2441,4 @@ async def startup_event():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)

@@ -12,7 +12,7 @@
   "ce_history_days": 45,
   "max_signal_age_days": 90,
   "auto_scan_enabled": true,
-  "auto_scan_interval_min": 15,
+  "auto_scan_interval_min": 5,
   "market_hours_only": true,
   "prev_high_filter_enabled": false,
   "prev_high_lookback_days": 120,

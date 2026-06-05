@@ -1064,6 +1064,9 @@ td.amber { color:var(--amber); font-family:var(--font-mono); }
       <div class="section-title">
         Sell Zone Alerts
         <span class="count-tag" id="alerts-count">0 hits</span>
+        <button class="btn btn-danger btn-sm" id="btn-clear-alerts" style="margin-left:auto">
+          🗑 Clear Sell Alerts
+        </button>
       </div>
       <div class="table-wrap">
         <table id="alerts-table">
@@ -2224,6 +2227,18 @@ document.getElementById('btn-clear').addEventListener('click', async () => {
     toast('success','Cleared all signals and alerts');
     refreshStatus();
   } catch(e) { toast('error','Clear failed'); }
+});
+
+document.getElementById('btn-clear-alerts').addEventListener('click', async () => {
+  if (!confirm('Clear sell alerts only? (Signals will be kept)')) return;
+  try {
+    await API.del('/api/proximity');
+    State.alerts = [];
+    renderAlerts();
+    updateBadge('alerts', 0);
+    toast('success', 'Sell alerts cleared');
+    refreshStatus();
+  } catch(e) { toast('error', 'Clear alerts failed'); }
 });
 
 // ═══════════════════════════════════════════════════════
