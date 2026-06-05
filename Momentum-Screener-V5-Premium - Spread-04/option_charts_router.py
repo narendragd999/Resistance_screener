@@ -497,7 +497,11 @@ def _build_daily_pnl_series(
         pnl_per_share  = net_credit_per_share - (sc - lc)
         pnl_per_lot    = round(pnl_per_share * lot_size, 2)
         pnl_total      = round(pnl_per_lot * num_lots, 2)
-        pct_of_max     = round((pnl_total / total_max_profit * 100) if total_max_profit != 0 else 0, 1)
+
+        # Store raw pct_of_max_profit for chart use.
+        # _calc_spread_stats will recompute final_pct using max_loss when P&L is negative,
+        # so the "-795%" display bug is fixed there.
+        pct_of_max = round((pnl_total / total_max_profit * 100) if total_max_profit != 0 else 0, 1)
 
         underlying = sr.get("underlying")
 
@@ -542,12 +546,21 @@ def _calc_spread_stats(
 
     final_row   = pnl_rows[-1]
     final_pnl   = final_row["pnl_total"]
-    final_pct   = final_row["pct_of_max"]
+
+    # FIX: final_pct — use max_profit when positive, max_loss when negative
+    if final_pnl >= 0:
+        final_pct = round((final_pnl / max_profit_tot * 100) if max_profit_tot != 0 else 0, 1)
+    else:
+        # e.g. -1.69Cr / 3.83Cr * 100 = -44.1% of max loss (meaningful)
+        final_pct = round((final_pnl / max_loss_tot * 100) if max_loss_tot != 0 else 0, 1)
 
     pnl_series  = [r["pnl_total"] for r in pnl_rows]
     peak_pnl    = max(pnl_series)
     trough_pnl  = min(pnl_series)
-    max_dd      = round(peak_pnl - trough_pnl, 2) if peak_pnl > trough_pnl else 0
+
+    # FIX: max_drawdown — the actual worst P&L reached (always the trough, negative value)
+    # This correctly shows the maximum capital at risk that was actually realised
+    max_dd = round(trough_pnl, 2)  # e.g. -1,69,17,100
 
     days_profit = sum(1 for p in pnl_series if p > 0)
     days_loss   = sum(1 for p in pnl_series if p < 0)
@@ -555,13 +568,16 @@ def _calc_spread_stats(
 
     rr = round(max_profit_tot / max_loss_tot, 3) if max_loss_tot != 0 else None
 
+    # FIX: outcome — compare final_pnl against max_loss_tot (positive number)
+    # using -max_loss_tot as the negative threshold
     if final_pnl >= max_profit_tot * 0.95:
         outcome = "FULL PROFIT 🎯"
     elif final_pnl > 0:
         outcome = "PARTIAL PROFIT ✅"
     elif final_pnl == 0:
         outcome = "BREAKEVEN ⚖️"
-    elif final_pnl < 0 and final_pnl > max_loss_tot * 0.5:
+    elif final_pnl < 0 and final_pnl > -max_loss_tot * 0.95:
+        # Loss is less than 95% of max possible loss → PARTIAL LOSS
         outcome = "PARTIAL LOSS ⚠️"
     else:
         outcome = "FULL LOSS ❌"
@@ -581,6 +597,7 @@ def _calc_spread_stats(
         "risk_reward":      rr,
         "final_pnl":        final_pnl,
         "final_pct_of_max": final_pct,
+        "final_pct_label":  "% of max profit" if final_pnl >= 0 else "% of max loss",
         "peak_pnl":         round(peak_pnl, 2),
         "trough_pnl":       round(trough_pnl, 2),
         "max_drawdown":     max_dd,
@@ -1168,6 +1185,8 @@ def _do_fetch_strikes_with_underlying(
     underlying_source = None
     # strike -> closest-to-entry-date closing premium
     strike_premium_map: dict = {}
+    # Track which strikes had their premium confirmed by Pass 1b (entry-date window)
+    _pass1b_strikes: set = set()
 
     # ── Pass 1: fetch strikes list (+ harvest premiums per strike) ──
     for attempt in range(2):
@@ -1218,10 +1237,11 @@ def _do_fetch_strikes_with_underlying(
             break
 
     # ── Pass 1b: fetch premiums around ENTRY DATE (separate window) ──
-    # Pass 1 window is near expiry — premiums there are near-zero/settle prices.
-    # We need a window around entry_dt to get the actual entry-day closing premium.
-    entry_from = entry_dt - timedelta(days=2)
-    entry_to   = entry_dt + timedelta(days=2)
+    # FIX: widened from ±2 days to ±5 days — NSE API misses many strikes
+    # in a narrow window, causing stale near-expiry prices to survive for
+    # far-from-expiry entries (e.g. entry 06-Jul, expiry 27-Jul).
+    entry_from = entry_dt - timedelta(days=5)
+    entry_to   = entry_dt + timedelta(days=5)
     # Don't exceed expiry
     if entry_to.date() > expiry_dt.date():
         entry_to = expiry_dt
@@ -1235,12 +1255,12 @@ def _do_fetch_strikes_with_underlying(
         "optionType":     option_type,
         # no strikePrice → NSE returns all strikes for this window
     }
+    _ep_best: dict = {}
     try:
         rp = session.get(NSE_OC_URL, params=entry_params, headers=api_hdrs, timeout=15)
         if rp.status_code == 200:
             dp = rp.json()
             if dp and "data" in dp and dp["data"]:
-                _ep_best: dict = {}
                 for row in dp["data"]:
                     sv = row.get("FH_STRIKE_PRICE")
                     ts = row.get("FH_TIMESTAMP")
@@ -1260,10 +1280,22 @@ def _do_fetch_strikes_with_underlying(
                             if s not in _ep_best or diff < _ep_best[s]:
                                 _ep_best[s]           = diff
                                 strike_premium_map[s] = round(prem_val, 2)
+                                _pass1b_strikes.add(s)   # mark as entry-date confirmed
                     except Exception:
                         pass
     except Exception:
         pass  # keep whatever Pass 1 harvested
+
+    # ── Purge stale near-expiry premiums from Pass 1 ──
+    # If entry is >7 days before expiry, Pass 1 window (near expiry) contains
+    # premiums that are near zero / settle prices — completely wrong for chips.
+    # Any strike NOT confirmed by Pass 1b is suspect → remove it so the chip
+    # shows no premium rather than a wrong one.
+    days_to_expiry_at_entry = (expiry_dt.date() - entry_dt.date()).days
+    if days_to_expiry_at_entry > 7:
+        for s in list(strike_premium_map.keys()):
+            if s not in _pass1b_strikes:
+                del strike_premium_map[s]
 
     # ── Pass 2: 🆕 Use NEW Equity API for underlying price (PRIMARY) ──
     ul_result = _get_underlying_price(symbol, entry_dt, instrument_type, expiry_dt, option_type)
