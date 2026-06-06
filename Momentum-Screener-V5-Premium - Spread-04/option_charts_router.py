@@ -966,21 +966,30 @@ def _do_fetch_lot_size(
         }
         try:
             r = session.get(NSE_OC_URL, params=params, headers=api_hdrs, timeout=15)
+            print(f"[LOT DEBUG] URL     : {r.url}")
+            print(f"[LOT DEBUG] STATUS  : {r.status_code}")
             if r.status_code != 200:
+                print(f"[LOT DEBUG] RESULT  : FAILED (non-200)")
                 return None
-            for row in r.json().get("data", []):
+            data = r.json().get("data", [])
+            print(f"[LOT DEBUG] ROWS    : {len(data)}")
+            for row in data:
                 lot = row.get("FH_MARKET_LOT")
                 if lot:
+                    print(f"[LOT DEBUG] LOT     : {lot}  ✓")
                     return int(float(lot))
-        except Exception:
-            pass
+            print(f"[LOT DEBUG] RESULT  : no FH_MARKET_LOT in response")
+        except Exception as exc:
+            print(f"[LOT DEBUG] ERROR   : {exc}")
         return None
 
     if entry_dt and expiry_dt:
+        print(f"[LOT DEBUG] ── Attempt A: entry_dt={entry_dt} expiry_dt={expiry_dt}")
         lot = _try_fetch(entry_dt, expiry_dt, expiry_dt)
         if lot:
             return lot
         month_start = date(expiry_dt.year, expiry_dt.month, 1)
+        print(f"[LOT DEBUG] ── Attempt B: month_start={month_start} expiry_dt={expiry_dt}")
         lot = _try_fetch(month_start, expiry_dt, expiry_dt)
         if lot:
             return lot
@@ -988,8 +997,10 @@ def _do_fetch_lot_size(
     for months_ahead in [0, 1, 2, 3]:
         target            = today + timedelta(days=30 * months_ahead)
         expiry_candidates = _get_monthly_expiries(target.year, target.month)
+        print(f"[LOT DEBUG] ── months_ahead={months_ahead} candidates={expiry_candidates}")
         for exp_candidate in reversed(expiry_candidates):
             if months_ahead == 0 and exp_candidate < today:
+                print(f"[LOT DEBUG]    skip {exp_candidate} (past)")
                 continue
             month_start = date(exp_candidate.year, exp_candidate.month, 1)
             lot = _try_fetch(month_start, exp_candidate, exp_candidate)
