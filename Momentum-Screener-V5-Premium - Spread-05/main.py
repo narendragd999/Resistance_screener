@@ -156,6 +156,16 @@ DEFAULT_CONFIG = {
     "min_gain_percent":            20.0,
     "min_green_candles":           3,
     "surge_recency_days":          5,      # surge_end must be within N trading days of today
+    # Surge gain calculation — High-based with wick filter
+    # The gain is computed from scan_closes[start] to the peak High in the window,
+    # BUT only if the candle's close is within `surge_wick_filter_pct` of that High.
+    # If the close is far below the High (long upper wick / intraday bubble), the
+    # close price is used instead so inflated wick gains don't qualify the window.
+    # surge_max_gain_pct: cap the gain at this value to filter out bubble/circuit
+    # stocks where the High reflects a manipulated or circuit-limit spike (>100%
+    # gains in a few candles are almost always bubble territory for CE-selling).
+    "surge_wick_filter_pct":       3.0,    # close must be within 3% of High to use High
+    "surge_max_gain_pct":          100.0,  # skip windows where gain > this % (bubble guard)
     # Breakdown (momentum loss) candle
     "min_drop_percent":            0.5,    # must close this % below prev low (not just a tick)
     "min_breakdown_volume_ratio":  1.2,    # breakdown volume / 20d avg volume
@@ -168,7 +178,7 @@ DEFAULT_CONFIG = {
     "ce_above_historical_high":    True,
     "ce_history_days":             30,
     # Signal freshness
-    "max_signal_age_days":         5,      # auto-prune signals older than N days
+    "max_signal_age_days":         10,     # auto-prune signals older than N days (increased from 5 so Gate-2 confirmation has time to land)
     # Auto scan
     "auto_scan_enabled":           True,
     "auto_scan_interval_min":      15,
@@ -184,10 +194,10 @@ DEFAULT_CONFIG = {
     #
     # Window: (today - prev_high_lookback_days)  to  (today - prev_high_exclude_recent_days)
     # The "exclude recent" gap ensures the current surge itself is NOT counted as the prior high.
-    "prev_high_filter_enabled":      True,
+    "prev_high_filter_enabled":      False,
     "prev_high_lookback_days":       120,    # how far back the prior-high window starts
-    "prev_high_exclude_recent_days": 20,     # exclude last N days (= current surge window)
-    "prev_high_buffer_pct":          0.5,    # if price >= prior_high*(1-buffer%), skip ticker
+    "prev_high_exclude_recent_days": 30,     # exclude last N days (= current surge window); increased from 20 so the surge itself never bleeds into the prior-high window
+    "prev_high_buffer_pct":          2.0,    # if price >= prior_high*(1-buffer%), skip ticker; widened from 0.5% — was too tight for valid post-breakdown retests
     # Bear Call Spread (Check 2)
     # After finding the short CE, we also find a buy-leg N intervals higher
     # to cap max loss.  Set to 0 to use a single short CE only.
@@ -203,7 +213,7 @@ DEFAULT_CONFIG = {
     "premium_otm_depth":           3,
     # Lifetime High filter — skip stocks where current price is at/near 52-week high
     # (price at new lifetime high = breakout mode, not a retest → CE selling is risky)
-    "lifetime_high_filter_enabled": True,
+    "lifetime_high_filter_enabled": False,
     "lifetime_high_lookback_days":  252,   # ~1 trading year
     "lifetime_high_buffer_pct":     1.0,   # skip if price >= 52w_high * (1 - buffer%)
 }
@@ -483,9 +493,11 @@ def fetch_option_chain(ticker: str) -> Tuple[Optional[Dict], Optional[str]]:
             pchg   = ce.get("pChange", None)
             prev   = ce.get("prevClose", None)
             ce_iv  = ce.get("impliedVolatility", None)
+            high   = ce.get("high", None)        # intraday high of the CE premium
             if sp > 0:
                 ltp_f  = float(ltp)
                 prev_f = float(prev) if prev is not None else None
+                high_f = float(high) if high is not None else None
                 chg_f  = float(chg)  if chg  is not None else (
                              round(ltp_f - prev_f, 2) if prev_f is not None else None)
                 # pChange: prefer NSE value; fallback = compute from ltp/prev
@@ -495,13 +507,21 @@ def fetch_option_chain(ticker: str) -> Tuple[Optional[Dict], Optional[str]]:
                     pchg_f = round((ltp_f - prev_f) / prev_f * 100, 1)
                 else:
                     pchg_f = None
+                # High-based gain% — how much the CE surged from prev close to intraday high
+                # This captures the maximum premium spike even if LTP has since pulled back
+                if high_f is not None and prev_f and prev_f > 0 and high_f > 0:
+                    high_chg_pct_f = round((high_f - prev_f) / prev_f * 100, 1)
+                else:
+                    high_chg_pct_f = None
                 strike_map[sp] = {
-                    "CE_ltp":     ltp_f,
-                    "CE_oi":      int(oi),
-                    "CE_chg":     chg_f,
-                    "CE_chg_pct": pchg_f,
-                    "CE_prev":    round(prev_f, 2) if prev_f is not None else None,
-                    "CE_iv":      round(float(ce_iv), 1)  if ce_iv is not None else None,
+                    "CE_ltp":          ltp_f,
+                    "CE_high":         round(high_f, 2) if high_f is not None else None,
+                    "CE_oi":           int(oi),
+                    "CE_chg":          chg_f,
+                    "CE_chg_pct":      pchg_f,         # LTP-based gain%
+                    "CE_high_chg_pct": high_chg_pct_f, # High-based gain% (peak surge)
+                    "CE_prev":         round(prev_f, 2) if prev_f is not None else None,
+                    "CE_iv":           round(float(ce_iv), 1)  if ce_iv is not None else None,
                 }
         return strike_map, expiry
     except Exception as e:
@@ -811,23 +831,23 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
     lifetime_high: Optional[float] = None   # populated below; reused in candidate dict
     if lth_enabled:
         lth_lookback = int(cfg.get("prev_high_lookback_days",       120))
-        lth_exclude  = int(cfg.get("prev_high_exclude_recent_days",  20))
-        lth_buffer   = float(cfg.get("prev_high_buffer_pct",          0.5))
+        lth_exclude  = int(cfg.get("prev_high_exclude_recent_days",  30))
+        lth_buffer   = float(cfg.get("prev_high_buffer_pct",          2.0))
         cur_price_for_lth = float(live_price if live_price is not None else closes[-1])
 
         lifetime_high = get_previous_pullup_high(ticker, lth_lookback, lth_exclude)
         if lifetime_high is not None and lifetime_high > 0:
             lth_threshold = lifetime_high * (1.0 - lth_buffer / 100.0)
             if cur_price_for_lth >= lth_threshold:
+                msg = (
+                    f"{ticker} SKIP (Prev-Pullup-High): "
+                    f"price Rs{cur_price_for_lth:.2f} >= threshold Rs{lth_threshold:.2f} "
+                    f"(prev high Rs{lifetime_high:.2f} from "
+                    f"{lth_exclude}-{lth_lookback}d window, buffer {lth_buffer}%)"
+                )
+                print(f"[FILTER] {msg}")
                 if job_id:
-                    job_log(
-                        job_id,
-                        f"{ticker} SKIP (Prev-Pullup-High): "
-                        f"price Rs{cur_price_for_lth:.2f} >= threshold Rs{lth_threshold:.2f} "
-                        f"(prev high Rs{lifetime_high:.2f} from "
-                        f"{lth_exclude}-{lth_lookback}d window, buffer {lth_buffer}%)",
-                        "fail",
-                    )
+                    job_log(job_id, msg, "fail")
                 return None
             if job_id:
                 dist_from_prev = (lifetime_high - cur_price_for_lth) / lifetime_high * 100
@@ -854,14 +874,14 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
         if lifetime_52w_high is not None and lifetime_52w_high > 0:
             lth52_threshold = lifetime_52w_high * (1.0 - lth52_buffer / 100.0)
             if cur_p >= lth52_threshold:
+                msg = (
+                    f"{ticker} SKIP (52W-High): "
+                    f"price Rs{cur_p:.2f} >= {lth52_threshold:.2f} "
+                    f"(52w high Rs{lifetime_52w_high:.2f}, buffer {lth52_buffer}%) — breakout mode"
+                )
+                print(f"[FILTER] {msg}")
                 if job_id:
-                    job_log(
-                        job_id,
-                        f"{ticker} SKIP (52W-High): "
-                        f"price Rs{cur_p:.2f} >= {lth52_threshold:.2f} "
-                        f"(52w high Rs{lifetime_52w_high:.2f}, buffer {lth52_buffer}%) — breakout mode",
-                        "fail",
-                    )
+                    job_log(job_id, msg, "fail")
                 return None
             if job_id:
                 dist52 = (lifetime_52w_high - cur_p) / lifetime_52w_high * 100
@@ -965,16 +985,18 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
         break   # use the most recent valid breakdown
 
     if breakdown_idx is None:
+        msg = f"{ticker} no valid breakdown candle in last {lookback_bd} sessions"
+        print(f"[FILTER] {msg}")
         if job_id:
-            job_log(job_id,
-                f"{ticker} no valid breakdown candle in last {lookback_bd} sessions",
-                "fail")
+            job_log(job_id, msg, "fail")
         return None
 
     # ── CONDITION 5: Continuous surge ending recently ──────────────────────
     min_gain     = cfg["min_gain_percent"]
     min_green    = cfg["min_green_candles"]
     recency_days = int(cfg.get("surge_recency_days", 5))
+    wick_filter_pct = float(cfg.get("surge_wick_filter_pct", 3.0))
+    max_gain_pct    = float(cfg.get("surge_max_gain_pct", 100.0))
 
     # Operate on candles BEFORE the breakdown candle (exclude breakdown onward).
     # breakdown_idx points to the breakdown candle; surge must end before it.
@@ -1005,8 +1027,34 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
             if end < min_end_idx:
                 continue
 
-            net_gain = ((scan_closes[end] - scan_closes[start]) / scan_closes[start]) * 100
+            # ── High-based gain with wick filter ─────────────────────────
+            # Find the candle with the highest High in the window.
+            # If that candle's close is within wick_filter_pct of its High,
+            # the surge genuinely closed near the peak — use the High.
+            # If not (long upper wick / intraday bubble), fall back to the
+            # close so bubble spikes don't inflate the gain calculation.
+            peak_idx   = start + int(np.argmax(scan_highs[start:end + 1]))
+            peak_high  = float(scan_highs[peak_idx])
+            peak_close = float(scan_closes[peak_idx])
+            wick_threshold = peak_high * (1.0 - wick_filter_pct / 100.0)
+            effective_peak = peak_high if peak_close >= wick_threshold else peak_close
+
+            net_gain = ((effective_peak - scan_closes[start]) / scan_closes[start]) * 100
             if net_gain < min_gain:
+                continue
+
+            # ── Bubble / circuit-limit guard ─────────────────────────────
+            # A >100% gain in a short window is almost always a manipulated
+            # spike, SME circuit stock, or news-driven bubble — not the kind
+            # of organised momentum surge where CE-selling makes sense.
+            # Skip the window; the stock will still be evaluated on other
+            # sub-windows that may have a sane gain.
+            if net_gain > max_gain_pct:
+                if job_id:
+                    job_log(job_id,
+                        f"{ticker} SKIP window [{start},{end}]: "
+                        f"gain {net_gain:.1f}% > max {max_gain_pct:.0f}% (bubble guard)",
+                        "warn")
                 continue
 
             # Continuity check: red candles allowed only if higher-low holds
@@ -1025,11 +1073,13 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
                 best_window = (start, end)
 
     if best_window is None or best_gain < min_gain:
+        msg = (
+            f"{ticker} no continuous surge >={min_gain}% ending within "
+            f"last {recency_days} sessions"
+        )
+        print(f"[FILTER] {msg}")
         if job_id:
-            job_log(job_id,
-                f"{ticker} no continuous surge >={min_gain}% ending within "
-                f"last {recency_days} sessions",
-                "fail")
+            job_log(job_id, msg, "fail")
         return None
 
     surge_start_idx, surge_end_idx = best_window
@@ -1043,9 +1093,18 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
     surge_window_highs = scan_highs[surge_start_idx:surge_end_idx + 1]   # ✅ uses pre-breakdown slice — excludes live-price injection on today's candle
     surge_high         = float(np.max(surge_window_highs))
 
+    # Identify whether the peak candle used High or Close (wick filter result)
+    best_peak_idx   = surge_start_idx + int(np.argmax(surge_window_highs))
+    best_peak_high  = float(scan_highs[best_peak_idx])
+    best_peak_close = float(scan_closes[best_peak_idx])
+    _wick_threshold = best_peak_high * (1.0 - wick_filter_pct / 100.0)
+    gain_used_high  = best_peak_close >= _wick_threshold   # True = High used; False = Close used
+
     if job_id:
+        peak_label = f"High Rs{best_peak_high:.2f}" if gain_used_high else \
+                     f"Close Rs{best_peak_close:.2f} (wick filtered, High Rs{best_peak_high:.2f})"
         job_log(job_id,
-            f"{ticker} PASS  surge={best_gain:.1f}%  greens={best_greens}  "
+            f"{ticker} PASS  surge={best_gain:.1f}% (peak={peak_label})  greens={best_greens}  "
             f"allowed_reds={best_reds}  ended {days_since_end}d ago  "
             f"drop={drop_pct:.2f}%  vol={volume_ratio:.2f}x  "
             f"EMA{ema_period}={ema_at_detection:.2f} (breached at detection)  "
@@ -1068,6 +1127,7 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
         "ema_breached_at_detection": True,                      # Legacy compat
         "below_ema":               below_ema,                   # kept for UI/legacy compat
         "surge_gain_pct":          round(best_gain, 2),
+        "surge_gain_used_high":    gain_used_high,              # True = High-based; False = wick-filtered close
         "surge_candles":           best_greens,
         "surge_allowed_reds":      best_reds,
         "surge_start_date":        scan_dates[surge_start_idx].strftime("%Y-%m-%d"),
@@ -1249,6 +1309,7 @@ def find_best_strike(candidate: Dict, cfg: Dict, job_id: str = "") -> Optional[D
         "Below_EMA":                candidate["below_ema"],          # legacy compat
         # Surge
         "Surge_Gain_Pct":       candidate["surge_gain_pct"],
+        "Surge_Gain_Used_High": candidate.get("surge_gain_used_high", False),  # True = High-based gain
         "Surge_Candles":        candidate["surge_candles"],
         "Surge_Allowed_Reds":   candidate["surge_allowed_reds"],
         "Surge_Start":          candidate["surge_start_date"],
@@ -1450,6 +1511,7 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
 
         # ── GATE 2 GUARD: EMA+volume breach after breakdown must be confirmed ─
         if not sig.get("Sell_Zone_EMA_Confirmed"):
+            print(f"[PROXIMITY] {ticker} SKIP — Gate 2 (EMA+vol) not yet confirmed")
             time.sleep(random.uniform(0.1, 0.3))
             continue
 
@@ -1469,24 +1531,46 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
             time.sleep(random.uniform(0.2, 0.5))
             continue
 
-        # Price broke above surge_high → thesis invalidated (breakout confirmed)
-        if cur_price > resistance:
+        surge_high_val    = float(sig.get("Surge_High") or 0)
+        proximity_ceiling = surge_high_val or float(resistance)
+
+        # above_surge: price is AT or ABOVE the surge-high resistance.
+        # This means an active retest is happening — CE selling is most urgent.
+        # We keep it in the sell zone rather than skipping it.
+        above_surge  = surge_high_val > 0 and cur_price >= surge_high_val
+
+        # dist_pct: signed distance from resistance.
+        # Negative value means price is above resistance (above_surge case).
+        dist_pct = (proximity_ceiling - cur_price) / proximity_ceiling * 100
+
+        # in_sell_zone: either an active retest above resistance, or
+        # price within the configured proximity band below resistance.
+        in_sell_zone = above_surge or (dist_pct <= proximity_pct)
+
+        if not in_sell_zone:
+            print(f"[PROXIMITY] {ticker} SKIP — distance {dist_pct:.2f}% > {proximity_pct}% limit  "
+                  f"(price Rs{cur_price:.2f} vs resistance Rs{proximity_ceiling:.2f})")
             time.sleep(random.uniform(0.2, 0.5))
             continue
 
-        dist_pct = (resistance - cur_price) / resistance * 100
+        if above_surge:
+            print(f"[PROXIMITY] {ticker} BREAKOUT — price Rs{cur_price:.2f} >= surge_high "
+                  f"Rs{proximity_ceiling:.2f}  dist={dist_pct:.2f}%  ✅ in sell zone")
 
-        if dist_pct <= proximity_pct:
+        if in_sell_zone:
             g2_date = sig.get("Sell_Zone_EMA_Confirm_Date", "?")
 
             # ── Option ladder with CE gain% to spot the hottest strike ──────
-            # Fetch live option chain and find which strikes are surging most.
-            # Priority: CE_chg_pct (computed in fetch_option_chain from pChange or ltp/prev).
-            # Fallback ranking: highest CE_ltp absolute value (most demanded strike).
+            # OTM-only ladder: ALL strikes strictly above cur_price.
+            # Priority for "hottest": CE_high_chg_pct (high-based surge from prev close)
+            #   — this catches strikes that spiked hard intraday even if LTP pulled back.
+            # Fallback: CE_chg_pct (LTP-based), then highest CE_ltp (market-closed / no prev).
             opt_ladder: List[Dict] = []
-            hot_strike    = None
-            hot_chg_pct   = None
-            hot_ltp       = None
+            hot_strike       = None
+            hot_chg_pct      = None   # LTP-based gain% of hottest strike
+            hot_ltp          = None
+            hot_high         = None   # intraday high of hottest strike's CE premium
+            hot_high_chg_pct = None   # high-based gain% of hottest strike
             try:
                 # Retry up to 3 times with backoff — NSE rate-limits on rapid sequential calls
                 sm, exp_live = None, None
@@ -1501,41 +1585,65 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
                 print(f"[{ticker}] Proximity opt-ladder: sm={'None' if not sm else f'{len(sm)} strikes'}  market_open={is_market_open()}")
                 if sm:
                     sorted_sk = sorted(sm.keys())
-                    atm_sk    = min(sorted_sk, key=lambda k: abs(k - cur_price))
-                    atm_idx   = sorted_sk.index(atm_sk)
-                    # Build ATM + up to 4 OTM strikes
-                    for off in range(5):
-                        sidx = atm_idx + off
-                        if sidx >= len(sorted_sk):
-                            break
-                        sk    = sorted_sk[sidx]
+
+                    # OTM-only: every strike strictly above current price
+                    otm_strikes = [s for s in sorted_sk if s > cur_price]
+
+                    for sk in otm_strikes:
                         sdata = sm[sk]
+                        ce_ltp = sdata["CE_ltp"]
+                        # Include all OTM strikes that have any LTP (even illiquid ones shown as 0)
+                        moneyness_label = f"+{otm_strikes.index(sk)+1} OTM"
                         opt_ladder.append({
-                            "strike":     sk,
-                            "moneyness":  "ATM" if off == 0 else f"+{off}",
-                            "ltp":        sdata["CE_ltp"],
-                            "chg":        sdata.get("CE_chg"),
-                            "chg_pct":    sdata.get("CE_chg_pct"),
-                            "prev":       sdata.get("CE_prev"),
-                            "oi":         sdata["CE_oi"],
+                            "strike":          sk,
+                            "moneyness":       moneyness_label,
+                            "ltp":             round(ce_ltp, 2),
+                            "high":            sdata.get("CE_high"),
+                            "chg":             sdata.get("CE_chg"),
+                            "chg_pct":         sdata.get("CE_chg_pct"),
+                            "high_chg_pct":    sdata.get("CE_high_chg_pct"),
+                            "prev":            sdata.get("CE_prev"),
+                            "oi":              sdata["CE_oi"],
                         })
-                    # Hottest = strike with highest CE_chg_pct
-                    # Fall back to highest ltp if no chg_pct available (e.g. market just opened)
-                    with_pct = [r for r in opt_ladder if r["chg_pct"] is not None and r["ltp"] > 0]
-                    with_ltp = [r for r in opt_ladder if r["ltp"] > 0]
-                    print(f"[{ticker}] ladder={len(opt_ladder)} with_pct={len(with_pct)} with_ltp={len(with_ltp)}")
-                    if with_pct:
-                        hottest     = max(with_pct, key=lambda r: r["chg_pct"])
-                        hot_strike  = hottest["strike"]
-                        hot_chg_pct = hottest["chg_pct"]
-                        hot_ltp     = hottest["ltp"]
+
+                    # ── Hottest strike: scan ALL OTM strikes ──────────────────
+                    # Primary: highest high_chg_pct (intraday peak surge from prev close)
+                    # Secondary: highest chg_pct (LTP-based)
+                    # Fallback: highest LTP (market closed / no prev data)
+                    with_high_pct = [r for r in opt_ladder if r["high_chg_pct"] is not None and r["ltp"] > 0]
+                    with_pct      = [r for r in opt_ladder if r["chg_pct"]      is not None and r["ltp"] > 0]
+                    with_ltp      = [r for r in opt_ladder if r["ltp"] > 0]
+
+                    print(f"[{ticker}] OTM ladder={len(opt_ladder)} "
+                          f"with_high_pct={len(with_high_pct)} "
+                          f"with_pct={len(with_pct)} with_ltp={len(with_ltp)}")
+
+                    if with_high_pct:
+                        hottest          = max(with_high_pct, key=lambda r: r["high_chg_pct"])
+                        hot_strike       = hottest["strike"]
+                        hot_chg_pct      = hottest["chg_pct"]
+                        hot_ltp          = hottest["ltp"]
+                        hot_high         = hottest["high"]
+                        hot_high_chg_pct = hottest["high_chg_pct"]
+                    elif with_pct:
+                        hottest          = max(with_pct, key=lambda r: r["chg_pct"])
+                        hot_strike       = hottest["strike"]
+                        hot_chg_pct      = hottest["chg_pct"]
+                        hot_ltp          = hottest["ltp"]
+                        hot_high         = hottest["high"]
+                        hot_high_chg_pct = hottest.get("high_chg_pct")
                     elif with_ltp:
                         # Market closed or no prev data — rank by highest LTP (most active strike)
-                        hottest     = max(with_ltp, key=lambda r: r["ltp"])
-                        hot_strike  = hottest["strike"]
-                        hot_chg_pct = None   # no change data available
-                        hot_ltp     = hottest["ltp"]
-                    print(f"[{ticker}] hot_strike={hot_strike}  hot_chg_pct={hot_chg_pct}  hot_ltp={hot_ltp}")
+                        hottest          = max(with_ltp, key=lambda r: r["ltp"])
+                        hot_strike       = hottest["strike"]
+                        hot_chg_pct      = None   # no change data available
+                        hot_ltp          = hottest["ltp"]
+                        hot_high         = hottest["high"]
+                        hot_high_chg_pct = hottest.get("high_chg_pct")
+
+                    print(f"[{ticker}] hot_strike={hot_strike}  "
+                          f"hot_high_chg_pct={hot_high_chg_pct}  "
+                          f"hot_chg_pct={hot_chg_pct}  hot_ltp={hot_ltp}  hot_high={hot_high}")
                 else:
                     print(f"[{ticker}] fetch_option_chain returned empty — NSE session issue or market closed")
             except Exception as _e_opt:
@@ -1544,27 +1652,78 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
             hit = {
                 **sig,
                 "Current_Price":          round(cur_price, 2),
-                "Resistance_High":        round(resistance, 2),
-                "Distance_From_High_Pct": round(dist_pct, 2),
+                "Resistance_High":        round(proximity_ceiling, 2),
+                "Distance_From_High_Pct": round(dist_pct, 2),   # negative = above resistance
+                "Above_Surge":            above_surge,
                 "Alert_Time":             now_ist_str(),
-                # Option premium surge data
+                # Option premium surge data — OTM-only full ladder
                 "Opt_Ladder":             opt_ladder,
                 "Hot_Strike":             hot_strike,
-                "Hot_CE_Chg_Pct":         hot_chg_pct,
+                "Hot_CE_Chg_Pct":         hot_chg_pct,      # LTP-based gain%
                 "Hot_CE_LTP":             hot_ltp,
+                "Hot_CE_High":            hot_high,          # intraday high of CE premium
+                "Hot_CE_High_Chg_Pct":    hot_high_chg_pct, # high-based gain% (peak surge)
             }
             sell_zone_hits.append(hit)
+
+            # ── Telegram alert ─────────────────────────────────────────────────
+            # Build 130%+ surge warning line if any OTM strike's intraday CE high
+            # surged >= 130% from previous close
+            surge_alert_lines = []
+            for rung in opt_ladder:
+                hcp = rung.get("high_chg_pct")
+                if hcp is not None and hcp >= 130.0:
+                    surge_alert_lines.append(
+                        f"  🔥 Rs{rung['strike']:.0f} CE: High Rs{rung['high']} "
+                        f"(+{hcp:.1f}% from prev Rs{rung['prev']})"
+                    )
+            surge_block = ""
+            if surge_alert_lines:
+                surge_block = (
+                    f"\n⚡ *130%+ PREMIUM SURGE DETECTED*\n"
+                    + "\n".join(surge_alert_lines)
+                    + "\n"
+                )
+
+            hot_line = ""
+            if hot_strike:
+                if hot_high_chg_pct is not None:
+                    hot_line = (
+                        f"🌡 Hottest OTM: Rs{hot_strike:.0f} CE  "
+                        f"High Rs{hot_high} (+{hot_high_chg_pct:.1f}% peak)  "
+                        f"LTP Rs{hot_ltp}"
+                    )
+                elif hot_chg_pct is not None:
+                    hot_line = (
+                        f"🌡 Hottest OTM: Rs{hot_strike:.0f} CE  "
+                        f"LTP Rs{hot_ltp} (+{hot_chg_pct:.1f}%)"
+                    )
+                else:
+                    hot_line = f"🌡 Hottest OTM: Rs{hot_strike:.0f} CE  LTP Rs{hot_ltp}"
+
             send_telegram(
                 cfg["telegram_bot_token"],
                 cfg["telegram_chat_id"],
                 f"*SELL ZONE — {ticker}* ✅ All 3 Gates Passed\n"
                 f"Gate 1 ✅ Momentum break (close < prev low)\n"
                 f"Gate 2 ✅ EMA breach confirmed {g2_date}\n"
-                f"Gate 3 ✅ Price Rs{cur_price:.2f} within "
-                f"{dist_pct:.2f}% of Surge High Rs{resistance:.2f} "
-                f"(limit {proximity_pct}%)\n"
+                f"Gate 3 ✅ "
+                + (
+                    f"Price Rs{cur_price:.2f} BROKE ABOVE Surge High Rs{proximity_ceiling:.2f} "
+                    f"(+{abs(dist_pct):.2f}% above resistance) 🚨 RETEST IN PROGRESS\n"
+                    if above_surge else
+                    f"Price Rs{cur_price:.2f} within {dist_pct:.2f}% of Surge High "
+                    f"Rs{proximity_ceiling:.2f} (limit {proximity_pct}%)\n"
+                ) +
                 f"Strike Rs{sig.get('Suggested_Strike','?')} CE  "
-                f"Expiry {sig.get('Expiry','?')}"
+                f"Expiry {sig.get('Expiry','?')}\n"
+                f"Surge Gain: {sig.get('Surge_Gain_Pct','?')}% "
+                f"({'High-based ✅' if sig.get('Surge_Gain_Used_High') else 'Close-based (wick filtered)'})\n"
+                f"BCS: SELL Rs{sig.get('Suggested_Strike','?')} / "
+                f"BUY Rs{sig.get('BCS_Hedge_Strike','?')}  "
+                f"Net Premium Rs{sig.get('BCS_Net_Premium','?')}\n"
+                f"{surge_block}"
+                f"{hot_line}"
             )
 
         time.sleep(random.uniform(0.2, 0.5))
@@ -1578,7 +1737,7 @@ def check_proximity_alerts(signals: List[Dict], cfg: Dict) -> List[Dict]:
 #  SIGNAL PRUNING
 # ─────────────────────────────────────────────────────────────
 def prune_stale_signals(signals: List[Dict], cfg: Dict) -> Tuple[List[Dict], int]:
-    max_age = int(cfg.get("max_signal_age_days", 5))
+    max_age = int(cfg.get("max_signal_age_days", 10))
     cutoff  = datetime.now(IST) - timedelta(days=max_age)
     fresh, pruned = [], 0
     for s in signals:
@@ -1627,7 +1786,7 @@ def run_screen_job(tickers: List[str], cfg: Dict, job_id: str):
     # Prune stale then merge
     existing, pruned = prune_stale_signals(load_signals(), cfg)
     if pruned:
-        job_log(job_id, f"Pruned {pruned} stale signal(s) (>{cfg.get('max_signal_age_days',5)}d)", "info")
+        job_log(job_id, f"Pruned {pruned} stale signal(s) (>{cfg.get('max_signal_age_days',10)}d)", "info")
 
     seen  = {s["Ticker"] for s in existing}
     added = 0
@@ -1820,59 +1979,78 @@ def scan_premium_zone_job(cfg: Dict, job_id: str) -> List[Dict]:
 
         sorted_strikes = sorted(strike_map.keys())
 
-        # ATM = strike closest to current price
-        atm_strike = min(sorted_strikes, key=lambda k: abs(k - cur_price))
-        atm_idx    = sorted_strikes.index(atm_strike)
+        # OTM-only: every strike strictly above current price
+        otm_strikes_pz = [s for s in sorted_strikes if s > cur_price]
 
-        # Build OTM ladder: ATM, +1, +2, … up to otm_depth
+        # Build full OTM ladder (no ATM, no depth cap — all OTM strikes available)
         ladder: List[Dict] = []
-        for offset in range(otm_depth + 1):          # 0 = ATM, 1..N = OTM
-            idx = atm_idx + offset
-            if idx >= len(sorted_strikes):
-                break
-            sk     = sorted_strikes[idx]
-            ce_ltp = strike_map[sk]["CE_ltp"]
-            ce_oi  = strike_map[sk]["CE_oi"]
-            ce_chg     = strike_map[sk].get("CE_chg")
-            ce_chg_pct = strike_map[sk].get("CE_chg_pct")
-            moneyness = "ATM" if offset == 0 else f"+{offset} OTM"
+        for offset, sk in enumerate(otm_strikes_pz):
+            ce_data    = strike_map[sk]
+            ce_ltp     = ce_data["CE_ltp"]
+            ce_oi      = ce_data["CE_oi"]
+            ce_chg     = ce_data.get("CE_chg")
+            ce_chg_pct = ce_data.get("CE_chg_pct")
+            ce_high        = ce_data.get("CE_high")
+            ce_high_chg_pct = ce_data.get("CE_high_chg_pct")
+            moneyness = f"+{offset+1} OTM"
             ladder.append({
-                "strike":      sk,
-                "moneyness":   moneyness,
-                "CE_ltp":      round(ce_ltp, 2),
-                "CE_oi":       ce_oi,
-                "CE_chg":      ce_chg,
-                "CE_chg_pct":  ce_chg_pct,
+                "strike":           sk,
+                "moneyness":        moneyness,
+                "CE_ltp":           round(ce_ltp, 2),
+                "CE_high":          round(ce_high, 2) if ce_high is not None else None,
+                "CE_oi":            ce_oi,
+                "CE_chg":           ce_chg,
+                "CE_chg_pct":       ce_chg_pct,
+                "CE_high_chg_pct":  ce_high_chg_pct,
             })
 
         if not ladder:
-            job_log(job_id, f"{ticker} no strikes found in ladder", "fail")
+            job_log(job_id, f"{ticker} no OTM strikes found in ladder", "fail")
             continue
 
         # ── Premium Score ─────────────────────────────────────────────────────
-        # Score = vol_surge_ratio × ATM_LTP.
+        # Score = vol_surge_ratio × nearest_OTM_LTP (+1 OTM, the most actionable sell strike).
         # At this point is_vol_surge is True (hard gate above), so vol_surge_ratio
         # is guaranteed to be >= min_vol_surge.  No fallback needed.
         # Higher score = more volume conviction at resistance + richer CE premium.
-        atm_ltp       = ladder[0]["CE_ltp"]
-        premium_score = round(vol_surge_ratio * atm_ltp, 2)
+        nearest_otm_ltp = ladder[0]["CE_ltp"]
+        premium_score   = round(vol_surge_ratio * nearest_otm_ltp, 2)
 
-        # Hottest strike in the ladder = highest CE_chg_pct (biggest % surge today)
-        valid_rungs = [rung for rung in ladder if rung.get("CE_chg_pct") is not None and rung["CE_ltp"] > 0]
-        if valid_rungs:
-            hot_rung      = max(valid_rungs, key=lambda r: r["CE_chg_pct"])
-            hot_strike_pz    = hot_rung["strike"]
-            hot_chg_pct_pz   = hot_rung["CE_chg_pct"]
-            hot_ltp_pz       = hot_rung["CE_ltp"]
+        # Hottest strike: primary = highest CE_high_chg_pct; secondary = CE_chg_pct; fallback = CE_ltp
+        valid_high = [r for r in ladder if r.get("CE_high_chg_pct") is not None and r["CE_ltp"] > 0]
+        valid_pct  = [r for r in ladder if r.get("CE_chg_pct")      is not None and r["CE_ltp"] > 0]
+        valid_ltp  = [r for r in ladder if r["CE_ltp"] > 0]
+
+        if valid_high:
+            hot_rung        = max(valid_high, key=lambda r: r["CE_high_chg_pct"])
+            hot_strike_pz   = hot_rung["strike"]
+            hot_chg_pct_pz  = hot_rung["CE_chg_pct"]
+            hot_ltp_pz      = hot_rung["CE_ltp"]
+            hot_high_pz     = hot_rung["CE_high"]
+            hot_high_chg_pz = hot_rung["CE_high_chg_pct"]
+        elif valid_pct:
+            hot_rung        = max(valid_pct, key=lambda r: r["CE_chg_pct"])
+            hot_strike_pz   = hot_rung["strike"]
+            hot_chg_pct_pz  = hot_rung["CE_chg_pct"]
+            hot_ltp_pz      = hot_rung["CE_ltp"]
+            hot_high_pz     = hot_rung.get("CE_high")
+            hot_high_chg_pz = hot_rung.get("CE_high_chg_pct")
+        elif valid_ltp:
+            hot_rung        = max(valid_ltp, key=lambda r: r["CE_ltp"])
+            hot_strike_pz   = hot_rung["strike"]
+            hot_chg_pct_pz  = None
+            hot_ltp_pz      = hot_rung["CE_ltp"]
+            hot_high_pz     = hot_rung.get("CE_high")
+            hot_high_chg_pz = hot_rung.get("CE_high_chg_pct")
         else:
-            hot_strike_pz = hot_chg_pct_pz = hot_ltp_pz = None
+            hot_strike_pz = hot_chg_pct_pz = hot_ltp_pz = hot_high_pz = hot_high_chg_pz = None
 
         # Best strike to SELL = first strike ABOVE resistance (existing logic)
         suggested_strike = sig.get("Suggested_Strike")
 
         job_log(job_id,
             f"{ticker} PREMIUM  score={premium_score:.1f}  "
-            f"ATM Rs{atm_strike:.0f} CE={atm_ltp:.2f}  "
+            f"+1 OTM Rs{ladder[0]['strike']:.0f} CE={nearest_otm_ltp:.2f}  "
             f"vol={vol_label}  "
             f"sell_strike=Rs{suggested_strike or '?'}  expiry={expiry}",
             "signal")
@@ -1890,29 +2068,24 @@ def scan_premium_zone_job(cfg: Dict, job_id: str) -> List[Dict]:
             "High_Near_Resistance":   high_near_resistance,
             "High_Dist_Pct":          high_dist_pct,
             "Expiry":            expiry,
-            "ATM_Strike":        ladder[0]["strike"]       if ladder else None,
-            "ATM_CE_LTP":        ladder[0]["CE_ltp"]       if ladder else None,
-            "ATM_CE_OI":         ladder[0]["CE_oi"]        if ladder else None,
-            "ATM_CE_Chg_Pct":    ladder[0].get("CE_chg_pct") if ladder else None,
-            "OTM1_Strike":       ladder[1]["strike"]       if len(ladder) > 1 else None,
-            "OTM1_CE_LTP":       ladder[1]["CE_ltp"]       if len(ladder) > 1 else None,
-            "OTM1_CE_OI":        ladder[1]["CE_oi"]        if len(ladder) > 1 else None,
-            "OTM1_CE_Chg_Pct":   ladder[1].get("CE_chg_pct") if len(ladder) > 1 else None,
-            "OTM2_Strike":       ladder[2]["strike"]       if len(ladder) > 2 else None,
-            "OTM2_CE_LTP":       ladder[2]["CE_ltp"]       if len(ladder) > 2 else None,
-            "OTM2_CE_OI":        ladder[2]["CE_oi"]        if len(ladder) > 2 else None,
-            "OTM2_CE_Chg_Pct":   ladder[2].get("CE_chg_pct") if len(ladder) > 2 else None,
-            "OTM3_Strike":       ladder[3]["strike"]       if len(ladder) > 3 else None,
-            "OTM3_CE_LTP":       ladder[3]["CE_ltp"]       if len(ladder) > 3 else None,
-            "OTM3_CE_OI":        ladder[3]["CE_oi"]        if len(ladder) > 3 else None,
-            "OTM3_CE_Chg_Pct":   ladder[3].get("CE_chg_pct") if len(ladder) > 3 else None,
+            # Full OTM-only ladder (all strikes above cur_price)
+            "OTM_Ladder":        ladder,
+            # Nearest OTM (first in ladder) — most actionable sell candidate
+            "OTM1_Strike":       ladder[0]["strike"]              if ladder else None,
+            "OTM1_CE_LTP":       ladder[0]["CE_ltp"]              if ladder else None,
+            "OTM1_CE_High":      ladder[0].get("CE_high")         if ladder else None,
+            "OTM1_CE_OI":        ladder[0]["CE_oi"]               if ladder else None,
+            "OTM1_CE_Chg_Pct":   ladder[0].get("CE_chg_pct")      if ladder else None,
+            "OTM1_CE_High_Chg_Pct": ladder[0].get("CE_high_chg_pct") if ladder else None,
             "Sell_Strike":       suggested_strike,
             "Sell_CE_LTP":       sig.get("CE_LTP"),
             "Premium_Score":     premium_score,
-            # Hottest CE strike (biggest % premium surge today)
+            # Hottest OTM CE strike (biggest % premium surge — high-based preferred)
             "Hot_Strike":        hot_strike_pz,
             "Hot_CE_Chg_Pct":    hot_chg_pct_pz,
             "Hot_CE_LTP":        hot_ltp_pz,
+            "Hot_CE_High":       hot_high_pz,
+            "Hot_CE_High_Chg_Pct": hot_high_chg_pz,
             "Surge_Gain_Pct":    sig.get("Surge_Gain_Pct"),
             "G2_Date":           sig.get("Sell_Zone_EMA_Confirm_Date"),
             "Breakdown_Date":    sig.get("Breakdown_Date"),
@@ -2053,6 +2226,9 @@ class ConfigUpdate(BaseModel):
     prev_high_lookback_days:         Optional[int]   = None
     prev_high_exclude_recent_days:   Optional[int]   = None
     prev_high_buffer_pct:            Optional[float] = None
+    # Surge gain calculation
+    surge_wick_filter_pct:            Optional[float] = None
+    surge_max_gain_pct:               Optional[float] = None
     # Check 2 — Bear Call Spread
     bear_call_spread_width_intervals: Optional[int]  = None
     # Premium Sell Zone

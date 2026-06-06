@@ -23,7 +23,7 @@
   "telegram_chat_id": "542581131",
   "premium_min_vol_surge": 1.5,
   "premium_otm_depth": 3,
-  "lifetime_high_filter_enabled": true,
+  "lifetime_high_filter_enabled": false,
   "lifetime_high_lookback_days": 252,
   "lifetime_high_buffer_pct": 1.0,
   "surge_min_body_pct": 0.3,
