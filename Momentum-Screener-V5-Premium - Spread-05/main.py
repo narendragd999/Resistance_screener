@@ -2220,27 +2220,28 @@ async def check_proximity():
         hits = new_hits
     return {"hits": len(hits), "alerts": hits, "gate2_confirmed": gate2_new}
 
-@app.post("/api/proximity/refresh-ladders")
-async def refresh_proximity_ladders():
+def _do_refresh_ladders() -> dict:
     """
-    Re-fetch live option chain for every saved proximity alert and update
-    Opt_Ladder / Hot_Strike / Hot_CE_Chg_Pct / Hot_CE_LTP in-place.
-    Call this during market hours to populate premium-surge data on old alerts.
+    Synchronous worker — runs in a thread via asyncio.to_thread so it does NOT
+    block the FastAPI event loop or the NSE session used by other endpoints.
+    Only fetches unique tickers (deduped) to minimise NSE calls.
     """
     alerts = load_proximity()
     if not alerts:
-        return {"ok": True, "updated": 0, "message": "No saved alerts to refresh"}
+        return {"ok": True, "updated": 0, "total": 0, "message": "No saved alerts to refresh"}
 
-    updated = 0
+    # Dedup: only fetch each ticker once, then patch all alerts for that ticker
+    seen_tickers: Dict[str, dict] = {}   # ticker -> {"ladder", "hot_strike", ...}
     for alert in alerts:
-        ticker    = alert.get("Ticker")
-        cur_price = alert.get("Current_Price") or 0
-        if not ticker:
+        ticker = alert.get("Ticker")
+        if not ticker or ticker in seen_tickers:
             continue
+        cur_price = alert.get("Current_Price") or 0
         try:
             sm, _ = fetch_option_chain(ticker)
             if not sm:
                 print(f"[refresh-ladders] {ticker}: option chain empty")
+                seen_tickers[ticker] = None   # mark as attempted
                 continue
 
             sorted_sk = sorted(sm.keys())
@@ -2266,7 +2267,6 @@ async def refresh_proximity_ladders():
 
             with_pct = [r for r in ladder if r["chg_pct"] is not None and r["ltp"] > 0]
             with_ltp = [r for r in ladder if r["ltp"] > 0]
-
             if with_pct:
                 hottest = max(with_pct, key=lambda r: r["chg_pct"])
             elif with_ltp:
@@ -2274,20 +2274,52 @@ async def refresh_proximity_ladders():
             else:
                 hottest = None
 
-            alert["Opt_Ladder"]     = ladder
-            alert["Hot_Strike"]     = hottest["strike"]    if hottest else None
-            alert["Hot_CE_Chg_Pct"] = hottest.get("chg_pct") if hottest else None
-            alert["Hot_CE_LTP"]     = hottest["ltp"]       if hottest else None
-            alert["Ladder_Refreshed_At"] = now_ist_str()
-            updated += 1
-            print(f"[refresh-ladders] {ticker}: hot={alert['Hot_Strike']}  chg%={alert['Hot_CE_Chg_Pct']}")
-            time.sleep(random.uniform(1.5, 2.5))
+            seen_tickers[ticker] = {
+                "ladder":    ladder,
+                "hot_strike":  hottest["strike"]         if hottest else None,
+                "hot_chg_pct": hottest.get("chg_pct")   if hottest else None,
+                "hot_ltp":     hottest["ltp"]            if hottest else None,
+            }
+            print(f"[refresh-ladders] {ticker}: hot={seen_tickers[ticker]['hot_strike']}  chg%={seen_tickers[ticker]['hot_chg_pct']}")
+            time.sleep(random.uniform(2.0, 3.0))
         except Exception as e:
             print(f"[refresh-ladders] {ticker} error: {e}")
+            seen_tickers[ticker] = None
             continue
+
+    # Patch all alerts with fresh data
+    updated = 0
+    refreshed_at = now_ist_str()
+    for alert in alerts:
+        tk = alert.get("Ticker")
+        data = seen_tickers.get(tk)
+        if data:
+            alert["Opt_Ladder"]          = data["ladder"]
+            alert["Hot_Strike"]          = data["hot_strike"]
+            alert["Hot_CE_Chg_Pct"]      = data["hot_chg_pct"]
+            alert["Hot_CE_LTP"]          = data["hot_ltp"]
+            alert["Ladder_Refreshed_At"] = refreshed_at
+            updated += 1
 
     save_proximity(alerts)
     return {"ok": True, "updated": updated, "total": len(alerts)}
+
+
+@app.post("/api/proximity/refresh-ladders")
+async def refresh_proximity_ladders(background_tasks: BackgroundTasks):
+    """
+    On-demand only — triggered manually via the ⚡ Refresh Ladders button.
+    Runs in a background thread so NSE HTTP calls do NOT block the event loop
+    or interfere with other in-flight requests.
+    Returns immediately; client should reload alerts after a short delay.
+    """
+    alerts = load_proximity()
+    if not alerts:
+        return {"ok": True, "updated": 0, "total": 0, "message": "No saved alerts"}
+    background_tasks.add_task(asyncio.to_thread, _do_refresh_ladders)
+    unique = len({a.get("Ticker") for a in alerts if a.get("Ticker")})
+    return {"ok": True, "queued": True, "unique_tickers": unique,
+            "message": f"Refreshing {unique} ticker(s) in background"}
 
 
 

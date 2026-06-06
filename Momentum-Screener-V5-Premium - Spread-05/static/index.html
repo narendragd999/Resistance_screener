@@ -2257,11 +2257,6 @@ document.getElementById('btn-check-prox').addEventListener('click', async () => 
   document.getElementById('btn-check-prox').disabled = true;
   try {
     const r = await API.post('/api/proximity/check');
-    // After a proximity check, refresh ladders for ALL saved alerts
-    // so tickers that got rate-limited during the check get their option data
-    try {
-      await API.post('/api/proximity/refresh-ladders');
-    } catch(_) { /* non-fatal */ }
     await loadAlerts();
     refreshStatus();
     if (r.hits) toast('success',`${r.hits} sell zone hit(s)!`);
@@ -2273,14 +2268,21 @@ document.getElementById('btn-check-prox').addEventListener('click', async () => 
 document.getElementById('btn-refresh-ladders').addEventListener('click', async () => {
   const btn = document.getElementById('btn-refresh-ladders');
   btn.disabled = true;
-  btn.textContent = '⏳ Refreshing…';
+  btn.innerHTML = '⏳ Fetching…';
   try {
     const r = await API.post('/api/proximity/refresh-ladders');
-    await loadAlerts();
-    toast('success', `Ladders refreshed`, `Updated ${r.updated} of ${r.total} alerts`);
-  } catch(e) { toast('error','Ladder refresh failed'); }
-  btn.disabled = false;
-  btn.innerHTML = '⚡ Refresh Ladders';
+    const secs = (r.unique_tickers || 1) * 4;   // ~4s per ticker (2 NSE calls + sleep)
+    toast('info', `Refreshing ${r.unique_tickers} ticker(s)`, `Results ready in ~${secs}s — reloading automatically`);
+    setTimeout(async () => {
+      await loadAlerts();
+      btn.disabled = false;
+      btn.innerHTML = '⚡ Refresh Ladders';
+    }, secs * 1000);
+  } catch(e) {
+    toast('error', 'Ladder refresh failed');
+    btn.disabled = false;
+    btn.innerHTML = '⚡ Refresh Ladders';
+  }
 });
 
 document.getElementById('btn-clear-alerts').addEventListener('click', async () => {
@@ -2965,15 +2967,9 @@ async function init() {
   await loadPnl();
 
   // Auto-refresh every 60 seconds — signals, alerts, premium zone, P&L
-  let _ladderRefreshCounter = 0;
   setInterval(async () => {
     await refreshStatus();
     await loadSignals();
-    // Every 3rd tick (≈3 min), also refresh option ladders so all tickers get live data
-    _ladderRefreshCounter++;
-    if (_ladderRefreshCounter % 3 === 0 && State.alerts.length) {
-      try { await API.post('/api/proximity/refresh-ladders'); } catch(_) {}
-    }
     await loadAlerts();
     await loadPremiumZone();   // ← Premium Zone now auto-refreshes
     await loadPnl();           // ← P&L tracker also refreshes
