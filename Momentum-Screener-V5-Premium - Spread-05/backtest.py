@@ -80,6 +80,22 @@ DEFAULT_CONFIG = {
     # At Gate 3 retest, vol_surge_at_g3 = volume / 20d avg volume.
     # Trades where this >= threshold are flagged as "High Premium" setups.
     "premium_vol_surge_threshold": 1.5,
+    # ── Max OTM Gain Pact ────────────────────────────────────────────────────
+    # Instead of always selling the +1 OTM strike, evaluate every strike from
+    # +1 to +max_otm_depth OTM and pick the one with the highest Expected Value:
+    #   EV = avg_premium × win_rate_at_that_offset
+    # The backtest records per-offset results in strike_variants[] and builds
+    # an otm_bucket_stats table in the summary for each ticker.
+    # The live screener (main.py) reads this table to auto-select the optimal
+    # strike when max_otm_ev_mode is True.
+    "max_otm_depth":              3,     # evaluate +1, +2, +3 OTM
+    "max_otm_ev_mode":            True,  # kept for compat; use otm_selection_mode instead
+    # otm_selection_mode controls which OTM offset is used as the PRIMARY trade:
+    #   "safest"  → deepest available OTM with premium >= min_tradable (max safety)
+    #   "ev"      → EV-optimal offset (premium × win_rate, from two-pass backtest)
+    #   "default" → always +1 OTM (original behaviour)
+    "otm_selection_mode":         "safest",   # ← safest = highest OTM = safer trade
+    "min_tradable_premium":       0.10,        # Rs — stop building variants below this
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -425,20 +441,30 @@ def check_gate3(
     prox_pct = float(cfg.get("price_proximity_percent", 1.0))
     floor    = surge_high * (1 - prox_pct / 100)
 
-    pulled_back = False   # True once close has dropped below floor after Gate 2
+    pulled_back       = False   # True once close has dropped below floor after Gate 2
+    above_high_streak = 0       # consecutive closes above surge_high
 
     # Start from g2_idx+1: Gate 2 candle itself is never a valid entry.
-    # elif prevents Phase 1 + Phase 2 firing on the same candle.
+    # Breakout requires 2 consecutive closes above surge_high — a single spike
+    # candle (high above surge_high but close well below, e.g. Jan 31 2022 AUBANK)
+    # should NOT permanently kill Gate 3 scanning.
     for i in range(g2_idx + 1, len(closes)):
         close = float(closes[i])
         high  = float(highs[i])
 
-        # Breakout confirmed by CLOSE -> thesis dead, stop scanning
+        # Track consecutive closes above surge_high (confirmed breakout)
         if close > surge_high:
-            return None
+            above_high_streak += 1
+            if above_high_streak >= 2:
+                return None   # 2 consecutive closes above → thesis dead
+            # Single close above: don't fire entry, but keep scanning
+            pulled_back = False  # reset pullback — price escaped zone
+            continue
+        else:
+            above_high_streak = 0  # streak broken
 
         # Phase 1: mark pullback when close falls below the floor
-        elif not pulled_back and close < floor:
+        if not pulled_back and close < floor:
             pulled_back = True
 
         # Phase 2: retest — HIGH re-enters the sell zone AFTER confirmed pullback
@@ -455,85 +481,130 @@ def evaluate_trade(
     closes: np.ndarray, dates: pd.DatetimeIndex,
     g3_idx: int, surge_high: float, cfg: Dict,
     vols: Optional[np.ndarray] = None,
+    recommended_otm_idx: int = 1,
 ) -> Optional[Dict]:
     """
-    At Gate 3 trigger (day g3_idx):
-      1. Compute strike = nearest OTM above surge_high
-      2. Estimate CE premium via Black-Scholes
-      3. Find monthly NSE expiry
-      4. Look up closing price on or after expiry date
-      5. Determine WIN / LOSS and P&L
-      6. Compute volume surge at Gate 3 (vol / 20d avg) and Premium Score
-         = vol_surge_at_g3 x entry_ce_premium — higher score means the
-         retest happened with elevated volume AND rich premium, flagging
-         the highest-conviction sell setups.
+    Max OTM Gain Pact primary flow
+    --------------------------------
+    1. Evaluate ALL strikes +1 to +max_otm_depth OTM (strike_variants[]).
+       Stop when Black-Scholes premium < Rs 0.10 (not tradable).
+    2. PRIMARY trade uses recommended_otm_idx (from EV table of prior run).
+       First run defaults to +1 OTM; subsequent runs auto-use EV-best offset.
+    3. BCS (Bear Call Spread) computed for every variant and the primary trade.
+    4. Single-close breakout kill is REMOVED (handled in check_gate3 with
+       2-consecutive-close rule so spike candles like Jan31 2022 are correctly
+       caught as retests, not false breakouts).
     """
-    entry_price  = float(closes[g3_idx])
-    entry_date   = dates[g3_idx].date()
+    entry_price = float(closes[g3_idx])
+    entry_date  = dates[g3_idx].date()
 
-    # --- Strike ---
-    strike = nearest_otm_strike(surge_high)
+    interval    = nse_strike_interval(surge_high)
+    base_strike = nearest_otm_strike(surge_high)
 
-    # --- Time to expiry (respects expiry_mode config) ---
     expiry_mode   = str(cfg.get("expiry_mode", "auto")).lower()
     min_days_roll = int(cfg.get("min_days_to_expiry", 5))
 
-    def _next_expiry(d: date) -> date:
+    def _next_expiry(d):
         nm = d.month + 1 if d.month < 12 else 1
-        ny = d.year  + (1 if d.month == 12 else 0)
+        ny = d.year + (1 if d.month == 12 else 0)
         return nse_monthly_expiry(ny, nm)
 
     if expiry_mode == "next":
         expiry_date = _next_expiry(entry_date)
     elif expiry_mode == "current":
         expiry_date = nse_monthly_expiry(entry_date.year, entry_date.month)
-    else:   # "auto" (default)
+    else:
         expiry_date = nse_monthly_expiry(entry_date.year, entry_date.month)
         if (expiry_date - entry_date).days <= min_days_roll:
             expiry_date = _next_expiry(entry_date)
 
     T_years = max(0.001, (expiry_date - entry_date).days / 365.0)
+    sigma   = hist_vol(closes[:g3_idx + 1], VOL_WINDOW)
 
-    # --- Historical volatility at entry ---
-    sigma = hist_vol(closes[:g3_idx + 1], VOL_WINDOW)
-
-    # --- Black-Scholes CE premium at entry ---
-    entry_ce_premium = round(bs_call(entry_price, strike, T_years, RISK_FREE_RATE, sigma), 2)
-    if entry_ce_premium < 0.01:
-        return None   # negligible premium — skip
-
-    # --- Find expiry-day close (or nearest available date) ---
     exp_dates = [d.date() for d in dates]
     exp_idx   = None
-    for search_offset in range(0, 5):   # allow up to 4 days slippage for holidays
+    for search_offset in range(0, 5):
         target = expiry_date + timedelta(days=search_offset)
         if target in exp_dates:
             exp_idx = exp_dates.index(target)
             break
-
     if exp_idx is None or exp_idx >= len(closes):
-        return None   # no data at/after expiry
+        return None
 
     expiry_close  = float(closes[exp_idx])
     actual_expiry = dates[exp_idx].date()
 
-    # --- P&L ---
-    # Seller receives entry_ce_premium; pays max(0, expiry_close - strike) at settlement
+    # Build all OTM strike variants with BCS
+    max_otm_depth   = int(cfg.get("max_otm_depth", 3))
+    strike_variants: List[Dict] = []
+    for otm_idx in range(1, max_otm_depth + 1):
+        k    = base_strike + (otm_idx - 1) * interval
+        prem = round(bs_call(entry_price, k, T_years, RISK_FREE_RATE, sigma), 2)
+        if prem < 0.10:
+            break
+        intrin  = max(0.0, expiry_close - k)
+        pnl_raw = prem - intrin
+        pnl_k   = max(pnl_raw, -3 * prem)
+        hedge_k    = k + interval
+        hedge_prem = round(bs_call(entry_price, hedge_k, T_years, RISK_FREE_RATE, sigma), 2)
+        bcs_net    = round(prem - hedge_prem, 2) if hedge_prem > 0 else None
+        bcs_ml     = round(interval - bcs_net, 2) if (bcs_net and bcs_net > 0) else None
+        bcs_be     = round(k + bcs_net, 2) if bcs_net else None
+        bcs_rr     = round(bcs_ml / bcs_net, 2) if (bcs_net and bcs_net > 0 and bcs_ml) else None
+        strike_variants.append({
+            "otm_idx":          otm_idx,
+            "strike":           int(k),
+            "premium":          prem,
+            "result":           "WIN" if expiry_close < k else "LOSS",
+            "pnl":              round(pnl_k, 2),
+            "return_pct":       round(pnl_raw / prem * 100, 1) if prem > 0 else 0.0,
+            "bcs_hedge_strike": int(hedge_k),
+            "bcs_hedge_prem":   hedge_prem,
+            "bcs_net_premium":  bcs_net,
+            "bcs_max_profit":   bcs_net,
+            "bcs_max_loss":     bcs_ml,
+            "bcs_breakeven":    bcs_be,
+            "bcs_risk_reward":  bcs_rr,
+        })
+
+    if not strike_variants:
+        return None
+
+    # ── Select PRIMARY strike based on otm_selection_mode ────────────────────
+    #
+    #   "safest"  → deepest available OTM (highest otm_idx with tradable premium)
+    #               Furthest from current price = lowest probability of going ITM
+    #               Lower premium collected but much higher win rate = safer trade
+    #
+    #   "ev"      → EV-optimal: offset with best (premium × win_rate) from
+    #               two-pass backtest. recommended_otm_idx is passed in by
+    #               backtest_multiple after Pass 1 builds the EV table.
+    #
+    #   "default" → always +1 OTM (nearest strike above surge_high)
+    #
+    sel_mode = str(cfg.get("otm_selection_mode", "safest")).lower()
+    avail    = {v["otm_idx"]: v for v in strike_variants}
+
+    if sel_mode == "safest":
+        # Deepest variant = last in strike_variants list (highest otm_idx)
+        primary_v = strike_variants[-1]
+    elif sel_mode == "ev":
+        # Use recommended offset from EV table; fall back to deepest if unavailable
+        primary_v = avail.get(recommended_otm_idx, strike_variants[-1])
+    else:
+        # "default" — always +1 OTM
+        primary_v = strike_variants[0]
+
+    strike           = primary_v["strike"]
+    entry_ce_premium = primary_v["premium"]
+    result           = primary_v["result"]
+    pnl              = primary_v["pnl"]
     intrinsic_at_expiry = max(0.0, expiry_close - strike)
-    pnl_per_lot_raw = entry_ce_premium - intrinsic_at_expiry   # per unit
-    result = "WIN" if expiry_close < strike else "LOSS"
 
-    # Max loss cap at 3× premium (reasonable for sold CE)
-    pnl = max(pnl_per_lot_raw, -3 * entry_ce_premium)
-
-    # ── Premium Surge metrics at Gate 3 ──────────────────────────────────────
-    # Volume surge: compare Gate 3 candle volume to 20d avg volume BEFORE it.
-    # High volume at the retest candle = stronger market presence at resistance
-    # = historically richer CE premiums and more aggressive rejection.
-    vol_surge_at_g3  = None
-    premium_score    = None
-    vol_at_g3_raw    = None
-    avg_vol_20d_g3   = None
+    vol_surge_at_g3 = None
+    premium_score   = None
+    vol_at_g3_raw   = None
+    avg_vol_20d_g3  = None
 
     if vols is not None and len(vols) > g3_idx:
         vol_at_g3_raw  = float(vols[g3_idx])
@@ -541,45 +612,46 @@ def evaluate_trade(
         avg_vol_20d_g3 = float(window.mean()) if len(window) > 0 else None
         if avg_vol_20d_g3 and avg_vol_20d_g3 > 0:
             vol_surge_at_g3 = round(vol_at_g3_raw / avg_vol_20d_g3, 2)
-            # Premium Score = vol_surge × ATM/OTM premium collected.
-            # Same formula used in the live Premium Zone scanner.
             premium_score   = round(vol_surge_at_g3 * entry_ce_premium, 2)
 
     threshold    = float(cfg.get("premium_vol_surge_threshold", 1.5))
     is_high_prem = bool(vol_surge_at_g3 is not None and vol_surge_at_g3 >= threshold)
 
     return {
-        # Dates
-        "entry_date":       str(entry_date),
-        "expiry_date":      str(expiry_date),
-        "actual_data_date": str(actual_expiry),
-        # Prices
-        "entry_price":      round(entry_price, 2),
-        "surge_high":       round(surge_high, 2),
-        "strike":           int(strike),
-        "entry_ce_premium": entry_ce_premium,
-        "expiry_close":     round(expiry_close, 2),
-        "intrinsic_value":  round(intrinsic_at_expiry, 2),
-        # Greeks
-        "iv_sigma":         round(sigma * 100, 1),    # %
-        "T_days":           (expiry_date - entry_date).days,
-        # Outcome
-        "expiry_mode":      expiry_mode,
-        "expiry_label":      expiry_mode,   # "current" / "next" / "auto"
-        "result":           result,
-        "pnl_per_unit":     round(pnl, 2),
-        "return_pct":       round(pnl / entry_ce_premium * 100, 1) if entry_ce_premium > 0 else 0,
-        # Premium Surge metrics (Gate 3 volume quality)
-        "vol_at_g3":        int(vol_at_g3_raw) if vol_at_g3_raw is not None else None,
-        "avg_vol_20d_g3":   int(avg_vol_20d_g3) if avg_vol_20d_g3 is not None else None,
-        "vol_surge_at_g3":  vol_surge_at_g3,
-        "premium_score":    premium_score,
-        "is_high_prem":     is_high_prem,
+        "entry_date":        str(entry_date),
+        "expiry_date":       str(expiry_date),
+        "actual_data_date":  str(actual_expiry),
+        "entry_price":       round(entry_price, 2),
+        "surge_high":        round(surge_high, 2),
+        "strike":            int(strike),
+        "otm_idx":           primary_v["otm_idx"],
+        "otm_label":         f"+{primary_v['otm_idx']} OTM",
+        "entry_ce_premium":  entry_ce_premium,
+        "expiry_close":      round(expiry_close, 2),
+        "intrinsic_value":   round(intrinsic_at_expiry, 2),
+        "iv_sigma":          round(sigma * 100, 1),
+        "T_days":            (expiry_date - entry_date).days,
+        "expiry_mode":       expiry_mode,
+        "expiry_label":      expiry_mode,
+        "result":            result,
+        "pnl_per_unit":      round(pnl, 2),
+        "return_pct":        round(pnl / entry_ce_premium * 100, 1) if entry_ce_premium > 0 else 0,
+        "bcs_hedge_strike":  primary_v["bcs_hedge_strike"],
+        "bcs_hedge_prem":    primary_v["bcs_hedge_prem"],
+        "bcs_net_premium":   primary_v["bcs_net_premium"],
+        "bcs_max_profit":    primary_v["bcs_max_profit"],
+        "bcs_max_loss":      primary_v["bcs_max_loss"],
+        "bcs_breakeven":     primary_v["bcs_breakeven"],
+        "bcs_risk_reward":   primary_v["bcs_risk_reward"],
+        "vol_at_g3":         int(vol_at_g3_raw) if vol_at_g3_raw is not None else None,
+        "avg_vol_20d_g3":    int(avg_vol_20d_g3) if avg_vol_20d_g3 is not None else None,
+        "vol_surge_at_g3":   vol_surge_at_g3,
+        "premium_score":     premium_score,
+        "is_high_prem":      is_high_prem,
+        "strike_variants":   strike_variants,
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  DUAL-EXPIRY HELPER
 # ─────────────────────────────────────────────────────────────────────────────
 def _expiry_side(
     closes: np.ndarray, dates: pd.DatetimeIndex,
@@ -783,6 +855,7 @@ def backtest_ticker(
     trades:          List[Dict] = []
     seen_trade_keys: set        = set()
 
+    rec_otm_idx = int(cfg.get("_recommended_otm_idx", 1))
     for bd_idx, bd_info in sorted(precomputed_signals.items()):
         surge_high  = bd_info["surge_high"]
         bd_date_str = str(dates[bd_idx].date())
@@ -832,8 +905,12 @@ def backtest_ticker(
         if verbose:
             print(f"    Gate 3 @ {g3_date}  price={closes[g3_idx]:.2f}")
 
-        # ── Trade evaluation (unchanged) ─────────────────────────────────────
-        trade = evaluate_trade(closes, dates, g3_idx, surge_high, cfg, vols=vols)
+        # ── Trade evaluation: pass EV-optimal OTM offset ──────────────────────
+        trade = evaluate_trade(
+            closes, dates, g3_idx, surge_high, cfg,
+            vols=vols,
+            recommended_otm_idx=rec_otm_idx,
+        )
         if trade is None:
             if verbose:
                 print(f"    Trade evaluation skipped (no expiry data or zero premium)")
@@ -910,6 +987,52 @@ def backtest_ticker(
             "total_pnl":    round(pnl, 2),
         }
 
+    # ── Max OTM Gain Pact: per-offset bucket stats ────────────────────────────
+    # Group all strike_variants across every trade by otm_idx (1, 2, 3 …).
+    # For each offset bucket compute: win_rate, avg_premium, avg_pnl, EV.
+    # EV = avg_premium × (wins / total)  — the expected rupees collected per trade.
+    # The bucket with the highest EV is the "recommended" strike offset for
+    # this ticker, which the live screener can read from the cache.
+    from collections import defaultdict as _dd
+    _buckets: Dict[int, list] = _dd(list)
+    for t in trades:
+        for v in t.get("strike_variants", []):
+            _buckets[v["otm_idx"]].append(v)
+
+    otm_bucket_stats: Dict[str, Dict] = {}
+    best_ev        = -1.0
+    best_otm_idx   = 1          # default to +1 OTM if no variants exist
+    for idx in sorted(_buckets.keys()):
+        variants = _buckets[idx]
+        n_v  = len(variants)
+        w_v  = sum(1 for v in variants if v["result"] == "WIN")
+        prem_v = round(sum(v["premium"] for v in variants) / n_v, 2)
+        pnl_v  = round(sum(v["pnl"]     for v in variants) / n_v, 2)
+        wr_v   = round(w_v / n_v * 100, 1)
+        ev_v   = round(prem_v * (w_v / n_v), 2)
+        otm_bucket_stats[str(idx)] = {
+            "otm_idx":     idx,
+            "label":       f"+{idx} OTM",
+            "trades":      n_v,
+            "wins":        w_v,
+            "losses":      n_v - w_v,
+            "win_rate":    wr_v,
+            "avg_premium": prem_v,
+            "avg_pnl":     pnl_v,
+            "ev":          ev_v,
+        }
+        if ev_v > best_ev:
+            best_ev      = ev_v
+            best_otm_idx = idx
+
+    recommended_otm = {
+        "otm_idx":  best_otm_idx,
+        "label":    f"+{best_otm_idx} OTM",
+        "ev":       round(best_ev, 2),
+        "win_rate": otm_bucket_stats[str(best_otm_idx)]["win_rate"] if otm_bucket_stats else None,
+        "avg_premium": otm_bucket_stats[str(best_otm_idx)]["avg_premium"] if otm_bucket_stats else None,
+    } if otm_bucket_stats else None
+
     return {
         "ticker": ticker,
         "summary": {
@@ -929,18 +1052,107 @@ def backtest_ticker(
                 "current_month": _side_summary("cur_expiry"),
                 "next_month":    _side_summary("nxt_expiry"),
             },
+            # Max OTM Gain Pact
+            "otm_bucket_stats":   otm_bucket_stats,
+            "recommended_otm":    recommended_otm,
         },
         "trades": trades,
     }
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MAX OTM GAIN PACT — MODULE-LEVEL AGGREGATE HELPERS
+#  These must be at module level so backtest_multiple() can call them during
+#  its two-pass flow (before the nested helpers inside the function are defined).
+# ─────────────────────────────────────────────────────────────────────────────
+def _agg_otm_buckets(ticker_results: list) -> Dict:
+    """Aggregate strike_variants across all tickers into per-offset bucket stats."""
+    from collections import defaultdict as _dd2
+    _bkt: Dict[int, list] = _dd2(list)
+    for r in ticker_results:
+        for t in r.get("trades", []):
+            for v in t.get("strike_variants", []):
+                _bkt[v["otm_idx"]].append(v)
+    out: Dict[str, Dict] = {}
+    for idx in sorted(_bkt.keys()):
+        vv  = _bkt[idx]
+        n_v = len(vv)
+        w_v = sum(1 for v in vv if v["result"] == "WIN")
+        prem_v = round(sum(v["premium"] for v in vv) / n_v, 2)
+        pnl_v  = round(sum(v["pnl"]     for v in vv) / n_v, 2)
+        wr_v   = round(w_v / n_v * 100, 1)
+        ev_v   = round(prem_v * (w_v / n_v), 2)
+        out[str(idx)] = {
+            "otm_idx":     idx,
+            "label":       f"+{idx} OTM",
+            "trades":      n_v,
+            "wins":        w_v,
+            "losses":      n_v - w_v,
+            "win_rate":    wr_v,
+            "avg_premium": prem_v,
+            "avg_pnl":     pnl_v,
+            "ev":          ev_v,
+        }
+    return out
+
+
+def _agg_best_otm(ticker_results: list) -> Optional[Dict]:
+    """Return the OTM offset with the highest EV across all tickers."""
+    buckets = _agg_otm_buckets(ticker_results)
+    if not buckets:
+        return None
+    best = max(buckets.values(), key=lambda x: x["ev"])
+    return {
+        "otm_idx":     best["otm_idx"],
+        "label":       best["label"],
+        "ev":          best["ev"],
+        "win_rate":    best["win_rate"],
+        "avg_premium": best["avg_premium"],
+    }
+
+
 def backtest_multiple(
     tickers: List[str], cfg: Dict, years: int = 2, verbose: bool = False
 ) -> Dict:
-    results = []
-    for tkr in tickers:
-        print(f"\n{'='*60}\nBacktesting {tkr}...\n{'='*60}")
-        res = backtest_ticker(tkr, cfg, years=years, verbose=verbose)
-        results.append(res)
+    """
+    Runs the walk-forward backtest for all tickers with Max OTM Gain Pact.
+
+    otm_selection_mode controls the primary strike:
+      "safest"  → deepest OTM with tradable premium (single pass — deterministic)
+      "ev"      → two-pass: Pass 1 builds EV table, Pass 2 re-runs with EV-best offset
+      "default" → always +1 OTM (single pass)
+    """
+    sel_mode = str(cfg.get("otm_selection_mode", "safest")).lower()
+
+    if sel_mode == "ev":
+        # ── Pass 1: build EV table with +1 OTM baseline ──────────────────────
+        cfg_pass1 = {**cfg, "_recommended_otm_idx": 1}
+        results = []
+        for tkr in tickers:
+            print(f"\n{'='*60}\nBacktesting {tkr} [Pass 1 — EV table build]...\n{'='*60}")
+            results.append(backtest_ticker(tkr, cfg_pass1, years=years, verbose=verbose))
+
+        pass1_best   = _agg_best_otm(results)
+        best_otm_idx = pass1_best["otm_idx"] if pass1_best else 1
+
+        # ── Pass 2: re-run with EV-optimal strike ────────────────────────────
+        if best_otm_idx > 1:
+            print(f"\n{'='*60}\nPass 2 — EV-optimal +{best_otm_idx} OTM\n{'='*60}")
+            cfg_pass2 = {**cfg, "_recommended_otm_idx": best_otm_idx}
+            results = []
+            for tkr in tickers:
+                print(f"  Re-backtesting {tkr}...")
+                results.append(backtest_ticker(tkr, cfg_pass2, years=years, verbose=verbose))
+        else:
+            print(f"\n[OTM Pact] EV-optimal is already +1 OTM — no re-run needed")
+
+    else:
+        # ── Single pass: "safest" or "default" — selection is deterministic ──
+        mode_label = "SAFEST (deepest OTM)" if sel_mode == "safest" else "DEFAULT (+1 OTM)"
+        results = []
+        for tkr in tickers:
+            print(f"\n{'='*60}\nBacktesting {tkr} [{mode_label}]...\n{'='*60}")
+            results.append(backtest_ticker(tkr, cfg, years=years, verbose=verbose))
 
     # Aggregate — overall
     all_trades  = [t for r in results for t in r.get("trades", [])]
@@ -993,6 +1205,8 @@ def backtest_multiple(
             "total_pnl":    round(pnl, 2),
         }
 
+    # (OTM aggregate helpers are module-level: _agg_otm_buckets, _agg_best_otm)
+
     return {
         "config":      cfg,
         "years_tested":years,
@@ -1015,6 +1229,9 @@ def backtest_multiple(
                 "current_month": _agg_side("cur_expiry"),
                 "next_month":    _agg_side("nxt_expiry"),
             },
+            # Max OTM Gain Pact — aggregate per-offset bucket stats (cross-ticker)
+            "otm_bucket_stats":    _agg_otm_buckets(results),
+            "recommended_otm":     _agg_best_otm(results),
         },
         "per_ticker": results,
     }

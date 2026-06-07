@@ -879,11 +879,77 @@ function renderResults(data) {
   </div>`;
   }
 
+  // ── Max OTM Gain Pact — Aggregate Panel ──────────────────────────────────
+  html += renderOtmPanel(agg.otm_bucket_stats, agg.recommended_otm, 'Aggregate');
+
   for (const tkr of per) {
     html += renderTicker(tkr);
   }
 
   document.getElementById('main-content').innerHTML = html;
+}
+
+// ── OTM Bucket Stats renderer (shared by aggregate + per-ticker) ──────────
+function renderOtmPanel(buckets, recommended, titlePrefix) {
+  if (!buckets || !Object.keys(buckets).length) return '';
+  const keys = Object.keys(buckets).sort((a,b) => +a - +b);
+  const bestIdx = recommended ? String(recommended.otm_idx) : null;
+
+  let rows = keys.map(k => {
+    const b   = buckets[k];
+    const isBest = k === bestIdx;
+    const evCol  = b.ev >= 0 ? 'var(--green)' : 'var(--red)';
+    const pnlCol = b.avg_pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    const starBadge = isBest
+      ? `<span style="background:rgba(240,136,62,.18);color:var(--accent);border:1px solid rgba(240,136,62,.4);
+             border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:6px;">★ EV Best</span>`
+      : '';
+    return `<tr style="${isBest ? 'background:rgba(240,136,62,.07)' : ''}">
+      <td style="font-weight:700">${b.label}${starBadge}</td>
+      <td>${b.trades}</td>
+      <td style="color:${b.win_rate >= 60 ? 'var(--green)' : b.win_rate >= 40 ? 'var(--accent)' : 'var(--red)'}">
+        ${b.win_rate.toFixed(1)}%</td>
+      <td style="color:var(--green)">₹${b.avg_premium.toFixed(2)}</td>
+      <td style="color:${pnlCol}">₹${b.avg_pnl.toFixed(2)}</td>
+      <td style="color:${evCol};font-weight:700">₹${b.ev.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+
+  const recLine = recommended
+    ? `<span style="color:var(--accent);font-weight:700">${recommended.label}</span>
+       &nbsp;→&nbsp;EV ₹${(recommended.ev||0).toFixed(2)}
+       &nbsp;·&nbsp;Win% ${recommended.win_rate ?? '?'}%
+       &nbsp;·&nbsp;Avg Prem ₹${(recommended.avg_premium||0).toFixed(2)}`
+    : '—';
+
+  return `
+  <div class="prem-panel" style="margin-top:12px">
+    <div class="prem-panel-header">
+      <span style="font-size:18px">🎯</span>
+      <h3>${titlePrefix} — Max OTM Gain Pact</h3>
+    </div>
+    <div class="prem-panel-body">
+      <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:12px">
+        Every Gate 3 trade is evaluated at each OTM offset (+1, +2, +3) simultaneously using Black-Scholes
+        pricing and the actual expiry close. <strong style="color:var(--text)">EV = avg_premium × win_rate</strong>
+        — the offset with the highest EV is the historically optimal strike to sell.<br>
+        <span style="color:var(--accent)">★ Recommended offset for this run: ${recLine}</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:6px 10px;background:var(--surface2);color:var(--muted)">Strike offset</th>
+            <th style="text-align:left;padding:6px 10px;background:var(--surface2);color:var(--muted)">Trades</th>
+            <th style="text-align:left;padding:6px 10px;background:var(--surface2);color:var(--muted)">Win%</th>
+            <th style="text-align:left;padding:6px 10px;background:var(--surface2);color:var(--muted)">Avg Premium</th>
+            <th style="text-align:left;padding:6px 10px;background:var(--surface2);color:var(--muted)">Avg P&L/unit</th>
+            <th style="text-align:left;padding:6px 10px;background:var(--surface2);color:var(--muted)">EV (₹) ▸</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
 }
 
 function renderTicker(tkr) {
@@ -913,6 +979,9 @@ function renderTicker(tkr) {
   const tdec = tkr.dual_expiry_comparison || {};
   const tCur = tdec.current_month       || {};
   const tNxt = tdec.next_month          || {};
+  // Max OTM Gain Pact per-ticker
+  const tOtmBuckets = s.otm_bucket_stats  || null;
+  const tOtmRec     = s.recommended_otm   || null;
 
   // ── Build rows ─────────────────────────────────────────────────────────────
   const rows = tkr.trades.map(t => {
@@ -945,7 +1014,35 @@ function renderTicker(tkr) {
                 : `<span style="color:var(--muted);font-size:11px">${ps.toFixed(1)}</span>`)
       : '<span style="color:var(--muted)">—</span>';
 
-    // Helper: render one expiry-side block (3 cells: Prem | ExpClose | Res+P&L)
+    // OTM label badge
+    const otmLabel = t.otm_label || '+1 OTM';
+    const otmIdx   = t.otm_idx   || 1;
+    const otmColor = otmIdx === 1 ? 'var(--muted)' : otmIdx === 2 ? 'var(--accent)' : 'var(--green)';
+    const otmHtml  = `<span style="font-size:10px;font-weight:700;color:${otmColor};
+      background:rgba(255,255,255,0.06);border-radius:8px;padding:1px 6px">${otmLabel}</span>`;
+
+    // BCS inline cell
+    const bcsNet   = t.bcs_net_premium;
+    const bcsML    = t.bcs_max_loss;
+    const bcsRR    = t.bcs_risk_reward;
+    const bcsHedge = t.bcs_hedge_strike;
+    const bcsShort = t.strike;            // the CE we SELL = primary strike
+    const bcsBE    = t.bcs_breakeven;
+    let bcsHtml = '<span style="color:var(--muted);font-size:10px">—</span>';
+    if (bcsNet != null && bcsNet > 0 && bcsML != null) {
+      const rrStr = bcsRR != null ? `1:${bcsRR}` : '—';
+      const beStr = bcsBE != null ? `₹${bcsBE}` : '—';
+      bcsHtml = `<span style="font-size:10px;line-height:1.8;display:inline-block">
+        <span style="color:var(--red);font-weight:700">SELL ₹${bcsShort} CE</span><br>
+        <span style="color:var(--green);font-weight:700">BUY &nbsp;₹${bcsHedge} CE</span><br>
+        <span style="color:var(--text)">Net&nbsp;&nbsp;₹${bcsNet}</span><br>
+        <span style="color:var(--red)">MaxL ₹${bcsML}</span><br>
+        <span style="color:var(--muted)">BE&nbsp;&nbsp;&nbsp;${beStr}</span><br>
+        <span style="color:var(--muted)">R:R&nbsp;&nbsp;${rrStr}</span>
+      </span>`;
+    }
+
+    // Helper: render one expiry-side block
     function sideCell(side, isWin, tagCls, tdBase) {
       if (!side || !side.result) {
         return `<td class="${tdBase}" colspan="5" style="color:var(--muted);text-align:center">—</td>`;
@@ -976,11 +1073,12 @@ function renderTicker(tkr) {
       <td>${t.gate2_date}</td>
       <td>${t.gate3_date} ${divBadge}</td>
       <td>₹${t.surge_high}</td>
-      <td>₹${t.strike}</td>
+      <td>₹${t.strike}<br>${otmHtml}</td>
       <td>₹${t.entry_price}</td>
       <td>${t.iv_sigma}%</td>
       <td>${vsHtml}</td>
       <td>${psHtml}</td>
+      <td style="min-width:90px">${bcsHtml}</td>
       ${sideCell(cur, cWin, 'tag-cur-' + (cWin?'win':'loss'), 'td-cur')}
       ${sideCell(nxt, nWin, 'tag-nxt-' + (nWin?'win':'loss'), 'td-nxt')}
     </tr>`;
@@ -1010,6 +1108,7 @@ function renderTicker(tkr) {
           🟣 Nxt: <span style="color:var(--nxt-col);font-weight:700">${nAcc}</span>
           ${divCount ? `&nbsp;·&nbsp;<span class="div-pill">⚡ ${divCount} div</span>` : ''}
           ${thi.trades ? `&nbsp;·&nbsp;💎 H-Vol: <span style="color:var(--accent)">${thiAcc}</span>` : ''}
+          ${tOtmRec ? `&nbsp;·&nbsp;🎯 OTM Best: <span style="color:var(--accent);font-weight:700">${tOtmRec.label}</span> EV ₹${(tOtmRec.ev||0).toFixed(1)}` : ''}
         </span>
       </div>
       <div class="ticker-stats">
@@ -1021,6 +1120,7 @@ function renderTicker(tkr) {
       </div>
     </div>
     <div class="ticker-body" style="display:none">
+      ${tOtmBuckets ? renderOtmPanel(tOtmBuckets, tOtmRec, tkr.ticker) : ''}
       <div class="filter-row" style="padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface2);flex-wrap:wrap;">
         <span style="font-size:11px;color:var(--muted);">Filter:</span>
         <button class="filter-chip active" id="fc-all-${uid}"  onclick="filterTrades('${uid}','all')">All (${tkr.trades.length})</button>
@@ -1036,11 +1136,12 @@ function renderTicker(tkr) {
             <th rowspan="2">Gate 2</th>
             <th rowspan="2">Gate 3 Entry</th>
             <th rowspan="2">Surge High</th>
-            <th rowspan="2">Strike</th>
+            <th rowspan="2">Strike / OTM</th>
             <th rowspan="2">Entry Price</th>
             <th rowspan="2">HV(σ)</th>
             <th rowspan="2" title="Vol at G3 / 20d avg">Vol@G3</th>
             <th rowspan="2" title="Vol Surge × CE Prem">Score 💎</th>
+            <th rowspan="2" title="Bear Call Spread — SELL short strike CE + BUY hedge CE one interval higher. Shows both legs, net credit, max loss, breakeven, R:R">BCS 🛡</th>
             <th colspan="5" class="th-cur">🔵 CURRENT MONTH EXPIRY</th>
             <th colspan="5" class="th-nxt">🟣 NEXT MONTH EXPIRY</th>
           </tr>
