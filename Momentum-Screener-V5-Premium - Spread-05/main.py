@@ -59,6 +59,9 @@ from backtest import router as bt_router
 
 from ema9_router import router as ema9_router
 
+from fv_router import router as fv_router
+
+
 BASE_DIR = Path(__file__).parent
 
 # ─────────────────────────────────────────────────────────────
@@ -2207,11 +2210,16 @@ async def backtest_dashboard_page():
 async def ema9_screener_page():
     return FileResponse(BASE_DIR / "static" / "ema9-screener.html")
 
+@app.get("/fv_test_harness", include_in_schema=False)
+async def ema9_screener_page():
+    return FileResponse(BASE_DIR / "static" / "fv_test_harness.html")
+
 app.include_router(oc_router)
 app.include_router(sma_router)
 
 app.include_router(bt_router)   # ADD THIS
 app.include_router(ema9_router)   # ADD THIS
+app.include_router(fv_router)
 
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")

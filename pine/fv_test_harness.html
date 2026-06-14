@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fair Value Bridge — Test Harness</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  /* ── Token System ───────────────────────── */
+  :root {
+    --bg:      #0d0f14;
+    --surface: #151820;
+    --border:  #252a35;
+    --text:    #e2e8f0;
+    --muted:   #64748b;
+    --under:   #00c853;
+    --fair:    #ffd600;
+    --over:    #ef4444;
+    --blue:    #60a5fa;
+    --purple:  #a78bfa;
+    --orange:  #fb923c;
+    --radius:  8px;
+    --font:    'Inter', 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  h1 { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+
+  /* ── Controls ───────────────────────────── */
+  .controls {
+    display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .ctrl-group { display: flex; flex-direction: column; gap: 4px; }
+  label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  input, select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    font-size: 13px;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: var(--blue); }
+  button {
+    background: var(--blue);
+    color: #000;
+    border: none;
+    border-radius: var(--radius);
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity .15s;
+    align-self: flex-end;
+  }
+  button:hover { opacity: .85; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* ── Status / error ─────────────────────── */
+  .status-bar {
+    font-size: 12px;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin-bottom: 16px;
+    color: var(--muted);
+    display: none;
+  }
+  .status-bar.visible { display: block; }
+  .status-bar.error   { border-color: var(--over);  color: var(--over); }
+  .status-bar.ok      { border-color: var(--under); color: var(--under); }
+
+  /* ── Summary cards ──────────────────────── */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+  .card .value { font-size: 20px; font-weight: 700; }
+  .card.under  { border-color: var(--under); }
+  .card.over   { border-color: var(--over); }
+  .card.fair   { border-color: var(--fair); }
+
+  /* ── Chart ──────────────────────────────── */
+  .chart-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+  .chart-wrap canvas { display: block; }
+
+  /* ── FY Table ───────────────────────────── */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: auto;
+    margin-bottom: 20px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead th {
+    background: #1a1e28;
+    padding: 8px 12px;
+    text-align: right;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    white-space: nowrap;
+    position: sticky; top: 0;
+  }
+  thead th:first-child { text-align: left; }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody td { padding: 7px 12px; text-align: right; }
+  tbody td:first-child { text-align: left; font-weight: 600; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+  }
+  .pill.UNDERVALUED { background: rgba(0,200,83,.2); color: var(--under); }
+  .pill.OVERVALUED  { background: rgba(239,68,68,.2); color: var(--over); }
+  .pill.FAIR        { background: rgba(255,214,0,.15); color: var(--fair); }
+
+  /* ── CSV raw output ─────────────────────── */
+  .raw-box {
+    background: #0a0c10;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--purple);
+    white-space: pre-wrap;
+    word-break: break-all;
+    min-height: 38px;
+  }
+  .raw-label { font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
+</style>
+</head>
+<body>
+
+<h1>Fair Value Bridge — Test Harness</h1>
+<p class="subtitle">Verify your /api/fv/pine bridge endpoint before loading the Pine Script indicator</p>
+
+<div class="controls">
+  <div class="ctrl-group">
+    <label>Server URL</label>
+    <input id="host" value="http://localhost:8002" style="width:220px">
+  </div>
+  <div class="ctrl-group">
+    <label>NSE Ticker</label>
+    <input id="ticker" value="RELIANCE" style="width:140px">
+  </div>
+  <div class="ctrl-group">
+    <label>FY Start</label>
+    <input id="fy_start" type="number" value="2014" style="width:90px">
+  </div>
+  <button id="btn" onclick="runTest()">Fetch & Plot</button>
+</div>
+
+<div id="status" class="status-bar"></div>
+
+<!-- Summary cards -->
+<div id="cards" class="cards" style="display:none"></div>
+
+<!-- Chart -->
+<div id="chart-wrap" class="chart-wrap" style="display:none; height:420px;">
+  <canvas id="myChart"></canvas>
+</div>
+
+<!-- FY table -->
+<div id="table-wrap" class="table-wrap" style="display:none">
+  <table>
+    <thead>
+      <tr>
+        <th>FY</th>
+        <th>OP Fair ₹</th>
+        <th>R² OP</th>
+        <th>Sales Fair ₹</th>
+        <th>R² Sales</th>
+        <th>TTM Fair ₹</th>
+        <th>R² TTM</th>
+        <th>Composite ₹</th>
+        <th>Gap%</th>
+        <th>Bucket</th>
+      </tr>
+    </thead>
+    <tbody id="fy-tbody"></tbody>
+  </table>
+</div>
+
+<!-- Raw CSV for a specific FY -->
+<div id="raw-section" style="display:none">
+  <p class="raw-label">Raw CSV — what Pine Script receives for the last FY row</p>
+  <div id="raw-box" class="raw-box"></div>
+</div>
+
+<script>
+let chartInst = null;
+
+function setStatus(msg, type = '') {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status-bar visible ' + type;
+}
+
+function fmt(v) {
+  if (v === null || v === undefined || v === 0) return '—';
+  return '₹' + Number(v).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function fmtPct(v) {
+  if (v === null || v === undefined) return '—';
+  return (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%';
+}
+function fmtR2(v) { return v ? Number(v).toFixed(3) : '—'; }
+
+async function runTest() {
+  const host     = document.getElementById('host').value.replace(/\/$/, '');
+  const ticker   = document.getElementById('ticker').value.trim().toUpperCase();
+  const fy_start = document.getElementById('fy_start').value;
+  const btn      = document.getElementById('btn');
+
+  btn.disabled = true;
+  setStatus('Fetching from ' + host + ' …');
+
+  try {
+    const url  = `${host}/api/fv/pine/json?ticker=${ticker}&fy_start=${fy_start}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} — ${await resp.text()}`);
+    const data = await resp.json();
+
+    setStatus(`OK — ${data.fy_rows.length} FY rows for ${ticker}`, 'ok');
+    renderCards(data);
+    renderChart(data);
+    renderTable(data.fy_rows);
+    renderRaw(host, ticker, data);
+
+    document.getElementById('cards').style.display      = '';
+    document.getElementById('chart-wrap').style.display = '';
+    document.getElementById('table-wrap').style.display = '';
+    document.getElementById('raw-section').style.display = '';
+
+  } catch (e) {
+    setStatus('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderCards(data) {
+  const bucket = data.valuation_bucket || 'FAIR';
+  const cls    = bucket === 'UNDERVALUED' ? 'under' : bucket === 'OVERVALUED' ? 'over' : 'fair';
+  const gapColor = data.composite_gain_pct > 0 ? 'var(--under)' : data.composite_gain_pct < 0 ? 'var(--over)' : 'var(--fair)';
+
+  document.getElementById('cards').innerHTML = `
+    <div class="card ${cls}">
+      <div class="label">CMP</div>
+      <div class="value">${fmt(data.current_price)}</div>
+    </div>
+    <div class="card ${cls}">
+      <div class="label">Composite FV</div>
+      <div class="value">${fmt(data.composite_fair_price)}</div>
+    </div>
+    <div class="card ${cls}">
+      <div class="label">Upside / Downside</div>
+      <div class="value" style="color:${gapColor}">${fmtPct(data.composite_gain_pct)}</div>
+    </div>
+    <div class="card ${cls}">
+      <div class="label">Valuation</div>
+      <div class="value" style="font-size:15px">${bucket}</div>
+    </div>
+  `;
+}
+
+function renderChart(data) {
+  const prices = data.price_history || [];
+  const rows   = data.fy_rows || [];
+
+  // Build a map: date string → composite FV for that FY
+  // FY window: Apr 1 fy_year → Mar 31 fy_year+1
+  function fyForDate(dateStr) {
+    const d = new Date(dateStr);
+    return d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  }
+  const fyMap = {};
+  rows.forEach(r => { fyMap[r.fy] = r.composite; });
+
+  // Downsample price history to max 500 points for speed
+  const step = Math.max(1, Math.floor(prices.length / 500));
+  const sampled = prices.filter((_, i) => i % step === 0);
+
+  const labels  = sampled.map(p => p.date);
+  const closePx = sampled.map(p => p.close);
+  const fvLine  = sampled.map(p => fyMap[fyForDate(p.date)] || null);
+
+  // Compute ±15% bands from fvLine
+  const upper15 = fvLine.map(v => v ? +(v * 1.15).toFixed(2) : null);
+  const lower15 = fvLine.map(v => v ? +(v * 0.85).toFixed(2) : null);
+
+  if (chartInst) chartInst.destroy();
+
+  const ctx = document.getElementById('myChart').getContext('2d');
+  chartInst = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Price',
+          data: closePx,
+          borderColor: '#93c5fd',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0,
+          order: 1,
+        },
+        {
+          label: 'Composite FV',
+          data: fvLine,
+          borderColor: '#ffd600',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0,
+          stepped: true,
+          order: 2,
+        },
+        {
+          label: 'FV +15%',
+          data: upper15,
+          borderColor: 'rgba(0,200,83,0.4)',
+          borderWidth: 1,
+          borderDash: [4, 3],
+          pointRadius: 0,
+          tension: 0,
+          stepped: true,
+          fill: false,
+          order: 3,
+        },
+        {
+          label: 'FV −15%',
+          data: lower15,
+          borderColor: 'rgba(239,68,68,0.4)',
+          borderWidth: 1,
+          borderDash: [4, 3],
+          pointRadius: 0,
+          tension: 0,
+          stepped: true,
+          fill: false,
+          order: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 14 }
+        },
+        tooltip: {
+          backgroundColor: '#1a1e28',
+          borderColor: '#252a35',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor:  '#94a3b8',
+          callbacks: {
+            label: ctx => ' ' + ctx.dataset.label + ': ₹' + (ctx.parsed.y?.toFixed(2) ?? '—'),
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#64748b', maxTicksLimit: 10, font: { size: 10 } },
+          grid:  { color: '#1e2330' },
+        },
+        y: {
+          ticks: { color: '#64748b', font: { size: 10 }, callback: v => '₹' + v.toLocaleString('en-IN') },
+          grid:  { color: '#1e2330' },
+        }
+      }
+    }
+  });
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById('fy-tbody');
+  tbody.innerHTML = rows.map(r => {
+    const cls = r.bucket === 'UNDERVALUED' ? 'under' : r.bucket === 'OVERVALUED' ? 'over' : 'fair';
+    const gapColor = r.comp_gain > 0 ? 'var(--under)' : r.comp_gain < 0 ? 'var(--over)' : 'var(--fair)';
+    return `<tr>
+      <td>FY${r.fy}</td>
+      <td>${fmt(r.fair_op)}</td>
+      <td>${fmtR2(r.r2_op)}</td>
+      <td>${fmt(r.fair_s)}</td>
+      <td>${fmtR2(r.r2_s)}</td>
+      <td>${fmt(r.fair_t)}</td>
+      <td>${fmtR2(r.r2_t)}</td>
+      <td><strong>${fmt(r.composite)}</strong></td>
+      <td style="color:${gapColor}">${fmtPct(r.comp_gain)}</td>
+      <td><span class="pill ${r.bucket}">${r.bucket}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderRaw(host, ticker, data) {
+  const lastRow = data.fy_rows[data.fy_rows.length - 1];
+  if (!lastRow) return;
+  const mp = lastRow.misprice;
+  const mps = (mp >= 0 ? '+' : '') + mp;
+  const csv = [
+    lastRow.fy,
+    lastRow.fair_op, lastRow.r2_op,
+    lastRow.fair_s,  lastRow.r2_s,
+    lastRow.fair_t,  lastRow.r2_t,
+    lastRow.composite,
+    lastRow.bucket,
+    mps
+  ].join(',');
+  document.getElementById('raw-box').textContent = csv;
+}
+</script>
+</body>
+</html>
