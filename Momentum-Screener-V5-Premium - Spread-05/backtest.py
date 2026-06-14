@@ -52,6 +52,72 @@ try:
 except ImportError:
     _has_fastapi = False
 
+# ── Optional Fair Value import (from sma_router) ──────────────────────────
+# Fair value enriches every Gate 3 trade with regression-based fundamental
+# data (Operating Profit, Sales, TTM models scraped from Screener.in).
+# If sma_router is unavailable the backtest runs normally without FV data.
+try:
+    from sma_router import _analyze_ticker as _sma_analyze
+    _has_fair_value = True
+except ImportError:
+    _has_fair_value = False
+
+# In-process fair value cache: ticker → {composite_fair_price, composite_gain_pct,
+# valuation_bucket, model_count, current_price, op_fair, sales_fair, ttm_fair}
+# Populated lazily on first Gate 3 hit; reused for all trades of the same ticker.
+_fv_cache: Dict[str, Dict] = {}
+
+
+def _get_fair_value(ticker: str, force: bool = False) -> Dict:
+    """
+    Fetch fundamental fair value for ticker using SMA regression models.
+    Returns a flat dict with fair value fields, or an empty dict on failure.
+    Results are cached in-process so each ticker is only scraped once per run.
+    """
+    if not _has_fair_value:
+        return {}
+
+    global _fv_cache
+    cache_key = ticker.upper()
+
+    if not force and cache_key in _fv_cache:
+        return _fv_cache[cache_key]
+
+    try:
+        result = _sma_analyze(
+            ticker=ticker,
+            fy_start=2014,
+            force=False,
+            include_other_income=True,
+        )
+        if "error" in result:
+            out = {"fv_error": result["error"]}
+        else:
+            op    = result.get("op",  {})
+            sales = result.get("sales", {})
+            ttm   = result.get("ttm",  {})
+            out = {
+                "fv_current_price":      result.get("current_price"),
+                "fv_composite_fair":     result.get("composite_fair_price"),
+                "fv_composite_gain_pct": result.get("composite_gain_pct"),
+                "fv_valuation_bucket":   result.get("valuation_bucket"),  # UNDERVALUED / FAIR / OVERVALUED
+                "fv_model_count":        result.get("model_count", 0),
+                # Individual model fair prices (for tooltip / drill-down)
+                "fv_op_fair":            op.get("pred_price"),
+                "fv_op_r2":             op.get("r2"),
+                "fv_op_gain_pct":       op.get("gain_pct"),
+                "fv_sales_fair":         sales.get("pred_price") if result.get("has_sales") else None,
+                "fv_sales_r2":          sales.get("r2")         if result.get("has_sales") else None,
+                "fv_ttm_fair":           ttm.get("pred_price")  if result.get("has_ttm")   else None,
+                "fv_ttm_r2":            ttm.get("r2")          if result.get("has_ttm")    else None,
+            }
+        _fv_cache[cache_key] = out
+        return out
+    except Exception as e:
+        out = {"fv_error": str(e)}
+        _fv_cache[cache_key] = out
+        return out
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -936,6 +1002,13 @@ def backtest_ticker(
         cur_side = _expiry_side(closes, dates, g3_idx, surge_high, cfg, "current", vols=vols)
         nxt_side = _expiry_side(closes, dates, g3_idx, surge_high, cfg, "next",    vols=vols)
 
+        # ── Fair Value enrichment (Gate 3 trade context) ─────────────────────
+        # Fetch once per ticker (cached); attach composite + per-model fields.
+        # fv_valuation_bucket: UNDERVALUED = stock below fair → CE likely to
+        # continue falling → historically better WIN setup.
+        # OVERVALUED = stock above fair → CE may stay elevated → riskier.
+        fv = _get_fair_value(ticker)
+
         trade.update({
             "ticker":         ticker,
             "gate1_date":     bd_date_str,
@@ -946,6 +1019,8 @@ def backtest_ticker(
             "volume_ratio":   bd_info["volume_ratio"],
             "cur_expiry":     cur_side,
             "nxt_expiry":     nxt_side,
+            # ── Fair Value fields (None if sma_router unavailable or scrape failed)
+            **fv,
         })
         trades.append(trade)
 
@@ -1050,6 +1125,40 @@ def backtest_ticker(
         "avg_premium": otm_bucket_stats[str(best_otm_idx)]["avg_premium"] if otm_bucket_stats else None,
     } if otm_bucket_stats else None
 
+    # ── Fair Value cohort summary ─────────────────────────────────────────────
+    def _fv_cohort(bucket: str) -> dict:
+        cohort = [t for t in trades if t.get("fv_valuation_bucket") == bucket]
+        nc = len(cohort)
+        if nc == 0:
+            return {"trades": 0, "wins": 0, "losses": 0, "accuracy_pct": None,
+                    "avg_pnl": None, "avg_premium": None}
+        w   = sum(1 for t in cohort if t["result"] == "WIN")
+        pnl = round(sum(t["pnl_per_unit"] for t in cohort) / nc, 2)
+        prem = round(sum(t["entry_ce_premium"] for t in cohort) / nc, 2)
+        return {
+            "trades":       nc,
+            "wins":         w,
+            "losses":       nc - w,
+            "accuracy_pct": round(w / nc * 100, 1),
+            "avg_pnl":      pnl,
+            "avg_premium":  prem,
+        }
+
+    # Representative FV snapshot for the ticker (from first successful trade)
+    fv_ticker_snapshot = None
+    for t in trades:
+        if t.get("fv_composite_fair") is not None:
+            fv_ticker_snapshot = {
+                "composite_fair_price":  t["fv_composite_fair"],
+                "composite_gain_pct":    t["fv_composite_gain_pct"],
+                "valuation_bucket":      t["fv_valuation_bucket"],
+                "model_count":           t.get("fv_model_count"),
+                "op_fair":               t.get("fv_op_fair"),
+                "sales_fair":            t.get("fv_sales_fair"),
+                "ttm_fair":              t.get("fv_ttm_fair"),
+            }
+            break
+
     return {
         "ticker": ticker,
         "summary": {
@@ -1072,6 +1181,13 @@ def backtest_ticker(
             # Max OTM Gain Pact
             "otm_bucket_stats":   otm_bucket_stats,
             "recommended_otm":    recommended_otm,
+            # ── Fair Value analysis
+            "fair_value_snapshot": fv_ticker_snapshot,
+            "fair_value_cohorts": {
+                "undervalued": _fv_cohort("UNDERVALUED"),
+                "fair":        _fv_cohort("FAIR"),
+                "overvalued":  _fv_cohort("OVERVALUED"),
+            },
         },
         "trades": trades,
     }
