@@ -18,7 +18,7 @@ Routes:
   POST /api/ema9/screen         → batch screener
 """
 
-import os, asyncio, datetime as dt_module
+import os, asyncio, datetime as dt_module, time, math
 from typing import Optional, List, Dict
 
 import pandas as pd
@@ -39,6 +39,26 @@ DATA_DIR = "data"
 FNO_CSV  = "tickers.csv"
 ALL_CSV  = "tickers_all.csv"
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# ─────────────────────────────────────────────────────────────
+#  RATE LIMIT CONFIGURATION
+#  Tune these if you hit 429s or Screener.in blocks.
+# ─────────────────────────────────────────────────────────────
+
+# ── yfinance (Yahoo Finance) ──────────────────────────────────
+# One batch download per chunk; Yahoo allows ~2 000 symbols/hour
+# comfortably.  We cap each chunk at 100 symbols and pause between
+# chunks so sustained 1 000+ scans stay well under the limit.
+YF_CHUNK_SIZE   = 100    # symbols per single yf.download() call
+YF_CHUNK_DELAY  = 2.0    # seconds to sleep between yf chunks
+                          # → 100 sym/2 s = 50 sym/s ≈ 180 000/hr (safe)
+
+# ── Screener.in ───────────────────────────────────────────────
+# Screener.in is aggressive about rate-limiting scrapers.
+# Each FV enrichment hits screener.in up to 2× (consolidated + standalone).
+# 1.5 s between calls keeps it under ~40 req/min — well within tolerance.
+# Results are disk-cached so re-runs within the same day are instant.
+FV_INTER_DELAY  = 1.5    # seconds between consecutive FV enrichments
 
 # ─────────────────────────────────────────────────────────────
 #  TICKER LOADING
@@ -173,9 +193,13 @@ def _batch_download(
     lookback_days: int,
 ) -> Dict[str, pd.DataFrame]:
     """
-    Single yf.download call for all tickers → returns {ticker: ohlcv_df}.
-    Using group_by='ticker' gives a clean MultiIndex we can slice safely.
+    Single yf.download call for a chunk of tickers (≤ YF_CHUNK_SIZE).
+    Returns {ticker: ohlcv_df}.  Caller is responsible for chunking and
+    inter-chunk delays.
     """
+    if not tickers:
+        return {}
+
     yf_symbols = [f"{t}.NS" for t in tickers]
     end   = dt_module.date.today()
     start = end - dt_module.timedelta(days=lookback_days + 30)
@@ -188,7 +212,7 @@ def _batch_download(
             group_by="ticker",
             progress=False,
             auto_adjust=True,
-            threads=False,   # ← force single-threaded inside yfinance too
+            threads=False,        # single-threaded inside yfinance
         )
     except Exception:
         return {}
@@ -200,10 +224,9 @@ def _batch_download(
     for ticker, sym in zip(tickers, yf_symbols):
         try:
             if isinstance(raw.columns, pd.MultiIndex):
-                # Multi-ticker download: columns are (symbol, field)
                 df = raw[sym][["Open", "High", "Low", "Close", "Volume"]].copy()
             else:
-                # Single ticker fell back to flat columns
+                # Single-symbol fallback — flat columns
                 df = raw[["Open", "High", "Low", "Close", "Volume"]].copy()
             df = df.dropna(how="all")
             if len(df) >= 12:
@@ -341,27 +364,40 @@ async def ema9_tickers_list(source: str = "fno"):
 
 @router.post("/api/ema9/screen")
 async def ema9_screen(req: Ema9ScreenRequest):
-    tickers = [t.strip().upper() for t in req.tickers if t.strip()][:100]
+    tickers = [t.strip().upper() for t in req.tickers if t.strip()][:2000]
     if not tickers:
         raise HTTPException(400, "No tickers provided.")
 
     signals, failed = [], []
+    total   = len(tickers)
+    n_chunks = math.ceil(total / YF_CHUNK_SIZE)
 
-    # ── Step 1: Single batch yf.download for ALL tickers ──────
-    # This avoids concurrent per-ticker downloads which cross-contaminate
-    # each other's DataFrames inside yfinance's shared session/cache.
-    ticker_dfs = await asyncio.to_thread(
-        _batch_download, tickers, req.interval, req.lookback_days
-    )
+    # ── Step 1: Chunked batch yf.download with inter-chunk delay ──────────────
+    # Each chunk = one yf.download() call (safe, no cross-contamination).
+    # Sleep YF_CHUNK_DELAY seconds between chunks to avoid Yahoo 429s on
+    # large scans (e.g. 1 000–2 000 symbols split into 10–20 chunks).
+    ticker_dfs: Dict[str, pd.DataFrame] = {}
 
-    # ── Step 2: Process each ticker's slice (pure Python, safe to do inline) ──
+    for chunk_idx in range(n_chunks):
+        chunk = tickers[chunk_idx * YF_CHUNK_SIZE : (chunk_idx + 1) * YF_CHUNK_SIZE]
+
+        chunk_dfs = await asyncio.to_thread(
+            _batch_download, chunk, req.interval, req.lookback_days
+        )
+        ticker_dfs.update(chunk_dfs)
+
+        # Pause between chunks (skip after the last one)
+        if chunk_idx < n_chunks - 1:
+            await asyncio.sleep(YF_CHUNK_DELAY)
+
+    # ── Step 2: Process each ticker's DataFrame slice (pure Python) ────────────
     for ticker in tickers:
         if ticker not in ticker_dfs:
             failed.append({"ticker": ticker, "error": "No data from batch download"})
             continue
         try:
             res = _process_ticker_df(ticker, ticker_dfs[ticker], req.max_candles_ago)
-            res["interval"] = req.interval   # stamp correct interval
+            res["interval"] = req.interval
             if res["status"] in ("ERROR", "NO_DATA"):
                 failed.append({"ticker": res["ticker"], "error": res.get("error", "")})
             elif res["status"] == "SIGNAL":
@@ -373,18 +409,24 @@ async def ema9_screen(req: Ema9ScreenRequest):
     # Sort: most recent confirmation first
     signals.sort(key=lambda r: r.get("candles_ago", 999))
 
-    # ── Step 3: Fair Value enrichment — strictly serial ────────
-    # yfinance inside _sma_analyze_ticker is NOT thread-safe; running it
-    # concurrently (even with a semaphore) risks wrong prices.
-    # Serial await-to-thread is the only safe approach.
+    # ── Step 3: Fair Value enrichment — serial with inter-call delay ───────────
+    # Screener.in will block rapid scraping.  We run enrichments one-at-a-time
+    # and sleep FV_INTER_DELAY seconds between each call.
+    # Disk cache (data/<TICKER>_pl.csv / _qr.csv) means previously-fetched
+    # tickers skip the network entirely, so cached runs add zero delay.
     _SAFE_FV_KEYS = {
         "composite_fair_price", "composite_gain_pct",
         "fair_gap_pct", "valuation_bucket", "fv_model_count",
     }
-    for sig in signals:
+
+    for i, sig in enumerate(signals):
         fv = await asyncio.to_thread(_enrich_fair_value, sig["ticker"])
         for k in _SAFE_FV_KEYS:
             sig[k] = fv.get(k)
+
+        # Pause between Screener.in calls (skip after last signal)
+        if i < len(signals) - 1:
+            await asyncio.sleep(FV_INTER_DELAY)
 
     return {
         "signals":  signals,
