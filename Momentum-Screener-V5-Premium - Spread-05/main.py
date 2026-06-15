@@ -53,9 +53,15 @@ from pydantic import BaseModel
 # Sub-routers (Option Charts + SMA Screener)
 from option_charts_router import router as oc_router
 from sma_router import router as sma_router
+from ema9_backtest_router import router as ema9_backtest_router
 
 # ADD THIS:
 from backtest import router as bt_router
+
+from ema9_router import router as ema9_router
+
+from fv_router import router as fv_router
+
 
 BASE_DIR = Path(__file__).parent
 
@@ -1090,7 +1096,16 @@ def check_surge_and_loss(ticker: str, cfg: Dict, job_id: str = "") -> Optional[D
     # The surge window's highest point is the true resistance level where
     # price exhausted momentum. Even after breakdown + recovery, this level
     # will likely reject price again (as seen in DIXON 20 May 2025 example).
-    surge_window_highs = scan_highs[surge_start_idx:surge_end_idx + 1]   # ✅ uses pre-breakdown slice — excludes live-price injection on today's candle
+    #
+    # FIX: scan the FULL range from surge_start to breakdown_idx (exclusive)
+    # rather than just to surge_end_idx.  The wick filter is used only for
+    # gain calculation to pick the best window — it must NOT cap the resistance
+    # level itself.  If the highest intraday High (e.g. 424.70) sits on a
+    # candle with a long upper wick, the wick filter may cause the gain loop to
+    # select an earlier/shorter window (whose end is 356), making
+    # surge_high = 356.  The real resistance is still 424.70 — the highest
+    # High between surge start and the breakdown candle, regardless of wicks.
+    surge_window_highs = scan_highs[surge_start_idx:breakdown_idx]   # full range: surge_start → pre-breakdown
     surge_high         = float(np.max(surge_window_highs))
 
     # Identify whether the peak candle used High or Close (wick filter result)
@@ -2192,11 +2207,25 @@ async def backtest_page():
 async def backtest_dashboard_page():
     return FileResponse(BASE_DIR / "static" / "backtest_dashboard.html")
 
+@app.get("/ema9-screener", include_in_schema=False)
+async def ema9_screener_page():
+    return FileResponse(BASE_DIR / "static" / "ema9-screener.html")
+
+@app.get("/fv_test_harness", include_in_schema=False)
+async def ema9_screener_page():
+    return FileResponse(BASE_DIR / "static" / "fv_test_harness.html")
+
+@app.get("/ema9_backtest", include_in_schema=False)
+async def ema9_screener_page():
+    return FileResponse(BASE_DIR / "static" / "ema9_backtest.html")
+
 app.include_router(oc_router)
 app.include_router(sma_router)
 
 app.include_router(bt_router)   # ADD THIS
-
+app.include_router(ema9_router)   # ADD THIS
+app.include_router(fv_router)
+app.include_router(ema9_backtest_router)
 
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -2749,4 +2778,4 @@ async def startup_event():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
