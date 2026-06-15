@@ -450,18 +450,40 @@ def _backtest_ticker(
 
             if outcome:
                 gain_pct = round((exit_px - entry_price) / entry_price * 100, 2)
+
+                # ── Trend regime at trade entry ───────────────────────
+                try:
+                    sma50_entry = float(df["sma50"].iloc[entry_idx]) if not pd.isna(df["sma50"].iloc[entry_idx]) else None
+                    sma200_series = df["Close"].rolling(200).mean()
+                    sma200_entry = float(sma200_series.iloc[entry_idx]) if entry_idx >= 200 and not pd.isna(sma200_series.iloc[entry_idx]) else None
+                    close_at_entry = float(df["Close"].iloc[entry_idx])
+                    if sma50_entry and sma200_entry:
+                        if close_at_entry > sma50_entry and sma50_entry > sma200_entry:
+                            trend_at_entry = "UPTREND"
+                        elif close_at_entry < sma50_entry and sma50_entry < sma200_entry:
+                            trend_at_entry = "DOWNTREND"
+                        else:
+                            trend_at_entry = "SIDEWAYS"
+                    elif sma50_entry:
+                        trend_at_entry = "UPTREND" if close_at_entry > sma50_entry else "DOWNTREND"
+                    else:
+                        trend_at_entry = "SIDEWAYS"
+                except Exception:
+                    trend_at_entry = "SIDEWAYS"
+
                 trades.append({
-                    "ticker":       ticker,
+                    "ticker":        ticker,
                     "breakout_date": breakout_date,
-                    "entry_date":   confirm_date,
-                    "entry_price":  round(entry_price, 2),
-                    "target_price": target_price,
-                    "exit_date":    exit_date,
-                    "exit_price":   round(exit_px, 2),
-                    "days_held":    days_held,
-                    "gain_pct":     gain_pct,
-                    "outcome":      outcome,
-                    "is_win":       outcome == "WIN",
+                    "entry_date":    confirm_date,
+                    "entry_price":   round(entry_price, 2),
+                    "target_price":  target_price,
+                    "exit_date":     exit_date,
+                    "exit_price":    round(exit_px, 2),
+                    "days_held":     days_held,
+                    "gain_pct":      gain_pct,
+                    "outcome":       outcome,
+                    "is_win":        outcome == "WIN",
+                    "trend_regime":  trend_at_entry,
                 })
                 in_trade = False
             continue  # Don't look for new signal while in trade

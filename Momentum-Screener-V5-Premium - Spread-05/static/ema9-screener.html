@@ -735,6 +735,9 @@ tailwind.config = {
               <th class="px-4 py-3">Breakout</th>
               <th class="px-4 py-3">Entry Date</th>
               <th class="px-4 py-3">Entry ₹</th>
+              <th class="px-4 py-3">Fair Value ₹</th>
+              <th class="px-4 py-3">FV Gap %</th>
+              <th class="px-4 py-3">Trend</th>
               <th class="px-4 py-3">Target ₹</th>
               <th class="px-4 py-3">Exit Date</th>
               <th class="px-4 py-3">Exit ₹</th>
@@ -1667,14 +1670,61 @@ function renderBtTickerTable(results) {
 
 function renderBtTradesTable(trades) {
   document.getElementById('btTradesTableBody').innerHTML = trades.map(t => {
-    const cls = t.outcome === 'WIN' ? 'trade-win' : t.outcome === 'TIMEOUT' ? 'trade-timeout' : 'trade-loss';
+    const cls      = t.outcome === 'WIN' ? 'trade-win' : t.outcome === 'TIMEOUT' ? 'trade-timeout' : 'trade-loss';
     const gainClass = t.gain_pct >= 0 ? 'bt-win' : 'bt-loss';
     const outClass  = t.outcome === 'WIN' ? 'bt-win' : t.outcome === 'TIMEOUT' ? 'bt-timeout' : 'bt-loss';
+
+    // ── Fair Value column ─────────────────────────────────────────
+    const fv = t.composite_fair_price;
+    let fvCell = '';
+    if (fv && fv > 0) {
+      const isUV = t.is_undervalued;
+      const fvColor = isUV ? '#00e5a0' : '#ef4444';
+      const fvBg    = isUV ? 'rgba(0,229,160,0.08)' : 'rgba(239,68,68,0.08)';
+      const fvLabel = isUV ? '▲ UV' : '▼ OV';
+      fvCell = `<span style="color:${fvColor};background:${fvBg};border:1px solid ${fvColor}33;
+        padding:2px 6px;border-radius:4px;font-size:10px;white-space:nowrap;">
+        ₹${fmtNum(fv)} <span style="font-size:9px;opacity:0.8;">${fvLabel}</span>
+      </span>`;
+    } else {
+      fvCell = `<span style="color:#475569;font-size:10px;">—</span>`;
+    }
+
+    // ── FV Gap % column ───────────────────────────────────────────
+    let fvGapCell = '';
+    const gap = t.entry_vs_fv_pct;
+    if (gap !== null && gap !== undefined) {
+      const gapColor = gap >= 0 ? '#00e5a0' : '#ef4444';
+      const gapSign  = gap >= 0 ? '+' : '';
+      fvGapCell = `<span style="color:${gapColor};font-size:11px;font-weight:600;">${gapSign}${gap}%</span>`;
+    } else {
+      fvGapCell = `<span style="color:#475569;font-size:10px;">—</span>`;
+    }
+
+    // ── Trend column ──────────────────────────────────────────────
+    // Use per-trade trend_regime if present, else fall back to ticker-level
+    const trend = t.trend_regime || '—';
+    const trendMap = {
+      'UPTREND':   { color: '#00e5a0', bg: 'rgba(0,229,160,0.1)',   icon: '↑' },
+      'DOWNTREND': { color: '#ef4444', bg: 'rgba(239,68,68,0.1)',   icon: '↓' },
+      'SIDEWAYS':  { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  icon: '→' },
+    };
+    const tm = trendMap[trend] || { color: '#475569', bg: 'transparent', icon: '—' };
+    const trendCell = trend !== '—'
+      ? `<span style="color:${tm.color};background:${tm.bg};border:1px solid ${tm.color}33;
+          padding:2px 7px;border-radius:12px;font-size:10px;white-space:nowrap;font-weight:600;">
+          ${tm.icon} ${trend}
+        </span>`
+      : `<span style="color:#475569;font-size:10px;">—</span>`;
+
     return `<tr class="${cls} border-b border-border/20 hover:bg-card2/50 transition-colors">
       <td class="px-4 py-2.5 font-ui font-700 text-white text-sm">${t.ticker}</td>
       <td class="px-4 py-2.5 font-mono text-xs text-slate-400">${t.breakout_date}</td>
       <td class="px-4 py-2.5 font-mono text-xs text-slate-300">${t.entry_date}</td>
       <td class="px-4 py-2.5 font-mono text-xs text-slate-300">₹${fmtNum(t.entry_price)}</td>
+      <td class="px-4 py-2.5 font-mono text-xs">${fvCell}</td>
+      <td class="px-4 py-2.5 font-mono text-xs">${fvGapCell}</td>
+      <td class="px-4 py-2.5 font-mono text-xs">${trendCell}</td>
       <td class="px-4 py-2.5 font-mono text-xs text-accent">₹${fmtNum(t.target_price)}</td>
       <td class="px-4 py-2.5 font-mono text-xs text-slate-400">${t.exit_date}</td>
       <td class="px-4 py-2.5 font-mono text-xs text-slate-300">₹${fmtNum(t.exit_price)}</td>
