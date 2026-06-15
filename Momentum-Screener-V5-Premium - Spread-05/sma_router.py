@@ -98,16 +98,22 @@ def is_bank_or_finance(ticker: str) -> bool:
 
 
 def _requests_html(url: str) -> Optional[str]:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Referer": "https://www.screener.in/",
+    }
     try:
-        r = requests.get(url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                          "AppleWebKit/537.36 (KHTML, like Gecko) "
-                          "Chrome/91.0.4472.124 Safari/537.36"
-        }, timeout=15)
+        r = requests.get(url, headers=headers, timeout=20)
         if r.status_code == 200:
             return r.text
-    except Exception:
-        pass
+        # surface non-200 so callers can log it
+        print(f"[SCREENER] {url} → HTTP {r.status_code}")
+    except Exception as exc:
+        print(f"[SCREENER] {url} → exception: {exc}")
     return None
 
 
@@ -138,10 +144,26 @@ def _parse_table(table) -> Optional[pd.DataFrame]:
         return None
 
 
+def _screener_slug(ticker: str) -> str:
+    """Convert NSE symbol to Screener.in slug (handles known mismatches)."""
+    _overrides = {
+        "DMART": "AVENUE-SUPERMARTS",
+        "M&M": "M-AND-M",
+        "M&MFIN": "M-AND-MFIN",
+        "L&TFH": "L-AND-TFH",
+        "BAJAJ-AUTO": "BAJAJ-AUTO",
+    }
+    if ticker in _overrides:
+        return _overrides[ticker]
+    # Screener uses hyphens for & and spaces
+    return ticker.replace("&", "-AND-").replace(" ", "-")
+
+
 def _scrape_section(ticker: str, section_id: str) -> Optional[pd.DataFrame]:
+    slug = _screener_slug(ticker)
     urls = [
-        f"https://www.screener.in/company/{ticker}/consolidated/",
-        f"https://www.screener.in/company/{ticker}/",
+        f"https://www.screener.in/company/{slug}/consolidated/",
+        f"https://www.screener.in/company/{slug}/",
     ]
     dfs = []
     for url in urls:
@@ -327,7 +349,7 @@ def _compute_composite(result: Dict) -> Dict:
 #  CORE ANALYSIS
 # ─────────────────────────────────────────────────────────────
 def _analyze_ticker(ticker: str, fy_start: int, force: bool, include_other_income: bool) -> Dict:
-    ticker = ticker.strip().upper()
+    ticker = ticker.strip().upper().lstrip("$").strip()
 
     pl_df = _get_cached(ticker, "pl", force)
     if pl_df is None:
@@ -395,15 +417,17 @@ def _analyze_ticker(ticker: str, fy_start: int, force: bool, include_other_incom
     try:
         start_str = f"{fy_start}-04-01"
         end_str   = f"{dt_module.date.today().year + 1}-03-31"
-        price_df  = yf.download(f"{ticker}.NS", start=start_str, end=end_str, progress=False)
+        t = yf.Ticker(f"{ticker}.NS")
+        price_df = t.history(start=start_str, end=end_str, auto_adjust=True)
+        # history() returns tz-aware index; strip tz so groupby/resample work cleanly
+        if price_df is not None and not price_df.empty:
+            price_df.index = price_df.index.tz_localize(None) if price_df.index.tz is None \
+                             else price_df.index.tz_convert(None)
     except Exception as exc:
         return {"ticker": ticker, "error": f"yfinance error: {exc}"}
 
     if price_df is None or price_df.empty:
         return {"ticker": ticker, "error": "No price data from yfinance"}
-
-    if isinstance(price_df.columns, pd.MultiIndex):
-        price_df.columns = price_df.columns.get_level_values(0)
 
     price_df["FY_Year"] = price_df.index.year
     price_df.loc[price_df.index.month <= 3, "FY_Year"] -= 1
@@ -656,7 +680,7 @@ async def sma_tickers_reload():
 
 @router.post("/api/sma/analyze")
 async def sma_analyze(req: SmaAnalyzeRequest):
-    tickers = [t.strip().upper() for t in req.tickers if t.strip()][:50]
+    tickers = [t.strip().upper().lstrip('$').strip() for t in req.tickers if t.strip()][:50]
     if not tickers:
         raise HTTPException(400, "No tickers provided.")
     results, failed = [], []

@@ -151,6 +151,7 @@ tbody tr:hover{background:var(--bg2)}
 tbody tr.row-win{background:rgba(0,217,126,.035)}
 tbody tr.row-loss{background:rgba(255,59,92,.03)}
 tbody tr.row-open{background:rgba(255,123,41,.03)}
+tbody tr.row-skip{background:rgba(61,155,255,.025)}
 td{padding:9px 12px;color:var(--text1);white-space:nowrap}
 td.mono{font-family:var(--font-mono);font-size:11px}
 td.ticker-cell{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--text0)}
@@ -645,7 +646,7 @@ async function runBacktest() {
   document.getElementById('stats-section').style.display = 'none';
   document.getElementById('filter-bar').style.display    = 'none';
   document.getElementById('results-section').innerHTML   =
-    `<div class="empty-state"><div class="spinner"></div><div class="empty-title">Backtesting ${tickers.length} ticker(s)…</div><div style="font-size:11px;color:var(--text2)">Fetching price history + fair value data</div></div>`;
+    `<div class="empty-state"><div class="spinner"></div><div class="empty-title">Backtesting ${tickers.length} ticker(s)…</div><div style="font-size:11px;color:var(--text2)">Scanning ${lookbackDays} days of history + fair value data</div></div>`;
 
   const btn = document.getElementById('btn-run');
   btn.disabled = true; btn.textContent = '⏳ Running…';
@@ -655,45 +656,54 @@ async function runBacktest() {
   const pl = document.getElementById('progress-label');
   const pc = document.getElementById('progress-counts');
   pw.style.display = 'block';
+  pl.textContent   = `Running full ${lookbackDays}-day backtest on ${tickers.length} ticker(s)…`;
+  pc.textContent   = 'Contacting backend…';
+  pb.style.width   = '15%';
 
-  let done = 0;
+  try {
+    // ── Use dedicated backtest endpoint which scans the FULL lookback window ──
+    const resp = await fetch('/api/backtest/ema9/run', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        tickers,
+        interval,
+        lookback_days: lookbackDays,
+        target_pct:    targetPct,
+        max_hold:      maxHoldCandles,
+        require_fv:    false,  // still run, just mark trades without FV
+      }),
+    });
 
-  for (const ticker of tickers) {
-    pl.textContent = `Processing ${ticker}…`;
-    pc.textContent = `${done} / ${tickers.length} done`;
-    pb.style.width = Math.round(done / tickers.length * 100) + '%';
+    pb.style.width = '80%';
+    pl.textContent = 'Processing results…';
 
-    try {
-      // 1. Fetch OHLCV candles from backend
-      const candles = await fetchOHLCV(ticker, interval, lookbackDays);
-      if (!candles || candles.length < 15) {
-        toast('warn', `${ticker}: No data`, 'Could not fetch price history');
-        done++; continue;
-      }
-
-      // 2. Fetch fair value from sma_router
-      pl.textContent = `Fetching Fair Value for ${ticker}…`;
-      const fairPrice = await fetchFairValue(ticker);
-
-      // 3. Run backtest
-      const trades = runBacktestOnCandles(ticker, candles, {
-        targetPct, maxHoldCandles, fairPrice,
-      });
-
-      allTrades.push(...trades);
-    } catch(e) {
-      toast('error', `${ticker} error`, e.message);
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`Backend error ${resp.status}: ${err}`);
     }
 
-    done++;
-    pb.style.width = Math.round(done / tickers.length * 100) + '%';
-    pc.textContent = `${done} / ${tickers.length} done`;
-    await new Promise(r => setTimeout(r, 50));
+    const data = await resp.json();
+    allTrades = data.trades || [];
+
+    // Show failed tickers as warnings
+    (data.failed || []).forEach(f => toast('warn', `${f.ticker}: skipped`, f.error || 'No data'));
+
+    pb.style.width = '100%';
+    pl.textContent = 'Backtest complete';
+
+  } catch(e) {
+    isRunning = false;
+    btn.disabled = false; btn.textContent = '⚡ Run Backtest';
+    pl.textContent = 'Error — see console';
+    document.getElementById('results-section').innerHTML =
+      `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Backend error</div><div style="font-size:11px;color:var(--red);max-width:500px">${e.message}</div><div style="margin-top:8px;font-size:11px;color:var(--text2)">Make sure the FastAPI server is running and /api/backtest/ema9/run is accessible.</div></div>`;
+    toast('error', 'Backtest failed', e.message);
+    return;
   }
 
   isRunning = false;
   btn.disabled = false; btn.textContent = '⚡ Run Backtest';
-  pl.textContent = 'Backtest complete';
 
   if (!allTrades.length) {
     document.getElementById('results-section').innerHTML =
@@ -701,7 +711,9 @@ async function runBacktest() {
     toast('warn','No trades found','No 9EMA breakout signals in the backtest window');
   } else {
     renderDashboard();
-    toast('success', `Backtest complete`, `${allTrades.length} signals found across ${tickers.length} tickers`);
+    const taken   = allTrades.filter(t => t.outcome !== 'SKIPPED').length;
+    const skipped = allTrades.filter(t => t.outcome === 'SKIPPED').length;
+    toast('success', `Backtest complete`, `${taken} trades taken · ${skipped} filtered by FV gate`);
   }
 }
 
@@ -880,14 +892,30 @@ function getFilteredSorted() {
 }
 
 function rerenderTable() {
-  const rows = getFilteredSorted();
-  const rs   = document.getElementById('results-section');
+  // Main trades = WIN / LOSS / OPEN (filter applied)
+  // Skipped trades always shown separately below, regardless of filter
+  const activeRows = activeFilter === 'all'
+    ? allTrades.filter(t => t.outcome !== 'SKIPPED')
+    : activeFilter === 'SKIPPED'
+      ? []   // skipped has its own section; main table shows nothing
+      : allTrades.filter(t => t.outcome === activeFilter);
 
-  if (!rows.length) {
-    rs.innerHTML = `<div class="content"><div class="empty-state" style="padding:40px"><div class="empty-icon">🔍</div><div>No trades match this filter</div></div></div>`;
-    return;
-  }
+  const col = document.getElementById('sort-col').value;
+  const dir = document.getElementById('sort-dir').value === 'asc' ? 1 : -1;
+  const sortedRows = [...activeRows].sort((a,b) => {
+    let va = a[col], vb = b[col];
+    if (va == null) va = dir > 0 ? Infinity : -Infinity;
+    if (vb == null) vb = dir > 0 ? Infinity : -Infinity;
+    if (typeof va === 'string') return dir * va.localeCompare(vb);
+    return (va - vb) * dir;
+  });
 
+  const skippedRows = [...allTrades.filter(t => t.outcome === 'SKIPPED')]
+    .sort((a,b) => (b.entry_date||'').localeCompare(a.entry_date||''));
+
+  const rs = document.getElementById('results-section');
+
+  // ── helpers ──────────────────────────────────────────────────────────────
   const outcomeLabel = o => {
     if (o==='WIN')     return `<span class="badge-win">✅ WIN</span>`;
     if (o==='LOSS')    return `<span class="badge-loss">❌ LOSS</span>`;
@@ -898,28 +926,24 @@ function rerenderTable() {
   const pnlClass = p => p == null ? '' : p >= 0 ? 'green' : 'red';
   const fvClass  = g => g == null ? '' : g > 0 ? 'green' : 'red';
   const rowClass = o => o==='WIN'?'row-win':o==='LOSS'?'row-loss':o==='OPEN'?'row-open':'';
+  const stopLabel = r => {
+    if (r.stop_reason==='TARGET')     return '🎯 Target';
+    if (r.stop_reason==='EMA_BREAK')  return '🔻 EMA Break';
+    if (r.stop_reason==='MAX_HOLD')   return '⏱ Max Hold';
+    if (r.stop_reason==='OVERVALUED') return '🚫 FV Gate';
+    return '—';
+  };
 
-  const hdr = `
-    <tr>
-      <th>Ticker</th>
-      <th>Outcome</th>
-      <th>Entry Date</th>
-      <th>Entry Price</th>
-      <th>Fair Value</th>
-      <th>FV Gap %</th>
-      <th>Target</th>
-      <th>Exit Date</th>
-      <th>Exit Price</th>
-      <th>P&amp;L %</th>
-      <th>Hold (c)</th>
-      <th>Exit Reason</th>
-      <th>BO Date</th>
-      <th>CF Date</th>
-    </tr>`;
+  // ── MAIN TRADES TABLE ─────────────────────────────────────────────────────
+  const mainHdr = `<tr>
+    <th>Ticker</th><th>Outcome</th><th>Entry Date</th><th>Entry Price</th>
+    <th>Fair Value</th><th>FV Gap %</th><th>Target</th>
+    <th>Exit Date</th><th>Exit Price</th><th>P&amp;L %</th>
+    <th>Hold (C)</th><th>Exit Reason</th><th>BO Date</th><th>CF Date</th>
+  </tr>`;
 
-  const trs = rows.map(r => {
-    const stopLabel = r.stop_reason==='TARGET' ? '🎯 Target' : r.stop_reason==='EMA_BREAK' ? '🔻 EMA Break' : r.stop_reason==='MAX_HOLD' ? '⏱ Max Hold' : r.stop_reason==='OVERVALUED' ? '🚫 FV Gate' : '—';
-    return `<tr class="${rowClass(r.outcome)}" onclick="showDetail(${allTrades.indexOf(r)})" title="Click to see chart">
+  const mainTrs = sortedRows.map(r => `
+    <tr class="${rowClass(r.outcome)}" onclick="showDetail(${allTrades.indexOf(r)})" title="Click to see chart">
       <td class="ticker-cell">${r.ticker}</td>
       <td>${outcomeLabel(r.outcome)}</td>
       <td class="mono">${fmtDate(r.entry_date)}</td>
@@ -931,28 +955,81 @@ function rerenderTable() {
       <td class="mono">${fmtRs(r.exit_price)}</td>
       <td class="mono ${pnlClass(r.pnl_pct)}" style="font-weight:600">${r.pnl_pct != null ? (r.pnl_pct>=0?'+':'')+fmt(r.pnl_pct)+'%' : '—'}</td>
       <td class="mono">${r.hold_candles ?? '—'}</td>
-      <td class="mono">${stopLabel}</td>
+      <td class="mono">${stopLabel(r)}</td>
       <td class="mono">${fmtDate(r.breakout_date)}</td>
       <td class="mono">${fmtDate(r.confirm_date)}</td>
-    </tr>`;
-  }).join('');
+    </tr>`).join('');
+
+  const mainEmpty = sortedRows.length === 0
+    ? `<div class="empty-state" style="padding:32px"><div class="empty-icon" style="font-size:28px">🔍</div><div>No trades match this filter</div></div>`
+    : '';
+
+  // ── SKIPPED TRADES TABLE ──────────────────────────────────────────────────
+  // Shows every skipped signal: entry price, fair price, gap — even without P&L
+  const skipHdr = `<tr>
+    <th>Ticker</th><th>BO Date</th><th>CF Date</th>
+    <th>Entry Date</th><th>Entry Price</th>
+    <th>Fair Value</th><th>FV Gap %</th>
+    <th>Would-Be Target</th><th>EMA9 at Entry</th>
+    <th>BO Close</th><th>CF Close</th>
+  </tr>`;
+
+  const skipTrs = skippedRows.map(r => `
+    <tr class="row-skip" onclick="showDetail(${allTrades.indexOf(r)})" title="Click to see chart">
+      <td class="ticker-cell">${r.ticker}</td>
+      <td class="mono">${fmtDate(r.breakout_date)}</td>
+      <td class="mono">${fmtDate(r.confirm_date)}</td>
+      <td class="mono">${fmtDate(r.entry_date)}</td>
+      <td class="mono amber">${fmtRs(r.entry_price)}</td>
+      <td class="mono blue">${r.fair_price ? fmtRs(r.fair_price) : '—'}</td>
+      <td class="mono red" style="font-weight:600">${r.fair_gap_pct != null ? (r.fair_gap_pct>=0?'+':'')+fmt(r.fair_gap_pct)+'%' : '—'}</td>
+      <td class="mono">${fmtRs(r.target_price)}</td>
+      <td class="mono">${r.entry_ema9 ? fmtRs(r.entry_ema9) : '—'}</td>
+      <td class="mono">${fmtRs(r.breakout_close)}</td>
+      <td class="mono">${r.confirm_close ? fmtRs(r.confirm_close) : '—'}</td>
+    </tr>`).join('');
+
+  const skippedSection = skippedRows.length === 0 ? '' : `
+    <div class="content" style="padding-top:28px;padding-bottom:24px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:3px;height:16px;background:var(--blue);border-radius:2px"></div>
+        <span style="font-size:11px;color:var(--blue);font-family:var(--font-mono);font-weight:700;letter-spacing:.1em;text-transform:uppercase">
+          🚫 Skipped Signals — Entry Overvalued (${skippedRows.length})
+        </span>
+        <span style="font-size:10px;color:var(--text2);font-family:var(--font-mono)">
+          Signal fired but Entry Price &gt; Fair Value — trade was NOT taken
+        </span>
+      </div>
+      <div style="font-size:10px;color:var(--text2);font-family:var(--font-mono);margin-bottom:8px;line-height:1.6;padding:8px 12px;background:rgba(61,155,255,.06);border:1px solid rgba(61,155,255,.2);border-radius:var(--r-sm)">
+        📌 <strong style="color:var(--blue)">How to read this table:</strong>
+        Entry Price &gt; Fair Value → stock was overvalued at entry → trade skipped by FV gate.
+        FV Gap % is <span style="color:var(--red)">negative</span> = overvalued by that %.
+        Use this to see <em>what you missed</em> and how often the FV gate protects you.
+      </div>
+      <div class="table-wrap" style="border-color:rgba(61,155,255,.3)">
+        <table>
+          <thead style="background:rgba(61,155,255,.06)">${skipHdr}</thead>
+          <tbody>${skipTrs}</tbody>
+        </table>
+      </div>
+    </div>`;
 
   rs.innerHTML = `
     <div class="content" style="padding-top:16px">
       <div style="font-size:11px;color:var(--text2);font-family:var(--font-mono);margin-bottom:8px">
-        Showing <span style="color:var(--teal)">${rows.length}</span> trades · Click any row to see chart
+        Showing <span style="color:var(--teal)">${sortedRows.length}</span> trades · Click any row to see chart
       </div>
-      <div class="table-wrap">
-        <table><thead>${hdr}</thead><tbody>${trs}</tbody></table>
-      </div>
-    </div>`;
+      ${mainEmpty}
+      ${sortedRows.length ? `<div class="table-wrap"><table><thead>${mainHdr}</thead><tbody>${mainTrs}</tbody></table></div>` : ''}
+    </div>
+    ${skippedSection}`;
 
-  // Re-attach detail panel below table
-  document.getElementById('content-detail-anchor') || (() => {
+  // Re-attach detail panel anchor
+  if (!document.getElementById('content-detail-anchor')) {
     const anchor = document.createElement('div');
     anchor.id = 'content-detail-anchor';
-    document.getElementById('results-section').after(anchor);
-  })();
+    rs.after(anchor);
+  }
 }
 
 // ══════════════════════════════════════════════

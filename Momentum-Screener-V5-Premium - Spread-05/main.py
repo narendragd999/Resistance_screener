@@ -59,7 +59,7 @@ from ema9_backtest_router import router as ema9_backtest_router
 from backtest import router as bt_router
 
 from ema9_router import router as ema9_router
-
+from ema9 import router as ema9
 from fv_router import router as fv_router
 
 
@@ -2211,6 +2211,10 @@ async def backtest_dashboard_page():
 async def ema9_screener_page():
     return FileResponse(BASE_DIR / "static" / "ema9-screener.html")
 
+@app.get("/ema9", include_in_schema=False)
+async def ema9_screener_page():
+    return FileResponse(BASE_DIR / "static" / "ema9.html")
+
 @app.get("/fv_test_harness", include_in_schema=False)
 async def ema9_screener_page():
     return FileResponse(BASE_DIR / "static" / "fv_test_harness.html")
@@ -2778,4 +2782,4 @@ async def startup_event():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8010, reload=True)

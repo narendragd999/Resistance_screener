@@ -492,7 +492,7 @@ async function analyze() {
   let tickers = [];
   if (src === 'manual') {
     const raw = document.getElementById('inp-tickers').value.trim();
-    tickers = raw.split(/[,\n\s]+/).map(t=>t.trim().toUpperCase()).filter(Boolean);
+    tickers = raw.split(/[,\n\s]+/).map(t=>t.trim().replace(/^\$+/, '').toUpperCase()).filter(Boolean);
     if (!tickers.length) { toast('warn','Enter at least one ticker'); btn.disabled=false; isAnalyzing=false; return; }
   } else {
     const s = parseInt(document.getElementById('inp-batch-start').value) || 0;
