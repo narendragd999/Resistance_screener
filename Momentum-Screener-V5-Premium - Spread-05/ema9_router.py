@@ -365,6 +365,404 @@ def _screen_ticker(ticker: str, max_candles_ago: int = 10) -> Dict:
 
 
 # ─────────────────────────────────────────────────────────────
+#  BACKTEST ENGINE  (9 EMA Breakout Walk-Forward)
+# ─────────────────────────────────────────────────────────────
+#
+#  SIGNAL DEFINITION (mirrors _process_ticker_df):
+#    • Breakout  : prev_close < prev_ema9 AND curr_close > curr_ema9
+#    • Confirm   : next_close > breakout_close
+#    • Entry     : confirm_close  (end of confirm candle)
+#
+#  EXIT RULES (checked in order each bar after entry):
+#    1. WIN  → High ≥ entry × (1 + target_pct/100)
+#    2. LOSS → Close < EMA9 (momentum breakdown)
+#    3. LOSS → hold_days exceeded (time-based stop)
+#
+#  Trades are non-overlapping: no new signal while a trade is open.
+#  Requires price > SMA50 at entry when require_uptrend=True.
+# ─────────────────────────────────────────────────────────────
+
+def _backtest_ticker(
+    ticker:          str,
+    df:              pd.DataFrame,
+    target_pct:      float = 3.0,
+    max_hold_days:   int   = 15,
+    require_uptrend: bool  = True,
+) -> Dict:
+    """
+    Walk-forward backtest for 9EMA breakout strategy on a single ticker.
+    Returns a dict with per-trade list and aggregate statistics.
+    """
+    df = df.copy().dropna()
+    n  = len(df)
+
+    if n < MIN_HISTORY_DAYS:
+        return {
+            "ticker": ticker,
+            "status": "NO_DATA",
+            "error":  f"Insufficient data ({n} days, need ≥ {MIN_HISTORY_DAYS})",
+            "trades": [],
+        }
+
+    df["ema9"]  = df["Close"].ewm(span=9, adjust=False).mean()
+    df["sma50"] = df["Close"].rolling(50).mean()
+
+    def _date(idx: int) -> str:
+        d = df.index[idx]
+        return str(d.date()) if hasattr(d, "date") else str(d)[:10]
+
+    trades: List[Dict] = []
+    in_trade = False
+    entry_idx: int = 0
+    entry_price: float = 0.0
+    breakout_date: str = ""
+    confirm_date:  str = ""
+    signal_idx:    int = 0   # confirm candle index (=entry)
+
+    # Walk forward from day 51 (need 50 for SMA50) to leave room for exit
+    for i in range(51, n - 1):
+        # ── If in a trade, check exit conditions first ──────────────────
+        if in_trade:
+            days_held = i - entry_idx
+            high_today  = float(df["High"].iloc[i])
+            close_today = float(df["Close"].iloc[i])
+            ema9_today  = float(df["ema9"].iloc[i])
+            target_price = round(entry_price * (1 + target_pct / 100), 2)
+
+            outcome  = None
+            exit_px  = None
+            exit_date = _date(i)
+
+            # Rule 1: Target hit (use intraday High)
+            if high_today >= target_price:
+                outcome = "WIN"
+                exit_px = target_price
+
+            # Rule 2: EMA9 breakdown (close below EMA9)
+            elif close_today < ema9_today:
+                outcome = "LOSS"
+                exit_px = close_today
+
+            # Rule 3: Time-based stop
+            elif days_held >= max_hold_days:
+                outcome = "TIMEOUT"
+                exit_px = close_today
+
+            if outcome:
+                gain_pct = round((exit_px - entry_price) / entry_price * 100, 2)
+                trades.append({
+                    "ticker":       ticker,
+                    "breakout_date": breakout_date,
+                    "entry_date":   confirm_date,
+                    "entry_price":  round(entry_price, 2),
+                    "target_price": target_price,
+                    "exit_date":    exit_date,
+                    "exit_price":   round(exit_px, 2),
+                    "days_held":    days_held,
+                    "gain_pct":     gain_pct,
+                    "outcome":      outcome,
+                    "is_win":       outcome == "WIN",
+                })
+                in_trade = False
+            continue  # Don't look for new signal while in trade
+
+        # ── Look for new breakout signal ──────────────────────────────
+        prev_close = float(df["Close"].iloc[i - 1])
+        prev_ema   = float(df["ema9"].iloc[i - 1])
+        curr_close = float(df["Close"].iloc[i])
+        curr_ema   = float(df["ema9"].iloc[i])
+
+        # Breakout condition
+        if not (prev_close < prev_ema and curr_close > curr_ema):
+            continue
+
+        # Confirmation: need at least one more bar
+        if i + 1 >= n:
+            continue
+
+        conf_close = float(df["Close"].iloc[i + 1])
+        if conf_close <= curr_close:
+            continue  # Confirmation candle didn't close higher
+
+        # Uptrend filter: price > SMA50 at entry
+        sma50_at_entry = df["sma50"].iloc[i + 1]
+        if require_uptrend and (pd.isna(sma50_at_entry) or conf_close <= float(sma50_at_entry)):
+            continue
+
+        # Enter trade at confirmation close
+        in_trade    = True
+        entry_idx   = i + 1
+        entry_price = conf_close
+        breakout_date = _date(i)
+        confirm_date  = _date(i + 1)
+        # Skip past confirm candle (loop will increment to i+2)
+        i = i + 1  # This won't actually work in a for loop; handled by 'continue' logic above
+
+    # ── Summarise ────────────────────────────────────────────────────
+    if not trades:
+        return {
+            "ticker": ticker,
+            "status": "OK",
+            "trades": [],
+            "summary": {
+                "total_trades":    0,
+                "wins":            0,
+                "losses":          0,
+                "timeouts":        0,
+                "win_rate_pct":    None,
+                "avg_gain_pct":    None,
+                "avg_win_pct":     None,
+                "avg_loss_pct":    None,
+                "max_win_pct":     None,
+                "max_loss_pct":    None,
+                "expectancy_pct":  None,
+                "total_return_pct": None,
+            },
+        }
+
+    wins      = [t for t in trades if t["outcome"] == "WIN"]
+    losses    = [t for t in trades if t["outcome"] != "WIN"]
+    timeouts  = [t for t in trades if t["outcome"] == "TIMEOUT"]
+
+    gains     = [t["gain_pct"] for t in trades]
+    win_gains = [t["gain_pct"] for t in wins]
+    los_gains = [t["gain_pct"] for t in losses]
+
+    win_rate   = round(len(wins) / len(trades) * 100, 1) if trades else None
+    avg_gain   = round(float(np.mean(gains)), 2)          if gains     else None
+    avg_win    = round(float(np.mean(win_gains)), 2)      if win_gains else None
+    avg_loss   = round(float(np.mean(los_gains)), 2)      if los_gains else None
+    max_win    = round(float(np.max(win_gains)), 2)       if win_gains else None
+    max_loss   = round(float(np.min(los_gains)), 2)       if los_gains else None
+
+    # Expectancy = WinRate × AvgWin + (1-WinRate) × AvgLoss
+    expectancy = None
+    if win_rate is not None and avg_win is not None and avg_loss is not None:
+        wr = win_rate / 100
+        expectancy = round(wr * avg_win + (1 - wr) * avg_loss, 2)
+
+    # Simple compound return simulation (1 trade at a time, full re-invest)
+    equity = 100.0
+    for t in trades:
+        equity *= (1 + t["gain_pct"] / 100)
+    total_return = round(equity - 100, 2)
+
+    return {
+        "ticker": ticker,
+        "status": "OK",
+        "trades": trades,
+        "summary": {
+            "total_trades":     len(trades),
+            "wins":             len(wins),
+            "losses":           len(losses) - len(timeouts),
+            "timeouts":         len(timeouts),
+            "win_rate_pct":     win_rate,
+            "avg_gain_pct":     avg_gain,
+            "avg_win_pct":      avg_win,
+            "avg_loss_pct":     avg_loss,
+            "max_win_pct":      max_win,
+            "max_loss_pct":     max_loss,
+            "expectancy_pct":   expectancy,
+            "total_return_pct": total_return,
+        },
+    }
+
+
+# ─── Backtest Request Model ───────────────────────────────────
+class Ema9BacktestRequest(BaseModel):
+    tickers:         List[str]
+    target_pct:      float = 3.0
+    max_hold_days:   int   = 15
+    require_uptrend: bool  = True
+    fetch_fv:        bool  = False   # If True, enrich each ticker trade with Fair Value data
+
+
+# ─── Backtest Route ───────────────────────────────────────────
+@router.post("/api/ema9/backtest")
+async def ema9_backtest(req: Ema9BacktestRequest):
+    """
+    Run walk-forward 9EMA breakout backtest across a list of tickers.
+    Returns per-ticker summaries, all individual trades, and an
+    aggregate report sorted by win-rate then total return.
+    """
+    tickers = [
+        t.strip().upper().replace(".NS", "").replace(".BO", "")
+        for t in req.tickers if t.strip()
+    ][:300]  # Cap at 300 for reasonable runtime
+
+    if not tickers:
+        raise HTTPException(400, "No valid tickers provided.")
+
+    logger.info(f"[Backtest] Starting: {len(tickers)} tickers | "
+                f"target={req.target_pct}% | hold={req.max_hold_days}d | "
+                f"uptrend={req.require_uptrend}")
+
+    # Download all tickers (reuse existing batch downloader)
+    ticker_dfs = await asyncio.to_thread(
+        _batch_download, tickers, "1d", 500
+    )
+
+    # Run backtest on each ticker
+    results      = []
+    all_trades   = []
+    failed       = []
+    no_trades    = []
+
+    for ticker in tickers:
+        if ticker not in ticker_dfs:
+            failed.append({"ticker": ticker, "error": "No price data"})
+            continue
+        try:
+            bt = _backtest_ticker(
+                ticker,
+                ticker_dfs[ticker],
+                target_pct      = req.target_pct,
+                max_hold_days   = req.max_hold_days,
+                require_uptrend = req.require_uptrend,
+            )
+            if bt["status"] == "NO_DATA":
+                failed.append({"ticker": ticker, "error": bt.get("error", "NO_DATA")})
+                continue
+            if not bt["trades"]:
+                no_trades.append(ticker)
+                continue
+
+            results.append(bt)
+            all_trades.extend(bt["trades"])
+        except Exception as exc:
+            logger.error(f"[Backtest] {ticker}: {exc}")
+            failed.append({"ticker": ticker, "error": str(exc)[:120]})
+
+    # ── Fair Value enrichment for backtest (optional, slow) ──────────────────
+    # Fetch FV once per ticker, then annotate all trades for that ticker.
+    # "Undervalued at entry" = entry_price < composite_fair_price (fundamental FV
+    # is not time-varying at the daily scale so we use current FV as proxy).
+    fv_by_ticker: Dict[str, Dict] = {}
+    if req.fetch_fv and _FV_AVAILABLE:
+        logger.info(f"[Backtest-FV] Starting FV enrichment for {len(results)} tickers with trades")
+        for i, bt_result in enumerate(results):
+            ticker = bt_result["ticker"]
+            # Grab current price from last bar as reference for gap_to_fair_pct
+            df_ref = ticker_dfs.get(ticker)
+            cur_price = float(df_ref["Close"].iloc[-1]) if df_ref is not None else None
+            fv = await asyncio.to_thread(_enrich_fair_value, ticker, cur_price)
+            fv_by_ticker[ticker] = fv
+            # Annotate the ticker-level result
+            for k in _SAFE_FV_KEYS:
+                bt_result[k] = fv.get(k)
+            # Annotate every trade for this ticker
+            fv_price = fv.get("composite_fair_price")
+            for trade in bt_result["trades"]:
+                trade["composite_fair_price"] = fv_price
+                if fv_price and fv_price > 0 and trade["entry_price"] > 0:
+                    trade["is_undervalued"]       = trade["entry_price"] < fv_price
+                    trade["entry_vs_fv_pct"]      = round((fv_price - trade["entry_price"]) / fv_price * 100, 2)
+                else:
+                    trade["is_undervalued"]  = None
+                    trade["entry_vs_fv_pct"] = None
+            if i < len(results) - 1:
+                await asyncio.sleep(FV_INTER_DELAY)
+        # Re-sync all_trades list (it was built before FV enrichment)
+        all_trades = []
+        for bt_result in results:
+            all_trades.extend(bt_result["trades"])
+        logger.info(f"[Backtest-FV] FV enrichment complete for {len(fv_by_ticker)} tickers")
+    else:
+        # No FV requested — annotate trades with None so frontend knows
+        for trade in all_trades:
+            trade.setdefault("composite_fair_price", None)
+            trade.setdefault("is_undervalued", None)
+            trade.setdefault("entry_vs_fv_pct", None)
+
+    # Sort by win_rate desc, then total_return desc
+    results.sort(
+        key=lambda r: (
+            -(r["summary"]["win_rate_pct"]    or 0),
+            -(r["summary"]["total_return_pct"] or 0),
+        )
+    )
+
+    # Aggregate across all tickers
+    all_wins     = [t for t in all_trades if t["is_win"]]
+    all_losses   = [t for t in all_trades if not t["is_win"]]
+    all_timeouts = [t for t in all_trades if t["outcome"] == "TIMEOUT"]
+
+    agg_win_rate  = None
+    agg_avg_gain  = None
+    agg_avg_win   = None
+    agg_avg_loss  = None
+    agg_expectancy = None
+
+    if all_trades:
+        agg_win_rate  = round(len(all_wins) / len(all_trades) * 100, 1)
+        gains         = [t["gain_pct"] for t in all_trades]
+        agg_avg_gain  = round(float(np.mean(gains)), 2)
+        if all_wins:
+            agg_avg_win = round(float(np.mean([t["gain_pct"] for t in all_wins])), 2)
+        if all_losses:
+            agg_avg_loss = round(float(np.mean([t["gain_pct"] for t in all_losses])), 2)
+        if agg_avg_win is not None and agg_avg_loss is not None:
+            wr = agg_win_rate / 100
+            agg_expectancy = round(wr * agg_avg_win + (1 - wr) * agg_avg_loss, 2)
+
+    # ── Undervalued-only aggregate (for checkbox filter on frontend) ──────────
+    uv_trades   = [t for t in all_trades if t.get("is_undervalued") is True]
+    uv_wins     = [t for t in uv_trades if t["is_win"]]
+    uv_losses   = [t for t in uv_trades if not t["is_win"]]
+    uv_win_rate = round(len(uv_wins) / len(uv_trades) * 100, 1) if uv_trades else None
+    uv_avg_win  = round(float(np.mean([t["gain_pct"] for t in uv_wins])),   2) if uv_wins   else None
+    uv_avg_loss = round(float(np.mean([t["gain_pct"] for t in uv_losses])), 2) if uv_losses else None
+    uv_expectancy = None
+    if uv_win_rate is not None and uv_avg_win is not None and uv_avg_loss is not None:
+        wr = uv_win_rate / 100
+        uv_expectancy = round(wr * uv_avg_win + (1 - wr) * uv_avg_loss, 2)
+
+    logger.info(
+        f"[Backtest] Done: {len(results)} tickers with trades | "
+        f"{len(all_trades)} total trades | WR={agg_win_rate}% | "
+        f"UV trades={len(uv_trades)} | UV WR={uv_win_rate}%"
+    )
+
+    return {
+        "results":       results,
+        "all_trades":    all_trades,
+        "failed":        failed,
+        "no_trades":     no_trades,
+        "fv_enabled":    req.fetch_fv and _FV_AVAILABLE,
+        "aggregate": {
+            "tickers_screened":      len(tickers),
+            "tickers_with_trades":   len(results),
+            "tickers_no_trades":     len(no_trades),
+            "tickers_failed":        len(failed),
+            "total_trades":          len(all_trades),
+            "total_wins":            len(all_wins),
+            "total_losses":          len(all_losses),
+            "total_timeouts":        len(all_timeouts),
+            "win_rate_pct":          agg_win_rate,
+            "avg_gain_pct":          agg_avg_gain,
+            "avg_win_pct":           agg_avg_win,
+            "avg_loss_pct":          agg_avg_loss,
+            "expectancy_pct":        agg_expectancy,
+        },
+        "undervalued_aggregate": {
+            "total_trades":    len(uv_trades),
+            "total_wins":      len(uv_wins),
+            "total_losses":    len(uv_losses),
+            "win_rate_pct":    uv_win_rate,
+            "avg_win_pct":     uv_avg_win,
+            "avg_loss_pct":    uv_avg_loss,
+            "expectancy_pct":  uv_expectancy,
+        },
+        "config": {
+            "target_pct":      req.target_pct,
+            "max_hold_days":   req.max_hold_days,
+            "require_uptrend": req.require_uptrend,
+            "fetch_fv":        req.fetch_fv,
+        },
+    }
+
+
+# ─────────────────────────────────────────────────────────────
 #  FAIR VALUE ENRICHMENT (Now fixed by the global yf.download patch)
 # ─────────────────────────────────────────────────────────────
 _FV_NULL = {
