@@ -52,6 +52,72 @@ try:
 except ImportError:
     _has_fastapi = False
 
+# ── Optional Fair Value import (from sma_router) ──────────────────────────
+# Fair value enriches every Gate 3 trade with regression-based fundamental
+# data (Operating Profit, Sales, TTM models scraped from Screener.in).
+# If sma_router is unavailable the backtest runs normally without FV data.
+try:
+    from sma_router import _analyze_ticker as _sma_analyze
+    _has_fair_value = True
+except ImportError:
+    _has_fair_value = False
+
+# In-process fair value cache: ticker → {composite_fair_price, composite_gain_pct,
+# valuation_bucket, model_count, current_price, op_fair, sales_fair, ttm_fair}
+# Populated lazily on first Gate 3 hit; reused for all trades of the same ticker.
+_fv_cache: Dict[str, Dict] = {}
+
+
+def _get_fair_value(ticker: str, force: bool = False) -> Dict:
+    """
+    Fetch fundamental fair value for ticker using SMA regression models.
+    Returns a flat dict with fair value fields, or an empty dict on failure.
+    Results are cached in-process so each ticker is only scraped once per run.
+    """
+    if not _has_fair_value:
+        return {}
+
+    global _fv_cache
+    cache_key = ticker.upper()
+
+    if not force and cache_key in _fv_cache:
+        return _fv_cache[cache_key]
+
+    try:
+        result = _sma_analyze(
+            ticker=ticker,
+            fy_start=2014,
+            force=False,
+            include_other_income=True,
+        )
+        if "error" in result:
+            out = {"fv_error": result["error"]}
+        else:
+            op    = result.get("op",  {})
+            sales = result.get("sales", {})
+            ttm   = result.get("ttm",  {})
+            out = {
+                "fv_current_price":      result.get("current_price"),
+                "fv_composite_fair":     result.get("composite_fair_price"),
+                "fv_composite_gain_pct": result.get("composite_gain_pct"),
+                "fv_valuation_bucket":   result.get("valuation_bucket"),  # UNDERVALUED / FAIR / OVERVALUED
+                "fv_model_count":        result.get("model_count", 0),
+                # Individual model fair prices (for tooltip / drill-down)
+                "fv_op_fair":            op.get("pred_price"),
+                "fv_op_r2":             op.get("r2"),
+                "fv_op_gain_pct":       op.get("gain_pct"),
+                "fv_sales_fair":         sales.get("pred_price") if result.get("has_sales") else None,
+                "fv_sales_r2":          sales.get("r2")         if result.get("has_sales") else None,
+                "fv_ttm_fair":           ttm.get("pred_price")  if result.get("has_ttm")   else None,
+                "fv_ttm_r2":            ttm.get("r2")          if result.get("has_ttm")    else None,
+            }
+        _fv_cache[cache_key] = out
+        return out
+    except Exception as e:
+        out = {"fv_error": str(e)}
+        _fv_cache[cache_key] = out
+        return out
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,6 +136,7 @@ DEFAULT_CONFIG = {
     "ema_period":                 9,
     "price_proximity_percent":    1.0,
     "sell_zone_lookback_days":    10,
+    "max_gate3_days":              90,     # calendar days after Gate 2 to scan for Gate 3 retest; 0 = unlimited
     # Expiry control ─────────────────────────────────────────────────────────
     # "auto"    → current month; roll to next if days_to_expiry < min_days_to_expiry
     # "current" → always current month (even if very close)
@@ -418,7 +485,7 @@ def check_gate2(
     bd_idx: int, cfg: Dict
 ) -> Optional[int]:
     """
-    Scan from bd_idx onward. Return first index where
+    Scan from bd_idx+1 onward (candle AFTER breakdown). Return first index where
     close < 9-EMA AND volume ≥ min_breakdown_volume_ratio × 20d avg.
     """
     ema_period    = int(cfg.get("ema_period", 9))
@@ -427,7 +494,7 @@ def check_gate2(
     avg_vol_20d   = float(np.mean(vols[-20:])) if len(vols) >= 20 else float(np.mean(vols))
     if avg_vol_20d <= 0:
         return None
-    for i in range(bd_idx, len(closes)):
+    for i in range(bd_idx + 1, len(closes)):   # +1: skip breakdown candle itself
         if closes[i] < ema_vals[i]:
             if float(vols[i]) / avg_vol_20d >= min_vol_ratio:
                 return i
@@ -436,10 +503,19 @@ def check_gate2(
 
 def check_gate3(
     closes: np.ndarray, highs: np.ndarray,
-    g2_idx: int, surge_high: float, cfg: Dict
+    g2_idx: int, surge_high: float, cfg: Dict,
+    dates: object = None,   # pd.DatetimeIndex — used for max_gate3_days limit
 ) -> Optional[int]:
-    prox_pct = float(cfg.get("price_proximity_percent", 1.0))
-    floor    = surge_high * (1 - prox_pct / 100)
+    prox_pct       = float(cfg.get("price_proximity_percent", 1.0))
+    max_g3_days    = int(cfg.get("max_gate3_days", 90))   # 0 = unlimited
+    floor          = surge_high * (1 - prox_pct / 100)
+
+    # Calendar-day deadline: if Gate 3 doesn't fire within max_gate3_days
+    # after Gate 2, the setup is stale (e.g. stock already in a new uptrend).
+    deadline_date  = None
+    if max_g3_days > 0 and dates is not None:
+        from datetime import timedelta
+        deadline_date = dates[g2_idx].date() + timedelta(days=max_g3_days)
 
     pulled_back       = False   # True once close has dropped below floor after Gate 2
     above_high_streak = 0       # consecutive closes above surge_high
@@ -451,6 +527,10 @@ def check_gate3(
     for i in range(g2_idx + 1, len(closes)):
         close = float(closes[i])
         high  = float(highs[i])
+
+        # Stale-setup guard: abort if past max_gate3_days deadline
+        if deadline_date is not None and dates[i].date() > deadline_date:
+            return None
 
         # Track consecutive closes above surge_high (confirmed breakout)
         if close > surge_high:
@@ -861,10 +941,13 @@ def backtest_ticker(
         bd_date_str = str(dates[bd_idx].date())
 
         # ── Gate 2: inline with precomputed EMA — avoids recomputing full EMA
+        # Start at bd_idx+1: the breakdown candle itself must NOT satisfy Gate 2.
+        # Gate 2 must be a *subsequent* candle confirming EMA rejection after the
+        # breakdown.  Starting at bd_idx was the bug that caused Gate1==Gate2 dates.
         g2_idx    = None
         g2_avgvol = float(np.mean(vols[max(0, bd_idx - 20):bd_idx])) if bd_idx > 0 else 0.0
         if g2_avgvol > 0:
-            for i in range(bd_idx, n):
+            for i in range(bd_idx + 1, n):   # ← +1 fix: skip the breakdown candle itself
                 if closes[i] < ema_full[i] and vols[i] / g2_avgvol >= min_vol_ratio:
                     g2_idx = i
                     break
@@ -877,18 +960,18 @@ def backtest_ticker(
         g2_date = str(dates[g2_idx].date())
         if verbose:
             print(f"    Gate 2 @ {g2_date}")
-
-        # Recompute surge_high: max high from recency window before bd up to g2
-        # (same logic as original — anchors resistance to visible peak)
+        # Recompute surge_high: max high from recency window BEFORE breakdown only.
+        # DO NOT extend to g2_idx — Gate 2 can occur days/weeks after breakdown,
+        # and including that span picks up stale post-crash highs that are not true
+        # surge resistance (root cause of phantom Gate 3 on recovery rallies).
         lookback_start = max(0, bd_idx - recency)
-        if lookback_start < g2_idx:
-            surge_high = float(np.max(highs[lookback_start:g2_idx]))
+        surge_high = float(np.max(highs[lookback_start:bd_idx + 1]))
 
         if verbose:
             print(f"    Surge-high (pre-EMA-break, {recency}d lookback) → {surge_high:.2f}")
 
         # ── Gate 3 (unchanged) ───────────────────────────────────────────────
-        g3_idx = check_gate3(closes, highs, g2_idx, surge_high, cfg)
+        g3_idx = check_gate3(closes, highs, g2_idx, surge_high, cfg, dates=dates)
         if g3_idx is None:
             if verbose:
                 print(f"    Gate 3 never triggered (breakout or no retest)")
@@ -919,6 +1002,13 @@ def backtest_ticker(
         cur_side = _expiry_side(closes, dates, g3_idx, surge_high, cfg, "current", vols=vols)
         nxt_side = _expiry_side(closes, dates, g3_idx, surge_high, cfg, "next",    vols=vols)
 
+        # ── Fair Value enrichment (Gate 3 trade context) ─────────────────────
+        # Fetch once per ticker (cached); attach composite + per-model fields.
+        # fv_valuation_bucket: UNDERVALUED = stock below fair → CE likely to
+        # continue falling → historically better WIN setup.
+        # OVERVALUED = stock above fair → CE may stay elevated → riskier.
+        fv = _get_fair_value(ticker)
+
         trade.update({
             "ticker":         ticker,
             "gate1_date":     bd_date_str,
@@ -929,6 +1019,8 @@ def backtest_ticker(
             "volume_ratio":   bd_info["volume_ratio"],
             "cur_expiry":     cur_side,
             "nxt_expiry":     nxt_side,
+            # ── Fair Value fields (None if sma_router unavailable or scrape failed)
+            **fv,
         })
         trades.append(trade)
 
@@ -1033,6 +1125,40 @@ def backtest_ticker(
         "avg_premium": otm_bucket_stats[str(best_otm_idx)]["avg_premium"] if otm_bucket_stats else None,
     } if otm_bucket_stats else None
 
+    # ── Fair Value cohort summary ─────────────────────────────────────────────
+    def _fv_cohort(bucket: str) -> dict:
+        cohort = [t for t in trades if t.get("fv_valuation_bucket") == bucket]
+        nc = len(cohort)
+        if nc == 0:
+            return {"trades": 0, "wins": 0, "losses": 0, "accuracy_pct": None,
+                    "avg_pnl": None, "avg_premium": None}
+        w   = sum(1 for t in cohort if t["result"] == "WIN")
+        pnl = round(sum(t["pnl_per_unit"] for t in cohort) / nc, 2)
+        prem = round(sum(t["entry_ce_premium"] for t in cohort) / nc, 2)
+        return {
+            "trades":       nc,
+            "wins":         w,
+            "losses":       nc - w,
+            "accuracy_pct": round(w / nc * 100, 1),
+            "avg_pnl":      pnl,
+            "avg_premium":  prem,
+        }
+
+    # Representative FV snapshot for the ticker (from first successful trade)
+    fv_ticker_snapshot = None
+    for t in trades:
+        if t.get("fv_composite_fair") is not None:
+            fv_ticker_snapshot = {
+                "composite_fair_price":  t["fv_composite_fair"],
+                "composite_gain_pct":    t["fv_composite_gain_pct"],
+                "valuation_bucket":      t["fv_valuation_bucket"],
+                "model_count":           t.get("fv_model_count"),
+                "op_fair":               t.get("fv_op_fair"),
+                "sales_fair":            t.get("fv_sales_fair"),
+                "ttm_fair":              t.get("fv_ttm_fair"),
+            }
+            break
+
     return {
         "ticker": ticker,
         "summary": {
@@ -1055,6 +1181,13 @@ def backtest_ticker(
             # Max OTM Gain Pact
             "otm_bucket_stats":   otm_bucket_stats,
             "recommended_otm":    recommended_otm,
+            # ── Fair Value analysis
+            "fair_value_snapshot": fv_ticker_snapshot,
+            "fair_value_cohorts": {
+                "undervalued": _fv_cohort("UNDERVALUED"),
+                "fair":        _fv_cohort("FAIR"),
+                "overvalued":  _fv_cohort("OVERVALUED"),
+            },
         },
         "trades": trades,
     }
