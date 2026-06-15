@@ -53,6 +53,7 @@ from pydantic import BaseModel
 # Sub-routers (Option Charts + SMA Screener)
 from option_charts_router import router as oc_router
 from sma_router import router as sma_router
+from ema9_backtest_router import router as ema9_backtest_router
 
 # ADD THIS:
 from backtest import router as bt_router
@@ -2214,12 +2215,17 @@ async def ema9_screener_page():
 async def ema9_screener_page():
     return FileResponse(BASE_DIR / "static" / "fv_test_harness.html")
 
+@app.get("/ema9_backtest", include_in_schema=False)
+async def ema9_screener_page():
+    return FileResponse(BASE_DIR / "static" / "ema9_backtest.html")
+
 app.include_router(oc_router)
 app.include_router(sma_router)
 
 app.include_router(bt_router)   # ADD THIS
 app.include_router(ema9_router)   # ADD THIS
 app.include_router(fv_router)
+app.include_router(ema9_backtest_router)
 
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
