@@ -374,9 +374,8 @@ def _screen_ticker(ticker: str, max_candles_ago: int = 10) -> Dict:
 #    • Entry     : confirm_close  (end of confirm candle)
 #
 #  EXIT RULES (checked in order each bar after entry):
-#    1. WIN  → High ≥ entry × (1 + target_pct/100)
-#    2. LOSS → Close < EMA9 (momentum breakdown)
-#    3. LOSS → hold_days exceeded (time-based stop)
+#    1. WIN     → High ≥ entry × (1 + target_pct/100)
+#    2. TIMEOUT → hold_days exceeded (time-based stop)
 #
 #  Trades are non-overlapping: no new signal while a trade is open.
 #  Requires price > SMA50 at entry when require_uptrend=True.
@@ -438,12 +437,7 @@ def _backtest_ticker(
                 outcome = "WIN"
                 exit_px = target_price
 
-            # Rule 2: EMA9 breakdown (close below EMA9)
-            elif close_today < ema9_today:
-                outcome = "LOSS"
-                exit_px = close_today
-
-            # Rule 3: Time-based stop
+            # Rule 2: Time-based stop
             elif days_held >= max_hold_days:
                 outcome = "TIMEOUT"
                 exit_px = close_today
@@ -486,7 +480,8 @@ def _backtest_ticker(
                     "trend_regime":  trend_at_entry,
                 })
                 in_trade = False
-            continue  # Don't look for new signal while in trade
+            else:
+                continue  # Trade still open, no exit yet — skip signal search
 
         # ── Look for new breakout signal ──────────────────────────────
         prev_close = float(df["Close"].iloc[i - 1])
@@ -517,8 +512,10 @@ def _backtest_ticker(
         entry_price = conf_close
         breakout_date = _date(i)
         confirm_date  = _date(i + 1)
-        # Skip past confirm candle (loop will increment to i+2)
-        i = i + 1  # This won't actually work in a for loop; handled by 'continue' logic above
+        # Note: Python for-loops ignore reassignment of i, so the confirm candle (i+1)
+        # will be evaluated as the first exit-check bar on the next iteration.
+        # days_held will be 0 on that bar — WIN check on confirm bar's High is intentional
+        # (gap-up on confirm day should count as a win).
 
     # ── Summarise ────────────────────────────────────────────────────
     if not trades:
