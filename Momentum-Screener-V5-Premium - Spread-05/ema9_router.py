@@ -373,9 +373,9 @@ def _screen_ticker(ticker: str, max_candles_ago: int = 10) -> Dict:
 #    • Confirm   : next_close > breakout_close
 #    • Entry     : confirm_close  (end of confirm candle)
 #
-#  EXIT RULES (checked in order each bar after entry):
-#    1. WIN     → High ≥ entry × (1 + target_pct/100)
-#    2. TIMEOUT → hold_days exceeded (time-based stop)
+#  EXIT RULES:
+#    1. WIN → High ≥ entry × (1 + target_pct/100)
+#    No force-exit. Trades that never hit target are dropped (open at end of data).
 #
 #  Trades are non-overlapping: no new signal while a trade is open.
 #  Requires price > SMA50 at entry when require_uptrend=True.
@@ -425,22 +425,16 @@ def _backtest_ticker(
             days_held = i - entry_idx
             high_today  = float(df["High"].iloc[i])
             close_today = float(df["Close"].iloc[i])
-            ema9_today  = float(df["ema9"].iloc[i])
             target_price = round(entry_price * (1 + target_pct / 100), 2)
 
             outcome  = None
             exit_px  = None
             exit_date = _date(i)
 
-            # Rule 1: Target hit (use intraday High)
+            # Only exit: Target hit (use intraday High). No force-exit ever.
             if high_today >= target_price:
                 outcome = "WIN"
                 exit_px = target_price
-
-            # Rule 2: Time-based stop
-            elif days_held >= max_hold_days:
-                outcome = "TIMEOUT"
-                exit_px = close_today
 
             if outcome:
                 gain_pct = round((exit_px - entry_price) / entry_price * 100, 2)

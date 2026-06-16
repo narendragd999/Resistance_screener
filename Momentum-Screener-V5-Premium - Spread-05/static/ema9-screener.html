@@ -1855,7 +1855,7 @@ function renderBtTradesTable(trades) {
       <td class="px-4 py-2.5 font-mono text-xs text-slate-300">₹${fmtNum(t.exit_price)}</td>
       <td class="px-4 py-2.5 font-mono text-xs text-slate-400">${t.days_held}d</td>
       <td class="px-4 py-2.5 font-mono text-xs font-600 ${gainClass}">${(t.gain_pct >= 0 ? '+' : '') + t.gain_pct}%</td>
-      <td class="px-4 py-2.5 font-mono text-xs font-600 ${outClass}">${t.outcome}</td>
+      <td class="px-4 py-2.5 font-mono text-xs font-600 ${outClass}">${t.outcome} <span style="font-weight:400;opacity:0.65;margin-left:3px;">${t.days_held}d</span></td>
     </tr>`;
   }).join('');
 }
