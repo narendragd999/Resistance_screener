@@ -54,13 +54,14 @@ from pydantic import BaseModel
 from option_charts_router import router as oc_router
 from sma_router import router as sma_router
 from ema9_backtest_router import router as ema9_backtest_router
+from fair_value_router import router as fv_router  # /api/fv/* endpoints
 
 # ADD THIS:
 from backtest import router as bt_router
 
 from ema9_router import router as ema9_router
 from ema9 import router as ema9
-from fv_router import router as fv_router
+# NOTE: fv_router import REMOVED — was overwriting fair_value_router above
 
 
 BASE_DIR = Path(__file__).parent
@@ -2226,9 +2227,9 @@ async def ema9_screener_page():
 app.include_router(oc_router)
 app.include_router(sma_router)
 
-app.include_router(bt_router)   # ADD THIS
-app.include_router(ema9_router)   # ADD THIS
-app.include_router(fv_router)
+app.include_router(bt_router)
+app.include_router(ema9_router)
+app.include_router(fv_router)          # fair_value_router → /api/fv/*
 app.include_router(ema9_backtest_router)
 
 os.makedirs("static", exist_ok=True)
