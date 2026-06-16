@@ -579,6 +579,9 @@ tailwind.config = {
       <span>Last run:</span>
       <span id="chartinkLastRun">never</span>
       <span class="mx-1">&bull;</span>
+      <span>Next auto-scan:</span>
+      <span id="chartinkNextScan" class="text-accent2">5:00</span>
+      <span class="mx-1">&bull;</span>
       <span>Symbols pulled:</span>
       <span id="chartinkSymbolCount">0</span>
       <span id="chartinkSymbolList" class="text-slate-500 truncate"></span>
@@ -1639,7 +1642,7 @@ function switchTab(tab) {
   } else if (tab === 'chartink') {
     chartinkPanel.classList.remove('hidden');
     tabChartink.classList.add('active');
-    if (!_chartinkPollStarted) startChartinkPolling();
+    fetchChartinkResults();   // immediate refresh on tab open; background polling already running
   }
 }
 
@@ -2077,14 +2080,39 @@ function btSortTickerTable() {
 // ═══════════════════════════════════════════════════════════
 
 const CHARTINK_POLL_MS = 5 * 60 * 1000;  // 5 minutes, matches backend scheduler
-let _chartinkPollStarted = false;
-let _chartinkPollTimer   = null;
+let _chartinkPollStarted   = false;
+let _chartinkPollTimer     = null;
+let _chartinkCountdownTimer = null;
+let _chartinkNextScanAt    = null;   // epoch ms of next scheduled auto-poll
 
 function startChartinkPolling() {
   _chartinkPollStarted = true;
-  fetchChartinkResults();                 // immediate load on first tab open
+  fetchChartinkResults();                 // immediate load on page load
+  _resetChartinkCountdown();
+
   if (_chartinkPollTimer) clearInterval(_chartinkPollTimer);
-  _chartinkPollTimer = setInterval(fetchChartinkResults, CHARTINK_POLL_MS);
+  _chartinkPollTimer = setInterval(() => {
+    fetchChartinkResults();
+    _resetChartinkCountdown();
+  }, CHARTINK_POLL_MS);
+
+  if (_chartinkCountdownTimer) clearInterval(_chartinkCountdownTimer);
+  _chartinkCountdownTimer = setInterval(_tickChartinkCountdown, 1000);
+}
+
+function _resetChartinkCountdown() {
+  _chartinkNextScanAt = Date.now() + CHARTINK_POLL_MS;
+  _tickChartinkCountdown();
+}
+
+function _tickChartinkCountdown() {
+  const el = document.getElementById('chartinkNextScan');
+  if (!el || !_chartinkNextScanAt) return;
+  const remainingMs = Math.max(0, _chartinkNextScanAt - Date.now());
+  const totalSec = Math.ceil(remainingMs / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  el.textContent = `${m}:${String(s).padStart(2, '0')}`;
 }
 
 async function fetchChartinkResults() {
@@ -2115,6 +2143,7 @@ async function runChartinkScanNow() {
     const data = await resp.json();
     renderChartinkResults(data);
     setChartinkStatus('Scan complete', 'success');
+    _resetChartinkCountdown();   // manual scan also pushes back the next auto-tick's reference point
   } catch (err) {
     setChartinkStatus('Error: ' + err.message, 'danger');
   } finally {
@@ -2215,6 +2244,13 @@ function toggleChartinkFailed() {
   c.classList.toggle('hidden');
   ch.style.transform = c.classList.contains('hidden') ? '' : 'rotate(180deg)';
 }
+
+// Chartink auto-poll starts on page load (not gated behind visiting the
+// tab) — backend already auto-scans every 5 min regardless; this keeps the
+// frontend's view of /results in sync at all times. Placed at the end of
+// the script (after _allSignals and all other state are declared) so the
+// immediate fetch-and-render on startup doesn't hit them before init.
+startChartinkPolling();
 
 </script>
 </body>

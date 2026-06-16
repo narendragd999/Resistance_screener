@@ -34,6 +34,7 @@ from fastapi import APIRouter, HTTPException
 
 from chartink_router import run_scan, DEFAULT_SCAN_CLAUSE
 from ema9_router import _run_screen_pipeline
+from telegram_alert import send_telegram_message, format_prime_targets_message
 
 router = APIRouter(prefix="/api/chartink-screener", tags=["chartink-screener"])
 
@@ -165,6 +166,15 @@ async def run_chartink_screen(scan_clause: str = DEFAULT_SCAN_CLAUSE, force_fres
             "result":         result,
         }
         save_results(payload)
+
+        # Telegram alert — fires every scan when prime targets exist (repeats included)
+        prime_targets = result.get("prime_targets") or []
+        if prime_targets:
+            msg = format_prime_targets_message(prime_targets, source="Chartink")
+            sent = send_telegram_message(msg)
+            logger.info(f"[Telegram] Prime-target alert {'sent' if sent else 'FAILED'} "
+                        f"({len(prime_targets)} tickers).")
+
         return payload
 
     finally:
@@ -239,3 +249,15 @@ async def clear_chartink_results():
 async def get_chartink_log():
     """Raw history of each Chartink pull (timestamp, clause, symbols returned)."""
     return {"log": load_log()}
+
+
+@router.post("/test-telegram")
+async def test_telegram():
+    """Send a test message to verify TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are configured correctly."""
+    ok = send_telegram_message("✅ Chartink screener Telegram alert is configured correctly.")
+    if not ok:
+        raise HTTPException(
+            500,
+            "Telegram send failed — check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars and server logs."
+        )
+    return {"ok": True, "message": "Test message sent."}
