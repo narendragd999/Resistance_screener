@@ -555,7 +555,8 @@ tailwind.config = {
           <path stroke-linecap="round" stroke-linejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 111.06 0z"/>
         </svg>
         <h2 class="font-ui text-lg font-700 text-white">Chartink Live Feed</h2>
-        <span class="text-xs font-mono text-slate-500 ml-2">Auto-pulls tickers from your Chartink scan every 5 min &bull; full screener + Fair Value applied to each</span>
+        <span id="chartinkStoredCount" class="font-mono text-xs bg-accent2/10 text-accent2 px-2 py-0.5 rounded-full ml-1">0 stored</span>
+        <span class="text-xs font-mono text-slate-500 ml-2">Signals accumulate across scans &bull; EMA9 + Trend + Fair Value applied &bull; clear to reset</span>
       </div>
       <div class="flex items-center gap-3">
         <span id="chartinkStatusText" class="font-mono text-xs text-slate-500"></span>
@@ -570,20 +571,22 @@ tailwind.config = {
         <button id="chartinkClearBtn" onclick="clearChartinkResults()"
           class="px-4 py-2 rounded-lg font-ui font-600 text-xs
                  bg-card2 border border-border/50 text-slate-400
-                 hover:text-danger hover:border-danger/40 transition-all duration-200">
-          Clear
+                 hover:text-danger hover:border-danger/40 transition-all duration-200"
+          title="Clear all stored signals from memory">
+          Clear All
         </button>
       </div>
     </div>
     <div class="mt-3 flex items-center gap-2 text-xs font-mono text-slate-600">
-      <span>Last run:</span>
+      <span>Last scan:</span>
       <span id="chartinkLastRun">never</span>
       <span class="mx-1">&bull;</span>
       <span>Next auto-scan:</span>
       <span id="chartinkNextScan" class="text-accent2">5:00</span>
       <span class="mx-1">&bull;</span>
-      <span>Symbols pulled:</span>
+      <span>Last pull:</span>
       <span id="chartinkSymbolCount">0</span>
+      <span class="text-slate-700">tickers</span>
       <span id="chartinkSymbolList" class="text-slate-500 truncate"></span>
     </div>
   </section>
@@ -593,7 +596,7 @@ tailwind.config = {
     <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
       <div class="glass-card rounded-xl p-4 text-center">
         <p class="font-mono text-2xl font-700 text-white" id="chartinkStatTotal">0</p>
-        <p class="font-ui text-xs text-slate-500 mt-1">Total Signals</p>
+        <p class="font-ui text-xs text-slate-500 mt-1">Stored Signals</p>
       </div>
       <div class="glass-card rounded-xl p-4 text-center border-accent/20">
         <p class="font-mono text-2xl font-700 text-accent" id="chartinkStatPrime">0</p>
@@ -605,11 +608,11 @@ tailwind.config = {
       </div>
       <div class="glass-card rounded-xl p-4 text-center">
         <p class="font-mono text-2xl font-700 text-slate-400" id="chartinkStatFiltered">0</p>
-        <p class="font-ui text-xs text-slate-500 mt-1">Trend Filtered</p>
+        <p class="font-ui text-xs text-slate-500 mt-1">Last Scan Filtered</p>
       </div>
       <div class="glass-card rounded-xl p-4 text-center">
         <p class="font-mono text-2xl font-700 text-danger" id="chartinkStatFailed">0</p>
-        <p class="font-ui text-xs text-slate-500 mt-1">Failed</p>
+        <p class="font-ui text-xs text-slate-500 mt-1">Last Scan Failed</p>
       </div>
     </div>
   </section>
@@ -704,7 +707,7 @@ tailwind.config = {
 
   <!-- ═══════════════ EMPTY STATE ═══════════════ -->
   <section id="chartinkEmptySection" class="glass-card rounded-2xl p-10 text-center">
-    <p class="font-ui text-slate-500 text-sm">No Chartink signals yet. The feed auto-scans every 5 minutes, or click <span class="text-accent">Scan Now</span>.</p>
+    <p class="font-ui text-slate-500 text-sm">No signals stored yet. The feed auto-scans every 5 minutes, or click <span class="text-accent">Scan Now</span>.<br><span class="text-slate-600 text-xs mt-1 block">All found signals accumulate here across scans and page reloads until you click <span class="text-slate-400">Clear All</span>.</span></p>
   </section>
 
 </div><!-- /chartinkPanel -->
@@ -2073,21 +2076,244 @@ function btSortTickerTable() {
 
 
 // ═══════════════════════════════════════════════════════════
-//  CHARTINK LIVE FEED — auto-pulls tickers from Chartink scan
-//  every 5 min, runs them through the SAME screener pipeline
-//  as the CSV-upload tab (EMA9 + trend + Fair Value), renders
-//  into prime/other tables identical to the Screener tab.
+//  CHARTINK LIVE FEED — Persistent Signal Store
+//  • Signals accumulate in localStorage across page reloads
+//  • Each scan MERGES new signals (ticker → latest data + metadata)
+//  • Old signals persist until user clicks "Clear"
+//  • "NEW" badge on signals from the latest scan batch
+//  • Stats reflect total accumulated store, not just last scan
 // ═══════════════════════════════════════════════════════════
 
-const CHARTINK_POLL_MS = 5 * 60 * 1000;  // 5 minutes, matches backend scheduler
-let _chartinkPollStarted   = false;
-let _chartinkPollTimer     = null;
-let _chartinkCountdownTimer = null;
-let _chartinkNextScanAt    = null;   // epoch ms of next scheduled auto-poll
+const CHARTINK_POLL_MS    = 5 * 60 * 1000;
+const CHARTINK_STORE_KEY  = 'chartink_signal_store_v1';
+const CHARTINK_META_KEY   = 'chartink_meta_v1';
+const NEW_BADGE_TTL_MS    = 10 * 60 * 1000; // show "NEW" badge for 10 min after scan
 
+let _chartinkPollStarted    = false;
+let _chartinkPollTimer      = null;
+let _chartinkCountdownTimer = null;
+let _chartinkNextScanAt     = null;
+
+// ── Persistent store helpers ──────────────────────────────────────────
+// Store shape: { [ticker]: { ...signalData, _foundAt: isoString, _scanAt: isoString, _isPrime: bool } }
+
+function _ckLoadStore() {
+  try { return JSON.parse(localStorage.getItem(CHARTINK_STORE_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function _ckSaveStore(store) {
+  try { localStorage.setItem(CHARTINK_STORE_KEY, JSON.stringify(store)); }
+  catch (e) { console.warn('[CK] localStorage save failed:', e); }
+}
+
+function _ckLoadMeta() {
+  try { return JSON.parse(localStorage.getItem(CHARTINK_META_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function _ckSaveMeta(meta) {
+  try { localStorage.setItem(CHARTINK_META_KEY, JSON.stringify(meta)); }
+  catch (e) { console.warn('[CK] localStorage meta save failed:', e); }
+}
+
+// ── Merge new scan results into persistent store ──────────────────────
+function _ckMergeResults(data) {
+  const store    = _ckLoadStore();
+  const meta     = _ckLoadMeta();
+  const scanAt   = data.last_run_at || new Date().toISOString();
+  const nowIso   = new Date().toISOString();
+  const result   = data.result;
+
+  // Track which tickers came in this scan (for NEW badge)
+  const thisScantickers = new Set();
+
+  if (result) {
+    const primes = result.prime_targets || [];
+    const others = result.other_signals || [];
+
+    primes.forEach(sig => {
+      const t = sig.ticker;
+      thisScantickers.add(t);
+      const isNew = !store[t]; // brand-new ticker never seen before
+      store[t] = {
+        ...sig,
+        _isPrime:  true,
+        _scanAt:   scanAt,
+        _foundAt:  isNew ? nowIso : (store[t]?._foundAt || nowIso),
+        _isNew:    true,  // mark all from this scan batch as "new"
+      };
+      storeSignal(sig);
+    });
+
+    others.forEach(sig => {
+      const t = sig.ticker;
+      thisScantickers.add(t);
+      const isNew = !store[t];
+      store[t] = {
+        ...sig,
+        _isPrime:  false,
+        _scanAt:   scanAt,
+        _foundAt:  isNew ? nowIso : (store[t]?._foundAt || nowIso),
+        _isNew:    true,
+      };
+      storeSignal(sig);
+    });
+  }
+
+  // Clear _isNew on tickers NOT in this scan (they're old)
+  Object.keys(store).forEach(t => {
+    if (!thisScantickers.has(t)) {
+      store[t]._isNew = false;
+    }
+  });
+
+  _ckSaveStore(store);
+  _ckSaveMeta({
+    last_run_at:     scanAt,
+    symbols_pulled:  data.symbols_pulled || [],
+    total_scans:     (meta.total_scans || 0) + 1,
+    last_scan_new:   thisScantickers.size,
+    last_scan_total_store: Object.keys(store).length,
+    last_scan_at_epoch: Date.now(),
+  });
+
+  return store;
+}
+
+// ── Rendering from the accumulated store ─────────────────────────────
+function _ckRenderStore() {
+  const store = _ckLoadStore();
+  const meta  = _ckLoadMeta();
+  const allEntries = Object.values(store);
+
+  const nowMs     = Date.now();
+  const lastScanMs = meta.last_scan_at_epoch || 0;
+  const isRecent   = (nowMs - lastScanMs) < NEW_BADGE_TTL_MS;
+
+  const primes = allEntries.filter(s => s._isPrime);
+  const others = allEntries.filter(s => !s._isPrime);
+
+  // Sort: new first, then by candles_ago asc
+  const sortFn = (a, b) => {
+    if (a._isNew && !b._isNew) return -1;
+    if (!a._isNew && b._isNew) return  1;
+    return (a.candles_ago || 999) - (b.candles_ago || 999);
+  };
+  primes.sort(sortFn);
+  others.sort(sortFn);
+
+  const emptySection = document.getElementById('chartinkEmptySection');
+
+  // Update header meta
+  document.getElementById('chartinkLastRun').textContent = meta.last_run_at || 'never';
+  const symPulled = meta.symbols_pulled || [];
+  document.getElementById('chartinkSymbolCount').textContent = symPulled.length;
+  document.getElementById('chartinkSymbolList').textContent  = symPulled.length ? `(${symPulled.join(', ')})` : '';
+
+  // Update store count badge
+  const totalStored = allEntries.length;
+  const storeCountEl = document.getElementById('chartinkStoredCount');
+  if (storeCountEl) storeCountEl.textContent = `${totalStored} stored`;
+
+  if (!totalStored) {
+    document.getElementById('chartinkSummarySection').classList.add('hidden');
+    document.getElementById('chartinkPrimeSection').classList.add('hidden');
+    document.getElementById('chartinkOtherSection').classList.add('hidden');
+    document.getElementById('chartinkFailedSection').classList.add('hidden');
+    emptySection.classList.remove('hidden');
+    return;
+  }
+  emptySection.classList.add('hidden');
+
+  // Stats reflect accumulated store
+  document.getElementById('chartinkSummarySection').classList.remove('hidden');
+  document.getElementById('chartinkStatTotal').textContent    = totalStored;
+  document.getElementById('chartinkStatPrime').textContent    = primes.length;
+  document.getElementById('chartinkStatOther').textContent    = others.length;
+  // Filtered/failed stats come from last scan (we don't accumulate those)
+  document.getElementById('chartinkStatFiltered').textContent = meta.last_scan_filtered || 0;
+  document.getElementById('chartinkStatFailed').textContent   = meta.last_scan_failed   || 0;
+
+  // Build rows with NEW badge for this scan's batch
+  function buildStoreRow(s, isPrime) {
+    const newBadge = (s._isNew && isRecent)
+      ? `<span style="display:inline-block;margin-left:4px;font-size:9px;font-weight:700;
+              letter-spacing:.05em;background:rgba(16,185,129,.18);color:#10b981;
+              border:1px solid rgba(16,185,129,.35);border-radius:4px;
+              padding:1px 5px;vertical-align:middle;line-height:1.5;">NEW</span>`
+      : '';
+    const scanTime = s._scanAt ? `<div style="font-size:9px;color:#475569;margin-top:1px;">${_fmtRelTime(s._scanAt)}</div>` : '';
+    // Inject NEW badge into ticker cell of the standard buildRow output
+    const rowHtml = buildRow(s, isPrime);
+    // Insert badge after ticker text in first <td>
+    return rowHtml.replace(
+      /(<td[^>]*>)(<span[^>]*font-mono[^>]*>[^<]*<\/span>)/,
+      `$1$2${newBadge}${scanTime}`
+    );
+  }
+
+  if (primes.length) {
+    document.getElementById('chartinkPrimeSection').classList.remove('hidden');
+    document.getElementById('chartinkPrimeCount').textContent = primes.length;
+    document.getElementById('chartinkPrimeTableBody').innerHTML = primes.map(s => buildStoreRow(s, true)).join('');
+  } else {
+    document.getElementById('chartinkPrimeSection').classList.add('hidden');
+  }
+
+  if (others.length) {
+    document.getElementById('chartinkOtherSection').classList.remove('hidden');
+    document.getElementById('chartinkOtherCount').textContent = others.length;
+    document.getElementById('chartinkOtherTableBody').innerHTML = others.map(s => buildStoreRow(s, false)).join('');
+  } else {
+    document.getElementById('chartinkOtherSection').classList.add('hidden');
+  }
+
+  // Failed / filtered from last scan only
+  const filtered = meta.last_scan_filtered_list || [];
+  const failed   = meta.last_scan_failed_list   || [];
+  if (filtered.length || failed.length) {
+    document.getElementById('chartinkFailedSection').classList.remove('hidden');
+    document.getElementById('chartinkFailedCount').textContent = filtered.length + failed.length;
+    if (filtered.length) {
+      document.getElementById('chartinkFilteredByTrend').classList.remove('hidden');
+      document.getElementById('chartinkFilteredTags').innerHTML = filtered.map(f =>
+        `<span class="font-mono text-xs px-2 py-1 rounded bg-card2 text-slate-400">${f.ticker} <span class="text-slate-600">${f.trend_regime}</span></span>`
+      ).join('');
+    }
+    if (failed.length) {
+      document.getElementById('chartinkFailedList').classList.remove('hidden');
+      document.getElementById('chartinkFailedTags').innerHTML = failed.map(f =>
+        `<span class="font-mono text-xs px-2 py-1 rounded bg-card2 text-slate-500" title="${f.error || ''}">${f.ticker}</span>`
+      ).join('');
+    }
+  } else {
+    document.getElementById('chartinkFailedSection').classList.add('hidden');
+  }
+}
+
+function _fmtRelTime(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const diffMs  = Date.now() - new Date(isoStr).getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1)  return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffH = Math.floor(diffMin / 60);
+    if (diffH < 24)   return `${diffH}h ago`;
+    return `${Math.floor(diffH/24)}d ago`;
+  } catch { return ''; }
+}
+
+// ── Polling machinery ─────────────────────────────────────────────────
 function startChartinkPolling() {
   _chartinkPollStarted = true;
-  fetchChartinkResults();                 // immediate load on page load
+
+  // Immediately render whatever is already in the store (instant page load)
+  _ckRenderStore();
+
+  // Then fetch fresh data from backend
+  fetchChartinkResults();
   _resetChartinkCountdown();
 
   if (_chartinkPollTimer) clearInterval(_chartinkPollTimer);
@@ -2109,7 +2335,7 @@ function _tickChartinkCountdown() {
   const el = document.getElementById('chartinkNextScan');
   if (!el || !_chartinkNextScanAt) return;
   const remainingMs = Math.max(0, _chartinkNextScanAt - Date.now());
-  const totalSec = Math.ceil(remainingMs / 1000);
+  const totalSec    = Math.ceil(remainingMs / 1000);
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   el.textContent = `${m}:${String(s).padStart(2, '0')}`;
@@ -2120,10 +2346,27 @@ async function fetchChartinkResults() {
     const resp = await fetch('/api/chartink-screener/results');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    renderChartinkResults(data);
+    _ckIngestAndRender(data);
   } catch (err) {
     setChartinkStatus('Error loading feed: ' + err.message, 'danger');
+    // Still render the store even if backend fetch failed
+    _ckRenderStore();
   }
+}
+
+function _ckIngestAndRender(data) {
+  // Save filtered/failed lists into meta for rendering
+  const meta   = _ckLoadMeta();
+  const result = data.result;
+  meta.last_scan_filtered      = (result?.filtered_by_trend || []).length;
+  meta.last_scan_failed        = (result?.failed || []).length;
+  meta.last_scan_filtered_list = result?.filtered_by_trend || [];
+  meta.last_scan_failed_list   = result?.failed || [];
+  _ckSaveMeta(meta);
+
+  _ckMergeResults(data);
+  _ckRenderStore();
+  setChartinkStatus(`Feed updated • ${Object.keys(_ckLoadStore()).length} signals stored`, 'success');
 }
 
 async function runChartinkScanNow() {
@@ -2141,9 +2384,8 @@ async function runChartinkScanNow() {
       throw new Error(err.detail || `HTTP ${resp.status}`);
     }
     const data = await resp.json();
-    renderChartinkResults(data);
-    setChartinkStatus('Scan complete', 'success');
-    _resetChartinkCountdown();   // manual scan also pushes back the next auto-tick's reference point
+    _ckIngestAndRender(data);
+    _resetChartinkCountdown();
   } catch (err) {
     setChartinkStatus('Error: ' + err.message, 'danger');
   } finally {
@@ -2152,11 +2394,13 @@ async function runChartinkScanNow() {
 }
 
 async function clearChartinkResults() {
-  if (!confirm('Clear all saved Chartink results and history?')) return;
+  if (!confirm('Clear ALL stored signals and history? This cannot be undone.')) return;
   try {
     await fetch('/api/chartink-screener/clear', { method: 'DELETE' });
-    renderChartinkResults({ last_run_at: null, symbols_pulled: [], result: null });
-    setChartinkStatus('Cleared', 'success');
+    localStorage.removeItem(CHARTINK_STORE_KEY);
+    localStorage.removeItem(CHARTINK_META_KEY);
+    _ckRenderStore();
+    setChartinkStatus('All signals cleared', 'success');
   } catch (err) {
     setChartinkStatus('Error clearing: ' + err.message, 'danger');
   }
@@ -2168,75 +2412,8 @@ function setChartinkStatus(msg, type = 'info') {
   el.className = 'font-mono text-xs ' + ({ info: 'text-slate-500', danger: 'text-danger', success: 'text-accent' }[type] || 'text-slate-500');
 }
 
-function renderChartinkResults(data) {
-  document.getElementById('chartinkLastRun').textContent = data.last_run_at || 'never';
-
-  const symbols = data.symbols_pulled || [];
-  document.getElementById('chartinkSymbolCount').textContent = symbols.length;
-  document.getElementById('chartinkSymbolList').textContent = symbols.length ? `(${symbols.join(', ')})` : '';
-
-  const result = data.result;
-  const emptySection = document.getElementById('chartinkEmptySection');
-
-  if (!result || !result.count) {
-    document.getElementById('chartinkSummarySection').classList.add('hidden');
-    document.getElementById('chartinkPrimeSection').classList.add('hidden');
-    document.getElementById('chartinkOtherSection').classList.add('hidden');
-    document.getElementById('chartinkFailedSection').classList.add('hidden');
-    emptySection.classList.remove('hidden');
-    return;
-  }
-  emptySection.classList.add('hidden');
-
-  document.getElementById('chartinkSummarySection').classList.remove('hidden');
-  document.getElementById('chartinkStatTotal').textContent    = result.count || 0;
-  document.getElementById('chartinkStatPrime').textContent    = result.prime_count || 0;
-  document.getElementById('chartinkStatOther').textContent    = result.other_count || 0;
-  document.getElementById('chartinkStatFiltered').textContent = (result.filtered_by_trend || []).length;
-  document.getElementById('chartinkStatFailed').textContent   = (result.failed || []).length;
-
-  // Reuse the exact same row builder as the main Screener tab
-  const primes = result.prime_targets || [];
-  const others = result.other_signals || [];
-  [...primes, ...others].forEach(storeSignal);
-
-  if (primes.length) {
-    document.getElementById('chartinkPrimeSection').classList.remove('hidden');
-    document.getElementById('chartinkPrimeCount').textContent = primes.length;
-    document.getElementById('chartinkPrimeTableBody').innerHTML = primes.map(s => buildRow(s, true)).join('');
-  } else {
-    document.getElementById('chartinkPrimeSection').classList.add('hidden');
-  }
-
-  if (others.length) {
-    document.getElementById('chartinkOtherSection').classList.remove('hidden');
-    document.getElementById('chartinkOtherCount').textContent = others.length;
-    document.getElementById('chartinkOtherTableBody').innerHTML = others.map(s => buildRow(s, false)).join('');
-  } else {
-    document.getElementById('chartinkOtherSection').classList.add('hidden');
-  }
-
-  const filtered = result.filtered_by_trend || [];
-  const failed    = result.failed || [];
-  if (filtered.length || failed.length) {
-    document.getElementById('chartinkFailedSection').classList.remove('hidden');
-    document.getElementById('chartinkFailedCount').textContent = filtered.length + failed.length;
-    if (filtered.length) {
-      document.getElementById('chartinkFilteredByTrend').classList.remove('hidden');
-      document.getElementById('chartinkFilteredTags').innerHTML = filtered.map(f =>
-        `<span class="font-mono text-xs px-2 py-1 rounded bg-card2 text-slate-400">${f.ticker} <span class="text-slate-600">${f.trend_regime}</span></span>`
-      ).join('');
-    }
-    if (failed.length) {
-      document.getElementById('chartinkFailedList').classList.remove('hidden');
-      document.getElementById('chartinkFailedTags').innerHTML = failed.map(f =>
-        `<span class="font-mono text-xs px-2 py-1 rounded bg-card2 text-slate-500" title="${f.error || ''}">${f.ticker}</span>`
-      ).join('');
-    }
-  } else {
-    document.getElementById('chartinkFailedSection').classList.add('hidden');
-  }
-}
+// Legacy shim — renderChartinkResults was called from old code paths; redirect to new system
+function renderChartinkResults(data) { _ckIngestAndRender(data); }
 
 function toggleChartinkFailed() {
   const c  = document.getElementById('chartinkFailedContent');
@@ -2245,11 +2422,10 @@ function toggleChartinkFailed() {
   ch.style.transform = c.classList.contains('hidden') ? '' : 'rotate(180deg)';
 }
 
-// Chartink auto-poll starts on page load (not gated behind visiting the
-// tab) — backend already auto-scans every 5 min regardless; this keeps the
-// frontend's view of /results in sync at all times. Placed at the end of
-// the script (after _allSignals and all other state are declared) so the
-// immediate fetch-and-render on startup doesn't hit them before init.
+// Chartink auto-poll starts on page load. Placed at end of script after
+// all state (_allSignals etc.) is declared. The immediate _ckRenderStore()
+// inside startChartinkPolling() ensures the user sees stored signals
+// instantly — no waiting for the first backend fetch.
 startChartinkPolling();
 
 </script>
