@@ -10,6 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/tailwindcss-cdn@3.4.16/tailwindcss.min.js" onerror="void(0)"></script>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 
 <script>
@@ -262,6 +263,16 @@ tailwind.config = {
   @keyframes fadeSlide { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
   .fade-slide { animation: fadeSlide 0.25s ease; }
 
+  /* ── Critical layout fallbacks (survive Tailwind CDN failure) ── */
+  header { padding: 1rem 1.5rem; border-bottom: 1px solid rgba(26,45,74,0.5); }
+  header > div { max-width: 80rem; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+  header .logo-wrap { display: flex; align-items: center; gap: 0.75rem; }
+  header .logo-icon { width: 40px; height: 40px; min-width: 40px; border-radius: 8px; background: linear-gradient(135deg, #00e5a0, #00b8d4); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  header .logo-icon svg { display: block; }
+  header h1 { font-size: 1.2rem; font-weight: 800; color: #fff; margin: 0; white-space: nowrap; }
+  header p  { font-size: 0.7rem; color: #64748b; margin: 0; }
+  main { max-width: 80rem; margin: 0 auto; padding: 2rem 1.5rem; }
+
   /* Tooltip */
   .fv-error-tip {
     position: relative;
@@ -290,9 +301,9 @@ tailwind.config = {
 
 <header class="border-b border-border/50 py-4 px-6">
   <div class="max-w-7xl mx-auto flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-accent to-accent2 flex items-center justify-center">
-        <svg class="w-5 h-5 text-base" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+    <div class="logo-wrap flex items-center gap-3">
+      <div class="logo-icon w-10 h-10 rounded-lg bg-gradient-to-br from-accent to-accent2 flex items-center justify-center">
+        <svg class="w-5 h-5" width="20" height="20" fill="none" stroke="#030912" stroke-width="2.5" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3 7h4l3 9 4-12 3 9h4"/>
         </svg>
       </div>
@@ -310,6 +321,10 @@ tailwind.config = {
         <button id="tabBacktest" onclick="switchTab('backtest')"
           class="tab-btn px-4 py-1.5 rounded-md font-ui text-xs font-600 transition-all duration-200">
           🔬 Backtest
+        </button>
+        <button id="tabChartink" onclick="switchTab('chartink')"
+          class="tab-btn px-4 py-1.5 rounded-md font-ui text-xs font-600 transition-all duration-200">
+          📡 Chartink
         </button>
       </div>
       <span id="clock"></span>
@@ -528,6 +543,168 @@ tailwind.config = {
   </section>
 
 </div><!-- /screenerPanel -->
+
+<!-- ═══════════════ CHARTINK LIVE PANEL ═══════════════ -->
+<div id="chartinkPanel" class="hidden space-y-8">
+
+  <!-- ═══════════════ CONTROL BAR ═══════════════ -->
+  <section class="glass-card rounded-2xl p-6">
+    <div class="flex items-center justify-between flex-wrap gap-4">
+      <div class="flex items-center gap-2">
+        <svg class="w-5 h-5 text-accent2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 111.06 0z"/>
+        </svg>
+        <h2 class="font-ui text-lg font-700 text-white">Chartink Live Feed</h2>
+        <span class="text-xs font-mono text-slate-500 ml-2">Auto-pulls tickers from your Chartink scan every 5 min &bull; full screener + Fair Value applied to each</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="chartinkStatusText" class="font-mono text-xs text-slate-500"></span>
+        <button id="chartinkScanNowBtn" onclick="runChartinkScanNow()"
+          class="px-4 py-2 rounded-lg font-ui font-600 text-xs
+                 bg-gradient-to-r from-accent2 to-accent text-base
+                 hover:shadow-lg hover:shadow-accent2/20 transition-all duration-200
+                 flex items-center gap-2 whitespace-nowrap">
+          <span id="chartinkScanNowText">Scan Now</span>
+          <span id="chartinkScanNowSpinner" class="spinner-sm hidden"></span>
+        </button>
+        <button id="chartinkClearBtn" onclick="clearChartinkResults()"
+          class="px-4 py-2 rounded-lg font-ui font-600 text-xs
+                 bg-card2 border border-border/50 text-slate-400
+                 hover:text-danger hover:border-danger/40 transition-all duration-200">
+          Clear
+        </button>
+      </div>
+    </div>
+    <div class="mt-3 flex items-center gap-2 text-xs font-mono text-slate-600">
+      <span>Last run:</span>
+      <span id="chartinkLastRun">never</span>
+      <span class="mx-1">&bull;</span>
+      <span>Symbols pulled:</span>
+      <span id="chartinkSymbolCount">0</span>
+      <span id="chartinkSymbolList" class="text-slate-500 truncate"></span>
+    </div>
+  </section>
+
+  <!-- ═══════════════ SUMMARY STATS ═══════════════ -->
+  <section id="chartinkSummarySection" class="hidden">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div class="glass-card rounded-xl p-4 text-center">
+        <p class="font-mono text-2xl font-700 text-white" id="chartinkStatTotal">0</p>
+        <p class="font-ui text-xs text-slate-500 mt-1">Total Signals</p>
+      </div>
+      <div class="glass-card rounded-xl p-4 text-center border-accent/20">
+        <p class="font-mono text-2xl font-700 text-accent" id="chartinkStatPrime">0</p>
+        <p class="font-ui text-xs text-slate-500 mt-1">Prime Targets</p>
+      </div>
+      <div class="glass-card rounded-xl p-4 text-center border-warn/20">
+        <p class="font-mono text-2xl font-700 text-warn" id="chartinkStatOther">0</p>
+        <p class="font-ui text-xs text-slate-500 mt-1">Technical Only</p>
+      </div>
+      <div class="glass-card rounded-xl p-4 text-center">
+        <p class="font-mono text-2xl font-700 text-slate-400" id="chartinkStatFiltered">0</p>
+        <p class="font-ui text-xs text-slate-500 mt-1">Trend Filtered</p>
+      </div>
+      <div class="glass-card rounded-xl p-4 text-center">
+        <p class="font-mono text-2xl font-700 text-danger" id="chartinkStatFailed">0</p>
+        <p class="font-ui text-xs text-slate-500 mt-1">Failed</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ TABLE A: PRIME TARGETS (Chartink) ═══════════════ -->
+  <section id="chartinkPrimeSection" class="hidden">
+    <div class="glass-card rounded-2xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-border/50 flex items-center gap-3">
+        <span class="text-lg">🎯</span>
+        <h2 class="font-ui text-lg font-700 text-accent">PRIME TARGETS: UNDERVALUED + UPTREND</h2>
+        <span id="chartinkPrimeCount" class="font-mono text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full">0</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs font-ui font-600 text-slate-500 uppercase tracking-wider border-b border-border/30">
+              <th class="px-4 py-3">Ticker</th>
+              <th class="px-4 py-3">Price</th>
+              <th class="px-4 py-3">3% Target</th>
+              <th class="px-4 py-3">EMA 9</th>
+              <th class="px-4 py-3">SMA 50</th>
+              <th class="px-4 py-3">Fair Value</th>
+              <th class="px-4 py-3">Gap to FV</th>
+              <th class="px-4 py-3">BO Date</th>
+              <th class="px-4 py-3">CF Date</th>
+              <th class="px-4 py-3">Ago</th>
+              <th class="px-4 py-3">Trend</th>
+              <th class="px-4 py-3">Status</th>
+            </tr>
+          </thead>
+          <tbody id="chartinkPrimeTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ TABLE B: OTHER SIGNALS (Chartink) ═══════════════ -->
+  <section id="chartinkOtherSection" class="hidden">
+    <div class="glass-card rounded-2xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-border/50 flex items-center gap-3">
+        <span class="text-lg">⚖️</span>
+        <h2 class="font-ui text-lg font-700 text-warn">TECHNICAL BREAKOUTS (OVERVALUED)</h2>
+        <span id="chartinkOtherCount" class="font-mono text-xs bg-warn/10 text-warn px-2 py-0.5 rounded-full">0</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs font-ui font-600 text-slate-500 uppercase tracking-wider border-b border-border/30">
+              <th class="px-4 py-3">Ticker</th>
+              <th class="px-4 py-3">Price</th>
+              <th class="px-4 py-3">3% Target</th>
+              <th class="px-4 py-3">EMA 9</th>
+              <th class="px-4 py-3">SMA 50</th>
+              <th class="px-4 py-3">Fair Value</th>
+              <th class="px-4 py-3">Gap to FV</th>
+              <th class="px-4 py-3">BO Date</th>
+              <th class="px-4 py-3">CF Date</th>
+              <th class="px-4 py-3">Ago</th>
+              <th class="px-4 py-3">Trend</th>
+              <th class="px-4 py-3">Status</th>
+            </tr>
+          </thead>
+          <tbody id="chartinkOtherTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ FAILED / FILTERED (Chartink) ═══════════════ -->
+  <section id="chartinkFailedSection" class="hidden">
+    <div class="glass-card rounded-2xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-border/50 flex items-center gap-3 cursor-pointer" onclick="toggleChartinkFailed()">
+        <span class="text-lg">⚠️</span>
+        <h2 class="font-ui text-lg font-700 text-slate-400">Filtered & Failed Tickers</h2>
+        <span id="chartinkFailedCount" class="font-mono text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">0</span>
+        <svg id="chartinkFailedChevron" class="w-4 h-4 text-slate-500 ml-auto transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </div>
+      <div id="chartinkFailedContent" class="hidden px-6 py-4">
+        <div id="chartinkFilteredByTrend" class="mb-4 hidden">
+          <h3 class="font-ui text-xs font-600 text-slate-500 uppercase mb-2">Trend Filtered (Close &le; 50 SMA)</h3>
+          <div id="chartinkFilteredTags" class="flex flex-wrap gap-2"></div>
+        </div>
+        <div id="chartinkFailedList" class="hidden">
+          <h3 class="font-ui text-xs font-600 text-slate-500 uppercase mb-2">Failed (Data/Network Errors)</h3>
+          <div id="chartinkFailedTags" class="flex flex-wrap gap-2"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ EMPTY STATE ═══════════════ -->
+  <section id="chartinkEmptySection" class="glass-card rounded-2xl p-10 text-center">
+    <p class="font-ui text-slate-500 text-sm">No Chartink signals yet. The feed auto-scans every 5 minutes, or click <span class="text-accent">Scan Now</span>.</p>
+  </section>
+
+</div><!-- /chartinkPanel -->
 
 <!-- ═══════════════ BACKTEST PANEL ═══════════════ -->
 <div id="backtestPanel" class="hidden space-y-8">
@@ -1441,19 +1618,28 @@ document.getElementById('chartModal').addEventListener('click', e => { if (e.tar
 function switchTab(tab) {
   const screenerPanel = document.getElementById('screenerPanel');
   const backtestPanel = document.getElementById('backtestPanel');
+  const chartinkPanel = document.getElementById('chartinkPanel');
   const tabScreener   = document.getElementById('tabScreener');
   const tabBacktest   = document.getElementById('tabBacktest');
+  const tabChartink   = document.getElementById('tabChartink');
+
+  screenerPanel.classList.add('hidden');
+  backtestPanel.classList.add('hidden');
+  chartinkPanel.classList.add('hidden');
+  tabScreener.classList.remove('active');
+  tabBacktest.classList.remove('active');
+  tabChartink.classList.remove('active');
 
   if (tab === 'screener') {
     screenerPanel.classList.remove('hidden');
-    backtestPanel.classList.add('hidden');
     tabScreener.classList.add('active');
-    tabBacktest.classList.remove('active');
-  } else {
-    screenerPanel.classList.add('hidden');
+  } else if (tab === 'backtest') {
     backtestPanel.classList.remove('hidden');
     tabBacktest.classList.add('active');
-    tabScreener.classList.remove('active');
+  } else if (tab === 'chartink') {
+    chartinkPanel.classList.remove('hidden');
+    tabChartink.classList.add('active');
+    if (!_chartinkPollStarted) startChartinkPolling();
   }
 }
 
@@ -1880,6 +2066,154 @@ function btSortTickerTable() {
     return (map[key](a) || 0) - (map[key](b) || 0);
   });
   renderBtTickerTable(sorted);
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  CHARTINK LIVE FEED — auto-pulls tickers from Chartink scan
+//  every 5 min, runs them through the SAME screener pipeline
+//  as the CSV-upload tab (EMA9 + trend + Fair Value), renders
+//  into prime/other tables identical to the Screener tab.
+// ═══════════════════════════════════════════════════════════
+
+const CHARTINK_POLL_MS = 5 * 60 * 1000;  // 5 minutes, matches backend scheduler
+let _chartinkPollStarted = false;
+let _chartinkPollTimer   = null;
+
+function startChartinkPolling() {
+  _chartinkPollStarted = true;
+  fetchChartinkResults();                 // immediate load on first tab open
+  if (_chartinkPollTimer) clearInterval(_chartinkPollTimer);
+  _chartinkPollTimer = setInterval(fetchChartinkResults, CHARTINK_POLL_MS);
+}
+
+async function fetchChartinkResults() {
+  try {
+    const resp = await fetch('/api/chartink-screener/results');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    renderChartinkResults(data);
+  } catch (err) {
+    setChartinkStatus('Error loading feed: ' + err.message, 'danger');
+  }
+}
+
+async function runChartinkScanNow() {
+  const btn     = document.getElementById('chartinkScanNowBtn');
+  const txt     = document.getElementById('chartinkScanNowText');
+  const spinner = document.getElementById('chartinkScanNowSpinner');
+
+  btn.disabled = true; txt.textContent = 'Scanning...'; spinner.classList.remove('hidden');
+  setChartinkStatus('Pulling from Chartink & running screener...');
+
+  try {
+    const resp = await fetch('/api/chartink-screener/scan-now', { method: 'POST' });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    renderChartinkResults(data);
+    setChartinkStatus('Scan complete', 'success');
+  } catch (err) {
+    setChartinkStatus('Error: ' + err.message, 'danger');
+  } finally {
+    btn.disabled = false; txt.textContent = 'Scan Now'; spinner.classList.add('hidden');
+  }
+}
+
+async function clearChartinkResults() {
+  if (!confirm('Clear all saved Chartink results and history?')) return;
+  try {
+    await fetch('/api/chartink-screener/clear', { method: 'DELETE' });
+    renderChartinkResults({ last_run_at: null, symbols_pulled: [], result: null });
+    setChartinkStatus('Cleared', 'success');
+  } catch (err) {
+    setChartinkStatus('Error clearing: ' + err.message, 'danger');
+  }
+}
+
+function setChartinkStatus(msg, type = 'info') {
+  const el = document.getElementById('chartinkStatusText');
+  el.textContent = msg;
+  el.className = 'font-mono text-xs ' + ({ info: 'text-slate-500', danger: 'text-danger', success: 'text-accent' }[type] || 'text-slate-500');
+}
+
+function renderChartinkResults(data) {
+  document.getElementById('chartinkLastRun').textContent = data.last_run_at || 'never';
+
+  const symbols = data.symbols_pulled || [];
+  document.getElementById('chartinkSymbolCount').textContent = symbols.length;
+  document.getElementById('chartinkSymbolList').textContent = symbols.length ? `(${symbols.join(', ')})` : '';
+
+  const result = data.result;
+  const emptySection = document.getElementById('chartinkEmptySection');
+
+  if (!result || !result.count) {
+    document.getElementById('chartinkSummarySection').classList.add('hidden');
+    document.getElementById('chartinkPrimeSection').classList.add('hidden');
+    document.getElementById('chartinkOtherSection').classList.add('hidden');
+    document.getElementById('chartinkFailedSection').classList.add('hidden');
+    emptySection.classList.remove('hidden');
+    return;
+  }
+  emptySection.classList.add('hidden');
+
+  document.getElementById('chartinkSummarySection').classList.remove('hidden');
+  document.getElementById('chartinkStatTotal').textContent    = result.count || 0;
+  document.getElementById('chartinkStatPrime').textContent    = result.prime_count || 0;
+  document.getElementById('chartinkStatOther').textContent    = result.other_count || 0;
+  document.getElementById('chartinkStatFiltered').textContent = (result.filtered_by_trend || []).length;
+  document.getElementById('chartinkStatFailed').textContent   = (result.failed || []).length;
+
+  // Reuse the exact same row builder as the main Screener tab
+  const primes = result.prime_targets || [];
+  const others = result.other_signals || [];
+  [...primes, ...others].forEach(storeSignal);
+
+  if (primes.length) {
+    document.getElementById('chartinkPrimeSection').classList.remove('hidden');
+    document.getElementById('chartinkPrimeCount').textContent = primes.length;
+    document.getElementById('chartinkPrimeTableBody').innerHTML = primes.map(s => buildRow(s, true)).join('');
+  } else {
+    document.getElementById('chartinkPrimeSection').classList.add('hidden');
+  }
+
+  if (others.length) {
+    document.getElementById('chartinkOtherSection').classList.remove('hidden');
+    document.getElementById('chartinkOtherCount').textContent = others.length;
+    document.getElementById('chartinkOtherTableBody').innerHTML = others.map(s => buildRow(s, false)).join('');
+  } else {
+    document.getElementById('chartinkOtherSection').classList.add('hidden');
+  }
+
+  const filtered = result.filtered_by_trend || [];
+  const failed    = result.failed || [];
+  if (filtered.length || failed.length) {
+    document.getElementById('chartinkFailedSection').classList.remove('hidden');
+    document.getElementById('chartinkFailedCount').textContent = filtered.length + failed.length;
+    if (filtered.length) {
+      document.getElementById('chartinkFilteredByTrend').classList.remove('hidden');
+      document.getElementById('chartinkFilteredTags').innerHTML = filtered.map(f =>
+        `<span class="font-mono text-xs px-2 py-1 rounded bg-card2 text-slate-400">${f.ticker} <span class="text-slate-600">${f.trend_regime}</span></span>`
+      ).join('');
+    }
+    if (failed.length) {
+      document.getElementById('chartinkFailedList').classList.remove('hidden');
+      document.getElementById('chartinkFailedTags').innerHTML = failed.map(f =>
+        `<span class="font-mono text-xs px-2 py-1 rounded bg-card2 text-slate-500" title="${f.error || ''}">${f.ticker}</span>`
+      ).join('');
+    }
+  } else {
+    document.getElementById('chartinkFailedSection').classList.add('hidden');
+  }
+}
+
+function toggleChartinkFailed() {
+  const c  = document.getElementById('chartinkFailedContent');
+  const ch = document.getElementById('chartinkFailedChevron');
+  c.classList.toggle('hidden');
+  ch.style.transform = c.classList.contains('hidden') ? '' : 'rotate(180deg)';
 }
 
 </script>

@@ -63,6 +63,12 @@ from ema9_router import router as ema9_router
 from ema9 import router as ema9
 # NOTE: fv_router import REMOVED — was overwriting fair_value_router above
 
+from chartink_router import router as chartink_router  # /api/chartink/* endpoints
+from chartink_watcher import (
+    router as chartink_watch_router,
+    start_chartink_scheduler,
+)  # /api/chartink-screener/* endpoints — auto-poll every 5 min
+
 
 BASE_DIR = Path(__file__).parent
 
@@ -2231,6 +2237,8 @@ app.include_router(bt_router)
 app.include_router(ema9_router)
 app.include_router(fv_router)          # fair_value_router → /api/fv/*
 app.include_router(ema9_backtest_router)
+app.include_router(chartink_router)       # chartink_router → /api/chartink/*
+app.include_router(chartink_watch_router) # chartink_watcher → /api/chartink-screener/*
 
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -2780,7 +2788,8 @@ async def startup_event():
     cfg = load_config()
     if cfg.get("auto_scan_enabled"):
         start_scheduler(cfg)
+    start_chartink_scheduler()   # auto-poll Chartink every 5 min
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8010, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8011, reload=True)
