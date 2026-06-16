@@ -91,7 +91,7 @@ FV_INTER_DELAY   = 1.5
 FV_MAX_RETRIES   = 2
 FV_RETRY_DELAY   = 3.0
 MIN_HISTORY_DAYS = 60
-DOWNLOAD_PERIOD  = "2y"
+DOWNLOAD_PERIOD  = "5y"
 
 # ─────────────────────────────────────────────────────────────
 #  TICKER LOADING

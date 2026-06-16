@@ -1464,6 +1464,71 @@ function switchTab(tab) {
 
 let _btTickers    = [];   // list of ticker strings
 let _btResults    = null; // last API response
+let _fvYearlyCache = {};  // ticker → { yearly: {op, sales}, fetched: bool }
+
+// ─── Year-wise FV helpers ───────────────────────────────────────────────────
+// Fetch /api/fv/fair-value/{ticker}/yearly and cache it.
+async function _fetchYearlyFV(ticker) {
+  if (_fvYearlyCache[ticker]?.fetched) return _fvYearlyCache[ticker];
+  try {
+    const resp = await fetch(`/api/fv/fair-value/${encodeURIComponent(ticker)}/yearly`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    _fvYearlyCache[ticker] = { fetched: true, yearly: data.yearly || null };
+  } catch(e) {
+    _fvYearlyCache[ticker] = { fetched: true, yearly: null, error: e.message };
+  }
+  return _fvYearlyCache[ticker];
+}
+
+// Given a trade entry_date (YYYY-MM-DD) and yearly FV cache entry, return
+// the best fair_value for that year (OP model preferred, Sales as fallback).
+// Fiscal Year logic: April–March. A Jan-2025 entry belongs to FY2024 (Apr24–Mar25).
+function _getFVForTrade(entry_date, yearlyCache) {
+  if (!yearlyCache?.yearly) return { fair_value: null, fv_source: null };
+  const d = new Date(entry_date);
+  // Convert calendar date → FY year (Apr start).  Jan 2025 → FY 2024.
+  let fy = d.getFullYear();
+  if (d.getMonth() < 3) fy -= 1;  // Jan,Feb,Mar → previous FY
+
+  const op    = yearlyCache.yearly?.op;
+  const sales = yearlyCache.yearly?.sales;
+
+  // Try OP model data first
+  if (op?.data) {
+    // Find the row with matching FY year
+    const row = op.data.find(r => r.year === fy);
+    if (row?.fair_value) {
+      const gap = row.fair_value && row.price
+        ? parseFloat(((row.fair_value - row.price) / row.price * 100).toFixed(2))
+        : null;
+      return { fair_value: row.fair_value, actual_price: row.price, fv_gap_pct: gap, fv_source: 'OP', fy };
+    }
+  }
+  // Fallback: Sales model
+  if (sales?.data) {
+    const row = sales.data.find(r => r.year === fy);
+    if (row?.fair_value) {
+      const gap = row.fair_value && row.price
+        ? parseFloat(((row.fair_value - row.price) / row.price * 100).toFixed(2))
+        : null;
+      return { fair_value: row.fair_value, actual_price: row.price, fv_gap_pct: gap, fv_source: 'Sales', fy };
+    }
+  }
+  // Try adjacent year (FY+1) in case data is one-year shifted
+  for (const adj of [fy + 1, fy - 1]) {
+    if (op?.data) {
+      const row = op.data.find(r => r.year === adj);
+      if (row?.fair_value) {
+        const gap = row.fair_value && row.price
+          ? parseFloat(((row.fair_value - row.price) / row.price * 100).toFixed(2))
+          : null;
+        return { fair_value: row.fair_value, actual_price: row.price, fv_gap_pct: gap, fv_source: `OP~${adj}`, fy: adj };
+      }
+    }
+  }
+  return { fair_value: null, fv_source: null, fy };
+}
 
 // ═══════════════════════════════════════════════════════════
 //  BACKTEST — TICKER MANAGEMENT
@@ -1562,6 +1627,7 @@ async function runBacktest() {
   const spinner = document.getElementById('btRunSpinner');
 
   btn.disabled = true; txt.textContent = 'Running...'; spinner.classList.remove('hidden');
+  _fvYearlyCache = {};  // Clear FV cache for fresh run
 
   const targetPct      = parseFloat(document.getElementById('btTargetPct').value)  || 3;
   const maxHoldDays    = parseInt(document.getElementById('btMaxHold').value)       || 15;
@@ -1585,6 +1651,35 @@ async function runBacktest() {
       throw new Error(err.detail || `HTTP ${resp.status}`);
     }
     _btResults = await resp.json();
+
+    // ── Step 2: Fetch year-wise Fair Value for every unique ticker with trades ──
+    const tradeTickers = [...new Set((_btResults.all_trades || []).map(t => t.ticker))];
+    if (tradeTickers.length) {
+      setBtStatus(`Fetching year-wise Fair Value for ${tradeTickers.length} ticker(s)…`);
+      // Fetch in parallel (up to 6 at a time to avoid hammering server)
+      const CHUNK = 6;
+      for (let i = 0; i < tradeTickers.length; i += CHUNK) {
+        await Promise.all(tradeTickers.slice(i, i + CHUNK).map(tk => _fetchYearlyFV(tk)));
+        if (i + CHUNK < tradeTickers.length) await new Promise(r => setTimeout(r, 400));
+      }
+      // Annotate each trade with year-matched FV from fair_value_router
+      for (const trade of _btResults.all_trades) {
+        const cache = _fvYearlyCache[trade.ticker];
+        const fvInfo = _getFVForTrade(trade.entry_date, cache);
+        trade._fv_yearly        = fvInfo.fair_value;     // year-matched fair value
+        trade._fv_yearly_gap    = fvInfo.fv_gap_pct;     // FY end price vs FV
+        trade._fv_yearly_source = fvInfo.fv_source;      // 'OP' | 'Sales' | null
+        trade._fv_fy            = fvInfo.fy;              // fiscal year matched
+        // Entry vs FV: how far entry_price is from the FY fair value
+        trade._entry_vs_fv_pct  = (fvInfo.fair_value && trade.entry_price)
+          ? parseFloat(((fvInfo.fair_value - trade.entry_price) / trade.entry_price * 100).toFixed(2))
+          : null;
+        trade._is_uv_at_entry   = (fvInfo.fair_value && trade.entry_price)
+          ? trade.entry_price < fvInfo.fair_value
+          : null;
+      }
+    }
+
     renderBacktestResults(_btResults);
     setBtStatus(
       `Done — ${_btResults.aggregate.total_trades} trades across ${_btResults.aggregate.tickers_with_trades} tickers`,
@@ -1674,35 +1769,65 @@ function renderBtTradesTable(trades) {
     const gainClass = t.gain_pct >= 0 ? 'bt-win' : 'bt-loss';
     const outClass  = t.outcome === 'WIN' ? 'bt-win' : t.outcome === 'TIMEOUT' ? 'bt-timeout' : 'bt-loss';
 
-    // ── Fair Value column ─────────────────────────────────────────
-    const fv = t.composite_fair_price;
+    // ── Fair Value column — year-matched from fair_value_router ───────────
+    // Uses trade._fv_yearly (FY-matched historical fair value) if available,
+    // falls back to composite_fair_price (current) if FV router not used.
+    const fvYearly  = t._fv_yearly;          // year-matched FV from /api/fv/yearly
+    const fvCurrent = t.composite_fair_price; // current FV from backtest enrichment
+    const fvSource  = t._fv_yearly_source;    // 'OP', 'Sales', or null
+    const fyYear    = t._fv_fy;
+
     let fvCell = '';
-    if (fv && fv > 0) {
-      const isUV = t.is_undervalued;
+    if (fvYearly && fvYearly > 0) {
+      // We have a year-matched FV — show it with FY label and model source
+      const isUV    = t._is_uv_at_entry;
+      const fvColor = isUV ? '#00e5a0' : '#ef4444';
+      const fvBg    = isUV ? 'rgba(0,229,160,0.08)' : 'rgba(239,68,68,0.08)';
+      const fvLabel = isUV ? '▲ UV' : '▼ OV';
+      const fyLabel = fyYear ? `<span style="font-size:9px;opacity:0.55;margin-left:4px;">FY${fyYear}</span>` : '';
+      const srcBadge = fvSource
+        ? `<span style="font-size:8px;opacity:0.6;background:rgba(255,255,255,0.07);padding:1px 4px;border-radius:3px;margin-left:3px;">${fvSource}</span>`
+        : '';
+      fvCell = `<span style="color:${fvColor};background:${fvBg};border:1px solid ${fvColor}33;
+        padding:2px 6px;border-radius:4px;font-size:10px;white-space:nowrap;display:inline-flex;align-items:center;gap:2px;">
+        ₹${fmtNum(fvYearly)} <span style="font-size:9px;opacity:0.8;">${fvLabel}</span>${fyLabel}${srcBadge}
+      </span>`;
+    } else if (fvCurrent && fvCurrent > 0) {
+      // Fallback: current composite FV (old behaviour)
+      const isUV    = t.is_undervalued;
       const fvColor = isUV ? '#00e5a0' : '#ef4444';
       const fvBg    = isUV ? 'rgba(0,229,160,0.08)' : 'rgba(239,68,68,0.08)';
       const fvLabel = isUV ? '▲ UV' : '▼ OV';
       fvCell = `<span style="color:${fvColor};background:${fvBg};border:1px solid ${fvColor}33;
         padding:2px 6px;border-radius:4px;font-size:10px;white-space:nowrap;">
-        ₹${fmtNum(fv)} <span style="font-size:9px;opacity:0.8;">${fvLabel}</span>
+        ₹${fmtNum(fvCurrent)} <span style="font-size:9px;opacity:0.8;">${fvLabel}</span>
+        <span style="font-size:8px;opacity:0.5;margin-left:3px;">curr</span>
       </span>`;
     } else {
       fvCell = `<span style="color:#475569;font-size:10px;">—</span>`;
     }
 
-    // ── FV Gap % column ───────────────────────────────────────────
+    // ── FV Gap % column — entry_price vs year-matched fair value ──────────
+    // _entry_vs_fv_pct = (fair_value - entry_price) / entry_price × 100
+    // Positive = entry was BELOW fair value (undervalued at entry) ← GREEN
+    // Negative = entry was ABOVE fair value (overvalued at entry) ← RED
     let fvGapCell = '';
-    const gap = t.entry_vs_fv_pct;
+    const gap = (t._entry_vs_fv_pct !== undefined && t._entry_vs_fv_pct !== null)
+      ? t._entry_vs_fv_pct
+      : t.entry_vs_fv_pct;  // fallback to backtest-computed gap
     if (gap !== null && gap !== undefined) {
       const gapColor = gap >= 0 ? '#00e5a0' : '#ef4444';
       const gapSign  = gap >= 0 ? '+' : '';
-      fvGapCell = `<span style="color:${gapColor};font-size:11px;font-weight:600;">${gapSign}${gap}%</span>`;
+      // Tooltip: explain what the gap means
+      const tipText  = gap >= 0
+        ? `Entry ₹${fmtNum(t.entry_price)} was ${Math.abs(gap)}% below FY${fyYear || ''} Fair Value`
+        : `Entry ₹${fmtNum(t.entry_price)} was ${Math.abs(gap)}% above FY${fyYear || ''} Fair Value`;
+      fvGapCell = `<span title="${tipText}" style="color:${gapColor};font-size:11px;font-weight:600;cursor:help;">${gapSign}${gap}%</span>`;
     } else {
       fvGapCell = `<span style="color:#475569;font-size:10px;">—</span>`;
     }
 
     // ── Trend column ──────────────────────────────────────────────
-    // Use per-trade trend_regime if present, else fall back to ticker-level
     const trend = t.trend_regime || '—';
     const trendMap = {
       'UPTREND':   { color: '#00e5a0', bg: 'rgba(0,229,160,0.1)',   icon: '↑' },
